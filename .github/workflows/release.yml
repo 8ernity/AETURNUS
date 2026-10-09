@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag version (e.g. v1.0.0)"
+        required: true
+        default: "v1.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build & Publish Release Assets
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Generate Clean Source Archive
+        run: |
+          python -c "
+          import zipfile
+          from pathlib import Path
+
+          root = Path('.')
+          zip_path = Path('AETURNUS_source.zip')
+          exclude_dirs = {'.git', '.github', '.venv', 'venv', 'env', 'node_modules', '__pycache__', '.pytest_cache', 'mlruns', 'processed', 'raw', 'uploads'}
+          exclude_exts = {'.pyc', '.joblib', '.parquet', '.db', '.db-wal', '.db-shm', '.log'}
+
+          with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as z:
+              for f in root.rglob('*'):
+                  if not f.is_file() or f.name == 'AETURNUS_source.zip':
+                      continue
+                  rel = f.relative_to(root)
+                  if any(part in exclude_dirs for part in rel.parts) or f.suffix.lower() in exclude_exts:
+                      continue
+                  z.write(f, arcname=f'AETURNUS/{rel}')
+          print(f'Created {zip_path} with size: {zip_path.stat().st_size / 1024 / 1024:.2f} MB')
+          "
+
+      - name: Generate SHA-256 Checksums
+        run: |
+          sha256sum AETURNUS_source.zip artifacts/reports/benchmark_summary.json > CHECKSUMS.txt
+          cat CHECKSUMS.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name || inputs.tag_name }}
+          name: "⚡ AETURNUS Release ${{ github.ref_name || inputs.tag_name }}"
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          files: |
+            AETURNUS_source.zip
+            CHECKSUMS.txt
+            artifacts/reports/benchmark_summary.json
+            artifacts/reports/model_comparison_FD001.json
+            artifacts/reports/data_quality_FD001.json

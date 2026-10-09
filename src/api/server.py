@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, HTTPException, Body, UploadFile, File
+from fastapi.responses import FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -758,6 +759,32 @@ async def upload_data(
         "subset": subset,
         "saved_path": str(dest_path.relative_to(ROOT_DIR))
     }
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def get_favicon_ico():
+    ico_path = ROOT_DIR / "web" / "dist" / "favicon.ico"
+    if not ico_path.exists():
+        ico_path = ROOT_DIR / "web" / "public" / "favicon.ico"
+    if ico_path.exists():
+        return FileResponse(
+            ico_path,
+            media_type="image/x-icon",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
+    return Response(status_code=404)
+
+@app.get("/favicon.svg", include_in_schema=False)
+async def get_favicon_svg():
+    svg_path = ROOT_DIR / "web" / "dist" / "favicon.svg"
+    if not svg_path.exists():
+        svg_path = ROOT_DIR / "web" / "public" / "favicon.svg"
+    if svg_path.exists():
+        return FileResponse(
+            svg_path,
+            media_type="image/svg+xml",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
+    return Response(status_code=404)
 
 # Mount static frontend build
 web_dist_path = ROOT_DIR / "web" / "dist"
