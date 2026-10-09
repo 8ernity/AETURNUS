@@ -13,6 +13,9 @@ import {
   Flame
 } from "lucide-react";
 
+import aeturnusMark from "../assets/aeturnus-mark.png";
+import aeturnusName from "../assets/aeturnus-name.png";
+
 interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
@@ -45,25 +48,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
       }`}
     >
       {/* Brand Header */}
-      <div className="h-20 flex items-center px-5 border-b border-indigo-500/10 justify-between">
+      <div className="h-20 flex items-center px-4 border-b border-indigo-500/10 justify-between">
         {!collapsed ? (
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-cyan-500 flex items-center justify-center shadow-lg shadow-indigo-500/30">
-              <Flame className="w-5 h-5 text-white animate-pulse" />
-            </div>
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="font-bold text-lg tracking-tight bg-gradient-to-r from-white via-slate-100 to-indigo-200 bg-clip-text text-transparent">
-                  AutoHeal Fleet
-                </span>
-              </div>
-              <span className="text-xs text-indigo-400/80 font-medium">Tata Elxsi · TELIPORT S4</span>
-            </div>
+          <div className="flex items-center gap-3 overflow-hidden">
+            <img 
+              src={aeturnusMark} 
+              alt="AETURNUS Emblem" 
+              className="h-10 w-auto max-w-[48px] object-contain drop-shadow-md flex-shrink-0" 
+            />
+            <img 
+              src={aeturnusName} 
+              alt="AETURNUS" 
+              className="h-6.5 max-h-[26px] w-auto max-w-[160px] object-contain drop-shadow-sm flex-shrink-0" 
+            />
           </div>
         ) : (
-          <div className="w-10 h-10 mx-auto rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-500 flex items-center justify-center shadow-lg">
-            <Flame className="w-5 h-5 text-white" />
-          </div>
+          <img 
+            src={aeturnusMark} 
+            alt="AETURNUS" 
+            className="h-10 w-auto max-w-[42px] object-contain mx-auto drop-shadow-md" 
+          />
         )}
 
         <button

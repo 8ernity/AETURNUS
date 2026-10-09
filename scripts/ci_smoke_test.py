@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CI Smoke Test for SelfHealingMachines
+CI Smoke Test for AETURNUS
 Validates end-to-end functionality across pipeline, models, agent, and API endpoints
 in under 10 seconds.
 """
@@ -16,7 +16,7 @@ sys.path.insert(0, str(root_dir))
 
 def run_smoke_test():
     print("=" * 60)
-    print("SelfHealingMachines - CI Smoke Test")
+    print("AETURNUS - CI Smoke Test")
     print("=" * 60)
 
     # 1. Configs & Rules

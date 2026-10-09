@@ -1,6 +1,7 @@
-# ✈️ AutoHeal Fleet · SelfHealingMachines
+# ⚡ AETURNUS
 
-> **An autonomous, closed-loop predictive maintenance platform for commercial aircraft turbofans. Combines regime-aware signal processing, multi-head probabilistic machine learning, deep learning baselines, and a deterministic triage agent on the NASA C-MAPSS benchmark — with absolute zero hardcoded numbers.**
+> **Autonomous Equipment Tracking and Uptime Restoration through Networked Unified Systems**  
+> An industrial-grade, closed-loop predictive maintenance (PdM) ecosystem for commercial aircraft turbofans. Combines regime-aware signal processing, multi-head probabilistic machine learning, deep learning baselines, and a deterministic triage agent on the NASA C-MAPSS benchmark — with absolute zero hardcoded numbers.
 
 <div align="center">
 
@@ -24,9 +25,9 @@
 
 ## 📌 Executive Summary
 
-Modern aerospace maintenance incurs tens of billions of dollars annually in unexpected component groundings and premature engine overhauls. **AutoHeal Fleet** is an industrial-grade, closed-loop predictive maintenance (PdM) ecosystem designed to monitor fleets of gas turbine turbofans continuously across operating regimes.
+Modern aerospace maintenance incurs tens of billions of dollars annually in unexpected component groundings and premature engine overhauls. **AETURNUS** (**A**utonomous **E**quipment **T**racking and **U**ptime **R**estoration through **N**etworked **U**nified **S**ystems) is an industrial-grade, closed-loop predictive maintenance (PdM) ecosystem designed to monitor fleets of gas turbine turbofans continuously across operating regimes.
 
-Built on the benchmark **NASA C-MAPSS dataset** (subsets `FD001` through `FD004`), AutoHeal Fleet unifies:
+Built on the benchmark **NASA C-MAPSS dataset** (subsets `FD001` through `FD004`), AETURNUS unifies:
 1. **Regime-Normalized Data Engineering**: Operational regime clustering ($k=6$), strictly causal missing value imputation, and Hampel outlier filtering with zero lookahead leakage.
 2. **Multi-Head Machine Learning**: Calibrated Remaining Useful Life (RUL) quantile regressors ($p_{10}, p_{50}, p_{90}$), calibrated binary classifier for critical failure probability ($\le 30$ cycles), and unsupervised Isolation Forest anomaly detection.
 3. **Deep Learning Benchmarks**: PyTorch 1D-CNN and Gated Recurrent Unit (GRU) baselines benchmarked against the gradient boosting champion across multiple random seeds.
@@ -83,41 +84,41 @@ Built on the benchmark **NASA C-MAPSS dataset** (subsets `FD001` through `FD004`
 
 ```mermaid
 flowchart TB
-    %% Styling Definitions
-    classDef clientStyle fill:#0F172A,stroke:#38BDF8,stroke-width:2px,color:#F8FAFC,font-weight:bold
-    classDef apiStyle fill:#1E293B,stroke:#818CF8,stroke-width:2px,color:#F8FAFC,font-weight:bold
-    classDef cleanStyle fill:#134E4A,stroke:#2DD4BF,stroke-width:2px,color:#F8FAFC
-    classDef mlStyle fill:#312E81,stroke:#A78BFA,stroke-width:2px,color:#F8FAFC
-    classDef agentStyle fill:#701A75,stroke:#F472B6,stroke-width:2px,color:#F8FAFC
-    classDef storageStyle fill:#713F12,stroke:#FBBF24,stroke-width:2px,color:#F8FAFC
+    %% Vibrant High-Contrast Style Definitions
+    classDef clientStyle fill:#0284C7,stroke:#38BDF8,stroke-width:2.5px,color:#FFFFFF,font-weight:bold
+    classDef apiStyle fill:#4F46E5,stroke:#818CF8,stroke-width:2.5px,color:#FFFFFF,font-weight:bold
+    classDef cleanStyle fill:#059669,stroke:#34D399,stroke-width:2.5px,color:#FFFFFF,font-weight:bold
+    classDef mlStyle fill:#7C3AED,stroke:#C084FC,stroke-width:2.5px,color:#FFFFFF,font-weight:bold
+    classDef agentStyle fill:#DB2777,stroke:#F472B6,stroke-width:2.5px,color:#FFFFFF,font-weight:bold
+    classDef storageStyle fill:#D97706,stroke:#FBBF24,stroke-width:2.5px,color:#FFFFFF,font-weight:bold
 
     subgraph ClientLayer["🖥️ PRESENTATION TIER (React 18 · Vite · TypeScript)"]
-        Dashboard["AutoHeal Cockpit<br/><i>(Fleet Replay · Model Lab · Triage Agent · MLOps)</i>"]:::clientStyle
-        WebSocketClient["WebSocket Client<br/><i>(Replay Telemetry & Retrain Stream)</i>"]:::clientStyle
+        Dashboard["AETURNUS Cockpit<br/><i>(Fleet Replay · Model Lab · Triage Agent · MLOps)</i>"]:::clientStyle
+        WebSocketClient["WebSocket Client<br/><i>(Live Telemetry & Retrain Stream)</i>"]:::clientStyle
     end
 
-    Dashboard <-->|REST API JSON| FastAPIGateway
-    WebSocketClient <-->|Live WS Events| FastAPIGateway
+    Dashboard <-->|"REST API JSON"| FastAPIGateway
+    WebSocketClient <-->|"Live WS Events"| FastAPIGateway
 
     subgraph BackendLayer["⚡ BACKEND SERVICE TIER (FastAPI · Uvicorn)"]
-        FastAPIGateway["FastAPI Gateway & Route Handlers<br/><i>(/fleet · /models · /triage · /mlops)</i>"]:::apiStyle
+        FastAPIGateway["FastAPI Gateway & Endpoints<br/><i>(/fleet · /models · /triage · /mlops)</i>"]:::apiStyle
         ReplayEngine["Replay Engine<br/><i>(Per-Engine Streaming Generator)</i>"]:::apiStyle
 
-        subgraph IngestionPipe["Data Engineering & Cleaning"]
-            RawData["Raw Telemetry<br/><i>(^s\d+$ Sensors)</i>"]:::cleanStyle
+        subgraph IngestionPipe["🧹 Data Engineering & Causal Cleaning"]
+            RawData["Raw Telemetry<br/><i>(Sensors s1..s21)</i>"]:::cleanStyle
             CausalCleaner["Causal Imputer & Hampel<br/><i>(No-Backfill · Norm Post-Regime)</i>"]:::cleanStyle
             RegimeClustering["K-Means Clusterer<br/><i>(k=6 Flight Regimes)</i>"]:::cleanStyle
             FeatureEngineering["Feature Builder<br/><i>(Rolling EWMA · Norm Deviations)</i>"]:::cleanStyle
         end
 
-        subgraph MLEngine["Multi-Head ML & Neural Engine"]
+        subgraph MLEngine["🧠 Multi-Head ML & Neural Engine"]
             QuantileRUL["Quantile Heads (p10 / p50 / p90)<br/><i>(Monotonic Bounded RUL)</i>"]:::mlStyle
-            FailClassifier["Calibrated Classifier<br/><i>(fails_within_30 Probabilities)</i>"]:::mlStyle
+            FailClassifier["Calibrated Classifier<br/><i>(Failure &le; 30 Cycles Prob)</i>"]:::mlStyle
             AnomalyDetector["Isolation Forest<br/><i>(Sensor Anomaly Score)</i>"]:::mlStyle
             DeepBaselines["Deep Learning Benchmarks<br/><i>(PyTorch 1D-CNN · GRU)</i>"]:::mlStyle
         end
 
-        subgraph TriageEngine["Autonomous Triage Agent (No-LLM)"]
+        subgraph TriageEngine["🛡️ Autonomous Triage Agent (No-LLM)"]
             RuleEngine["Deterministic Rule Engine<br/><i>(Severity Bands · Exceptions X1-X7)</i>"]:::agentStyle
             HysteresisManager["Hysteresis & De-escalation<br/><i>(5-Cycle Hold · Suppression Windows)</i>"]:::agentStyle
         end
@@ -144,22 +145,22 @@ flowchart TB
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Engine as Turbofan Engine (Replay Ticker)
-    participant Pipe as StreamingEnginePipeline
-    participant Model as Multi-Head ML Service
-    participant Agent as Deterministic Triage Agent
-    participant DB as SQLite Work Orders
-    participant UI as Fleet Dashboard (UI)
+    participant Engine as 🚀 Turbofan Engine (Replay Ticker)
+    participant Pipe as 🧹 StreamingEnginePipeline
+    participant Model as 🧠 Multi-Head ML Service
+    participant Agent as 🛡️ Deterministic Triage Agent
+    participant DB as 💾 SQLite Work Orders
+    participant UI as 🖥️ AETURNUS Cockpit (UI)
 
     Engine->>Pipe: Stream raw cycle telemetry row (unit, cycle, setting_*, s1..s21)
     Note over Pipe: 1. Isolate sensors via regex (^s\d+$)<br/>2. Causal forward-fill & train median fallback<br/>3. Compute regime cluster & normalize<br/>4. Post-norm Hampel clipping & rolling EWMA
-    Pipe->>Model: Formatted feature vector
-    Model->>Model: Compute p10, p50, p90 (enforce p10 <= p50 <= p90)
+    Pipe->>Model: Formatted feature vector (128-dim)
+    Model->>Model: Compute monotonic quantiles [p10 &le; p50 &le; p90]
     Model->>Model: Calibrated fail_prob_30 & Isolation Forest anomaly
-    Model->>Agent: Inference payload (RUL, prob, anomaly, top sensors)
+    Model->>Agent: Inference payload (RUL bounds, prob, anomaly, attributions)
     Note over Agent: Evaluate 9-step decision flow:<br/>- Exception checks (X1-X7)<br/>- Severity classification (Critical/High/Med/Low)<br/>- Modifiers & Hysteresis dampening
     Agent->>DB: Persist / Refresh Work Order with UUID
-    Agent->>UI: Broadcast fleet state & active work order
+    Agent->>UI: Broadcast fleet state & active work order via WebSocket
 ```
 
 ---
@@ -168,7 +169,7 @@ sequenceDiagram
 
 ### Subset Performance Matrix (FD001–FD004)
 
-All metrics below are computed directly on the standard NASA C-MAPSS holdout test engines and generated by [scripts/evaluate_all_models.py](file:///d:/Projects/SelfHealingMachines/scripts/evaluate_all_models.py). No numbers are hardcoded.
+All metrics below are computed directly on the standard NASA C-MAPSS holdout test engines and generated by [scripts/evaluate_all_models.py](scripts/evaluate_all_models.py). No numbers are hardcoded.
 
 | Dataset Subset | Operating Conditions | Fault Modes | Test Engines | Champion RMSE | NASA Asymmetric Score | PR-AUC (Fail $\le 30$) | Conformal Coverage | Target Status |
 |:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
@@ -193,7 +194,7 @@ Evaluated across 3 distinct initialization seeds (42, 43, 44) to guarantee repro
 
 ### Deep Learning Architecture Comparison
 
-Evaluated on held-out test splits in [src/models/neural_baseline.py](file:///d:/Projects/SelfHealingMachines/src/models/neural_baseline.py):
+Evaluated on held-out test splits in [src/models/neural_baseline.py](src/models/neural_baseline.py):
 
 | Subset | Model Architecture | Test RMSE | Test MAE | Training Speed / Epoch |
 |:---:|:---|:---:|:---:|:---:|
@@ -209,22 +210,27 @@ Evaluated on held-out test splits in [src/models/neural_baseline.py](file:///d:/
 ## 🧠 Machine Learning Methodology
 
 ### Multi-Head Architecture
-```
-                                ┌────────────────────────────────────────┐
-                                │   Engineered Feature Vector (128-dim)   │
-                                └───────────────────┬────────────────────┘
-                                                    │
-             ┌──────────────────────────────┬───────┴──────────────────────┬─────────────────────────────┐
-             ▼                              ▼                              ▼                             ▼
-┌─────────────────────────┐   ┌───────────────────────────┐   ┌─────────────────────────┐   ┌─────────────────────────┐
-│   Quantile Regressors   │   │   Calibrated Classifier   │   │    Anomaly Detector     │   │   Sensor Attributions   │
-│   Pinball Losses:       │   │  HistGradientBoosting +   │   │     Isolation Forest    │   │  Normalized Deviations  │
-│   p10, p50, p90         │   │   CalibratedClassifierCV  │   │  Contamination = 0.05   │   │      (s_dev_base)       │
-└────────────┬────────────┘   └─────────────┬─────────────┘   └────────────┬────────────┘   └────────────┬────────────┘
-             │                              │                              │                             │
-             ▼                              ▼                              ▼                             ▼
-       RUL Bounds                   P(Fail <= 30)                    Anomaly Score                 Top Degraded
-     [p10, p50, p90]                [0.00 .. 1.00]                  [-1.00 .. 1.00]                  Sensors
+```mermaid
+flowchart TD
+    %% Vibrant Multi-Head Styles
+    classDef featStyle fill:#0284C7,stroke:#38BDF8,stroke-width:2.5px,color:#FFFFFF,font-weight:bold
+    classDef qStyle fill:#4F46E5,stroke:#818CF8,stroke-width:2px,color:#FFFFFF,font-weight:bold
+    classDef cStyle fill:#059669,stroke:#34D399,stroke-width:2px,color:#FFFFFF,font-weight:bold
+    classDef aStyle fill:#D97706,stroke:#FBBF24,stroke-width:2px,color:#FFFFFF,font-weight:bold
+    classDef sStyle fill:#DB2777,stroke:#F472B6,stroke-width:2px,color:#FFFFFF,font-weight:bold
+    classDef outStyle fill:#1E293B,stroke:#94A3B8,stroke-width:2px,color:#FFFFFF,font-weight:bold
+
+    Feat["⚙️ Engineered Feature Vector (128-dim)<br/><i>Causal Imputed · Regime-Normalized · Rolling EWMA</i>"]:::featStyle
+
+    Feat --> Head1["📊 Quantile Regressors<br/>Pinball Losses: p10, p50, p90<br/>Gradient Boosted Trees"]:::qStyle
+    Feat --> Head2["🎯 Calibrated Classifier<br/>HistGradientBoosting + CalibratedCV<br/>Sigmoid Calibration"]:::cStyle
+    Feat --> Head3["🔍 Anomaly Detector<br/>Isolation Forest<br/>Contamination = 0.05"]:::aStyle
+    Feat --> Head4["⚡ Sensor Attributions<br/>Normalized Regime Deviations<br/>s_dev_base Ranking"]:::sStyle
+
+    Head1 --> Out1["📉 RUL Bounds<br/>Monotonic [p10 &le; p50 &le; p90]"]:::outStyle
+    Head2 --> Out2["⚠️ Prob(Fail &le; 30)<br/>Calibrated Probability [0.0 .. 1.0]"]:::outStyle
+    Head3 --> Out3["🚨 Sensor Anomaly Score<br/>Normalized Score [-1.0 .. 1.0]"]:::outStyle
+    Head4 --> Out4["🔍 Top Degraded Sensors<br/>Root-Cause Telemetry Attribution"]:::outStyle
 ```
 
 ### Monotonic Quantiles & Conformal Coverage
@@ -239,30 +245,42 @@ To prevent future cycle leakage and optimistic test bias, data splits are groupe
 
 ## 🛡️ Deterministic Triage Agent (Zero-LLM)
 
-The triage agent is implemented in [src/agent/triage_agent.py](file:///d:/Projects/SelfHealingMachines/src/agent/triage_agent.py). It operates entirely without probabilistic large language models, running in $<5\text{ ms}$ with deterministic logic:
+The triage agent is implemented in [src/agent/triage_agent.py](src/agent/triage_agent.py). It operates entirely without probabilistic large language models, running in $<5\text{ ms}$ with deterministic logic:
 
 ```mermaid
 flowchart TD
-    In([Telemetry & Predictions In]) --> ExCheck{Exception Checks<br/>X1 to X7}
-    
-    ExCheck -- Fails (Flatline / Data Gap / Missing Model / Wide Interval) --> ExRoute[Route to NEEDS_REVIEW<br/>Flag Exception Reason]
-    ExCheck -- Passes --> BaseSev[Compute Base Severity<br/>Critical: RUL <= 15<br/>High: RUL <= 30<br/>Medium: RUL <= 60<br/>Low: RUL <= 100]
+    %% Vibrant Palette Styles
+    classDef ioStyle fill:#0284C7,stroke:#38BDF8,stroke-width:2.5px,color:#FFFFFF,font-weight:bold
+    classDef checkStyle fill:#D97706,stroke:#FBBF24,stroke-width:2px,color:#FFFFFF,font-weight:bold
+    classDef alertStyle fill:#DC2626,stroke:#F87171,stroke-width:2px,color:#FFFFFF,font-weight:bold
+    classDef sevStyle fill:#4F46E5,stroke:#818CF8,stroke-width:2px,color:#FFFFFF,font-weight:bold
+    classDef modStyle fill:#7C3AED,stroke:#C084FC,stroke-width:2px,color:#FFFFFF,font-weight:bold
+    classDef timerStyle fill:#0891B2,stroke:#22D3EE,stroke-width:2px,color:#FFFFFF,font-weight:bold
+    classDef humanStyle fill:#059669,stroke:#34D399,stroke-width:2px,color:#FFFFFF,font-weight:bold
+    classDef orderStyle fill:#DB2777,stroke:#F472B6,stroke-width:2px,color:#FFFFFF,font-weight:bold
+    classDef dbStyle fill:#EA580C,stroke:#FB923C,stroke-width:2.5px,color:#FFFFFF,font-weight:bold
 
-    BaseSev --> ModCheck[Apply Escalation Modifiers<br/>M1: RUL Drop >= 15 in 10 cycles<br/>M2: Anomaly Score >= 0.80<br/>M3: P(Fail<=30) >= 0.70]
+    In(["📥 Telemetry & Model Predictions In"]):::ioStyle --> ExCheck{"🔍 Exception Checks<br/>(X1 to X7)"}:::checkStyle
     
-    ModCheck --> Hysteresis{Hysteresis &<br/>De-escalation Check}
-    Hysteresis -- Conditions Improved --> HoldTimer[Hold Severity for 5 Cycles<br/>Debounce Sensor Fluctuations]
-    Hysteresis -- Maintained or Escalated --> HumanCheck{Human Technician<br/>Status Present?}
+    ExCheck -->|"Fails: Flatline / Gap / Interval"| ExRoute["⚠️ Route to NEEDS_REVIEW<br/>Flag Exception Reason & Audit"]:::alertStyle
+    ExCheck -->|"Passes All Checks"| BaseSev["📊 Compute Base Severity<br/>Critical: RUL &le; 15<br/>High: RUL &le; 30<br/>Medium: RUL &le; 60<br/>Low: RUL &le; 100"]:::sevStyle
 
-    HumanCheck -- IN_PROGRESS / RESOLVED --> PreserveHuman[Preserve Human Status<br/>Refresh Conservative RUL Only]
-    HumanCheck -- None or Machine --> GenUUID[Generate UUID Order ID<br/>WO-xxxx-xxxx]
+    BaseSev -->|"Base Assigned"| ModCheck["⚡ Apply Escalation Modifiers<br/>M1: RUL Drop &ge; 15 in 10 cycles<br/>M2: Anomaly Score &ge; 0.80<br/>M3: Prob(Fail &le; 30) &ge; 0.70"]:::modStyle
+    
+    ModCheck --> Hysteresis{"🔄 Hysteresis &<br/>De-escalation Check"}:::checkStyle
+    
+    Hysteresis -->|"Conditions Improved"| HoldTimer["⏱️ 5-Cycle Hold Timer<br/>Debounce Sensor Fluctuations"]:::timerStyle
+    Hysteresis -->|"Maintained or Escalated"| HumanCheck{"👨‍🔧 Human Technician<br/>Override Present?"}:::checkStyle
+
+    HumanCheck -->|"Status: IN_PROGRESS / RESOLVED"| PreserveHuman["🛡️ Preserve Human Status<br/>Refresh Conservative RUL Only"]:::humanStyle
+    HumanCheck -->|"Status: None or Machine"| GenUUID["🏷️ Generate UUID Order ID<br/>Format: WO-xxxx-xxxx"]:::orderStyle
 
     HoldTimer --> Persist
     PreserveHuman --> Persist
     GenUUID --> Persist
     ExRoute --> Persist
     
-    Persist[(SQLite Database<br/>WAL Mode)] --> Out([Dispatched Work Order & Audit Trace])
+    Persist[("💾 SQLite Database<br/>WAL Mode & Audit Trace")]:::dbStyle --> Out(["📤 Dispatched Work Order & Live State"]):::ioStyle
 ```
 
 - **Hysteresis & De-Escalation**: Engines whose raw sensor values temporarily recover cannot abruptly drop severity until improved health persists for 5 consecutive cycles.
@@ -281,34 +299,28 @@ flowchart TD
 
 ## 📈 MLOps & Autonomous Self-Healing
 
-```
-Replay Stream ──► Streaming Window (Last 50 Cycles)
-                         │
-                         ├──► Population Stability Index (PSI)  ──► PSI > 0.25 (Critical Drift)
-                         └──► Kolmogorov-Smirnov (KS) Test      ──► p < 0.01 (Distribution Shift)
-                                                                             │
-                                                                             ▼
-                                                                Triggers Autonomous Retrain
-                                                                             │
-                                   ┌─────────────────────────────────────────┴─────────────────────────────────────────┐
-                                   ▼                                                                                    ▼
-                       Existing Champion Model (v1.0)                                                       Trained Challenger Model (v2.0)
-                                   │                                                                                    │
-                                   └─────────────────────────────────────────┬──────────────────────────────────────────┘
-                                                                             │
-                                                                             ▼
-                                                                Fixed Holdout Validation Gate
-                                                                ├── 1. Holdout RMSE <= Champion RMSE
-                                                                ├── 2. Holdout NASA Score <= Champion
-                                                                └── 3. Late Prediction Rate <= 0.50
-                                                                             │
-                                                               ┌─────────────┴─────────────┐
-                                                               ▼                           ▼
-                                                      Passes All 3 Criteria         Fails Any Criterion
-                                                               │                           │
-                                                               ▼                           ▼
-                                                    Promote to Champion Alias      Reject Challenger Model
-                                                    (Demote to Previous Alias)     (Keep Champion Active)
+```mermaid
+flowchart TD
+    %% Vibrant MLOps Styles
+    classDef streamStyle fill:#0284C7,stroke:#38BDF8,stroke-width:2px,color:#FFFFFF,font-weight:bold
+    classDef testStyle fill:#D97706,stroke:#FBBF24,stroke-width:2px,color:#FFFFFF,font-weight:bold
+    classDef triggerStyle fill:#DC2626,stroke:#F87171,stroke-width:2px,color:#FFFFFF,font-weight:bold
+    classDef trainStyle fill:#7C3AED,stroke:#C084FC,stroke-width:2px,color:#FFFFFF,font-weight:bold
+    classDef gateStyle fill:#4F46E5,stroke:#818CF8,stroke-width:2px,color:#FFFFFF,font-weight:bold
+    classDef successStyle fill:#059669,stroke:#34D399,stroke-width:2px,color:#FFFFFF,font-weight:bold
+    classDef rejectStyle fill:#991B1B,stroke:#F87171,stroke-width:2px,color:#FFFFFF,font-weight:bold
+
+    Stream["📡 Streaming Window<br/>(Recent 50 Replay Cycles)"]:::streamStyle --> DriftCheck{"🔍 Statistical Drift Testing"}:::testStyle
+    
+    DriftCheck -->|"PSI > 0.25 (Critical Drift)"| Trigger["🚨 Autonomous Retrain Trigger"]:::triggerStyle
+    DriftCheck -->|"KS Test: p < 0.01 (Distribution Shift)"| Trigger
+
+    Trigger --> Train["⚡ Retrain Challenger Model (v2.0)<br/>Cryptographic SHA-256 Data Fingerprint"]:::trainStyle
+    
+    Train --> Gate{"🛡️ Fixed Holdout Validation Gate<br/>1. Holdout RMSE &le; Champion<br/>2. Holdout NASA Score &le; Champion<br/>3. Late Prediction Rate &le; 0.50"}:::gateStyle
+
+    Gate -->|"Passes All 3 Criteria"| Promote["✅ Promote Challenger to Champion<br/>Rotate Alias in MLflow Registry"]:::successStyle
+    Gate -->|"Fails Any Criterion"| Reject["❌ Reject Challenger Model<br/>Retain Active Champion"]:::rejectStyle
 ```
 
 1. **Drift Computation**: Compares true training reference distributions against the dynamic recent replay telemetry window (not artificial head-to-tail slices).
@@ -321,7 +333,7 @@ Replay Stream ──► Streaming Window (Last 50 Cycles)
 ## 📁 Project Directory Structure
 
 ```
-SelfHealingMachines/
+AETURNUS/
 ├── .github/
 │   └── workflows/
 │       └── ci.yml                     # Automated CI pipeline (Pytest + Smoke Test)
@@ -471,7 +483,7 @@ make ci-smoke
 ```
 
 ### Automated GitHub Actions CI
-Every commit and pull request triggers [.github/workflows/ci.yml](file:///d:/Projects/SelfHealingMachines/.github/workflows/ci.yml) which executes:
+Every commit and pull request triggers [.github/workflows/ci.yml](.github/workflows/ci.yml) which executes:
 1. Python 3.11 environment preparation and caching.
 2. Dependency installation (`pip install -r requirements.txt`).
 3. Frontend bundle compilation (`npm run build`).

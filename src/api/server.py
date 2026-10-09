@@ -19,7 +19,11 @@ from src.agent.triage_agent import TriageAgent
 from src.mlops.drift_and_retrain import MLOpsManager
 from src.features.streaming import StreamingEnginePipeline
 
-app = FastAPI(title="AutoHeal Fleet API", version="1.0.0")
+app = FastAPI(
+    title="AETURNUS API",
+    description="Autonomous Equipment Tracking and Uptime Restoration through Networked Unified Systems",
+    version="1.0.0",
+)
 
 app.add_middleware(
     CORSMiddleware,
