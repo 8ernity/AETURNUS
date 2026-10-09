@@ -1,0 +1,57 @@
+# configs/pipeline.yaml
+dataset:
+  subsets: ["FD001", "FD002", "FD003", "FD004"]
+  default_subset: "FD001"
+  columns:
+    - unit
+    - cycle
+    - setting_1
+    - setting_2
+    - setting_3
+    - s1
+    - s2
+    - s3
+    - s4
+    - s5
+    - s6
+    - s7
+    - s8
+    - s9
+    - s10
+    - s11
+    - s12
+    - s13
+    - s14
+    - s15
+    - s16
+    - s17
+    - s18
+    - s19
+    - s20
+    - s21
+
+cleaning:
+  ffill_limit: 3
+  hampel_window: 7
+  hampel_sigma: 3.0
+  outlier_z_clip: 5.0
+  flatline_window: 10
+  flatline_var_threshold: 1.0e-5
+  constant_sensor_var_threshold: 1.0e-4
+
+regime:
+  n_clusters_single_regime: 1
+  n_clusters_multi_regime: 6
+  multi_regime_subsets: ["FD002", "FD004"]
+
+features:
+  rolling_windows: [5, 10, 30]
+  healthy_baseline_cycles: 20
+  smoothing_alpha: 0.2
+  rul_cap: 125
+  sequence_window_len: 30
+
+splits:
+  train_ratio: 0.80
+  val_ratio: 0.20
+  random_seed: 42

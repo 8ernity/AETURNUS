@@ -1,0 +1,78 @@
+{
+  "subset": "FD001",
+  "train_validation": {
+    "dataset": "train",
+    "subset": "FD001",
+    "initial_rows": 20631,
+    "duplicate_rows": 0,
+    "out_of_order_cycles": 0,
+    "missing_values_count": 0,
+    "quarantined_rows": 0,
+    "valid_rows": 20631
+  },
+  "test_validation": {
+    "dataset": "test",
+    "subset": "FD001",
+    "initial_rows": 13096,
+    "duplicate_rows": 0,
+    "out_of_order_cycles": 0,
+    "missing_values_count": 0,
+    "quarantined_rows": 0,
+    "valid_rows": 13096
+  },
+  "train_cleaning": {
+    "initial_rows": 20631,
+    "missing_before": 0,
+    "sensors_dropped": [
+      "s1",
+      "s5",
+      "s6",
+      "s10",
+      "s16",
+      "s18",
+      "s19"
+    ],
+    "missing_after": 0,
+    "kept_sensors_count": 14,
+    "outliers_cleaned": 192,
+    "flatlines_detected": 5
+  },
+  "test_cleaning": {
+    "initial_rows": 13096,
+    "missing_before": 0,
+    "sensors_dropped": [
+      "s1",
+      "s5",
+      "s6",
+      "s10",
+      "s16",
+      "s18",
+      "s19"
+    ],
+    "missing_after": 0,
+    "kept_sensors_count": 14,
+    "outliers_cleaned": 0,
+    "flatlines_detected": 4
+  },
+  "kept_sensors": [
+    "s2",
+    "s3",
+    "s4",
+    "s7",
+    "s8",
+    "s9",
+    "s11",
+    "s12",
+    "s13",
+    "s14",
+    "s15",
+    "s17",
+    "s20",
+    "s21"
+  ],
+  "kept_sensors_count": 14,
+  "regime_clusters": 1,
+  "train_rows": 20631,
+  "test_rows": 13096,
+  "feature_count": 277
+}

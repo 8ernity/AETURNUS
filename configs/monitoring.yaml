@@ -1,0 +1,16 @@
+# configs/monitoring.yaml
+drift:
+  psi_threshold: 0.20
+  ks_pvalue_threshold: 0.05
+  drifting_features_ratio_threshold: 0.30
+  reference_sample_size: 2000
+
+retraining:
+  volume_labeled_engines_threshold: 20
+  rmse_degradation_threshold_ratio: 0.15
+  auto_trigger_enabled: true
+
+promotion_gate:
+  rmse_min_improvement_pct: 2.0
+  nasa_score_max_degradation_pct: 5.0
+  late_prediction_max_increase_pp: 3.0

@@ -1,0 +1,29 @@
+{
+  "subset": "FD001",
+  "models": [
+    {
+      "model_name": "HistGradientBoosting Quantile (Champion)",
+      "architecture": "GBDT",
+      "rmse": 13.4289,
+      "mae": 9.683,
+      "nasa_score": 244.48,
+      "train_time_sec": 37.29
+    },
+    {
+      "model_name": "1D-CNN PyTorch",
+      "architecture": "CNN",
+      "rmse": 57.0219,
+      "mae": 44.1684,
+      "nasa_score": 520619.12,
+      "train_time_sec": 10.21
+    },
+    {
+      "model_name": "GRU PyTorch",
+      "architecture": "GRU",
+      "rmse": 50.8394,
+      "mae": 39.7308,
+      "nasa_score": 199533.63,
+      "train_time_sec": 1.21
+    }
+  ]
+}

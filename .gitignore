@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+
+# Virtual Environments
+.venv/
+venv/
+env/
+.env
+
+# Testing & Linting
+.pytest_cache/
+.tox/
+.coverage
+htmlcov/
+
+# Node & Frontend Dependencies
+node_modules/
+web/node_modules/
+npm-debug.log*
+
+# IDE & Editor Settings
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Runtime SQLite, logs, and test artifacts
+*.log
+*.db
+*.db-*
+*.db-wal
+*.db-shm
+*.db-journal
+smoke_test.db
+test_*.db
+
+# Generated data, duplicate checkpoints, and uploads
+data/processed/
+data/uploads/
+mlruns/
+artifacts/models/*_v*.joblib

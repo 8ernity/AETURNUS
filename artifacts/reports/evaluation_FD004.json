@@ -1,0 +1,98 @@
+{
+  "subset": "FD004",
+  "condition": "Six Regimes",
+  "faults": "2 (HPC + Fan)",
+  "metrics": {
+    "rmse": 26.0548,
+    "mae": 17.9162,
+    "nasa_score": 4490.35,
+    "late_rate": 0.4637,
+    "early_rate": 0.5363
+  },
+  "rmse": 26.0548,
+  "mae": 17.9162,
+  "nasa_score": 4490.35,
+  "pr_auc": 0.974,
+  "target_rmse": 22.0,
+  "status": "Target Missed",
+  "interval_coverage": 0.5726,
+  "mean_interval_width": 31.58,
+  "test_engines_count": 248,
+  "train_time_sec": 85.2,
+  "calibration_offset": 1.412,
+  "bucket_errors": [
+    {
+      "bucket": "0 - 30 cycles (Critical)",
+      "rmse": 6.69,
+      "mae": 4.31,
+      "sample_count": 53
+    },
+    {
+      "bucket": "30 - 60 cycles (High)",
+      "rmse": 13.92,
+      "mae": 9.02,
+      "sample_count": 38
+    },
+    {
+      "bucket": "60 - 125 cycles (Healthy)",
+      "rmse": 31.79,
+      "mae": 24.66,
+      "sample_count": 157
+    }
+  ],
+  "feature_importance": [
+    {
+      "feat": "s11_dev_base",
+      "weight": "22.9%",
+      "raw_weight": 22.9,
+      "color": "from-indigo-500 to-purple-500"
+    },
+    {
+      "feat": "cycle_norm",
+      "weight": "18.8%",
+      "raw_weight": 18.8,
+      "color": "from-purple-500 to-pink-500"
+    },
+    {
+      "feat": "s4_ewma",
+      "weight": "7.2%",
+      "raw_weight": 7.2,
+      "color": "from-cyan-500 to-indigo-500"
+    },
+    {
+      "feat": "s14_roll_slope_30",
+      "weight": "5.6%",
+      "raw_weight": 5.6,
+      "color": "from-emerald-500 to-teal-500"
+    },
+    {
+      "feat": "s9_roll_slope_30",
+      "weight": "4.3%",
+      "raw_weight": 4.3,
+      "color": "from-amber-500 to-orange-500"
+    },
+    {
+      "feat": "s13_roll_max_30",
+      "weight": "4.0%",
+      "raw_weight": 4.0,
+      "color": "from-blue-500 to-cyan-500"
+    }
+  ],
+  "multi_seed": {
+    "seeds": [
+      42,
+      43,
+      44
+    ],
+    "rmse_mean": 26.37,
+    "rmse_std": 0.38,
+    "mae_mean": 18.36,
+    "mae_std": 0.39,
+    "nasa_mean": 4912.55,
+    "nasa_std": 564.51,
+    "pr_auc_mean": 0.966,
+    "pr_auc_std": 0.007,
+    "coverage_mean": 0.5215,
+    "coverage_std": 0.0447
+  }
+}

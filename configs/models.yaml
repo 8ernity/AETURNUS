@@ -1,0 +1,25 @@
+# configs/models.yaml
+anomaly_detector:
+  model_type: "isolation_forest"
+  contamination: 0.05
+  healthy_cycle_fraction: 0.40
+  n_estimators: 100
+  random_state: 42
+  score_threshold: 0.80
+
+rul_regressor:
+  model_type: "hist_gradient_boosting"
+  quantiles: [0.1, 0.5, 0.9]
+  max_iter: 150
+  learning_rate: 0.05
+  max_leaf_nodes: 31
+  min_samples_leaf: 20
+  random_state: 42
+
+classifier:
+  target_threshold_cycles: 30
+  model_type: "hist_gradient_boosting_classifier"
+  max_iter: 120
+  learning_rate: 0.05
+  probability_threshold: 0.70
+  random_state: 42

@@ -1,0 +1,118 @@
+# configs/sensor_map.yaml
+sensors:
+  s1:
+    name: "T2"
+    description: "Total temperature at fan inlet"
+    units: "°R"
+    subsystem: "Fan"
+  s2:
+    name: "T24"
+    description: "Total temperature at LPC outlet"
+    units: "°R"
+    subsystem: "LPC"
+  s3:
+    name: "T30"
+    description: "Total temperature at HPC outlet"
+    units: "°R"
+    subsystem: "HPC"
+  s4:
+    name: "T50"
+    description: "Total temperature at LPT outlet"
+    units: "°R"
+    subsystem: "LPT"
+  s5:
+    name: "P2"
+    description: "Pressure at fan inlet"
+    units: "psia"
+    subsystem: "Fan"
+  s6:
+    name: "P15"
+    description: "Total pressure in bypass-duct"
+    units: "psia"
+    subsystem: "Fan"
+  s7:
+    name: "P30"
+    description: "Total pressure at HPC outlet"
+    units: "psia"
+    subsystem: "HPC"
+  s8:
+    name: "Nf"
+    description: "Physical fan speed"
+    units: "rpm"
+    subsystem: "Fan"
+  s9:
+    name: "Nc"
+    description: "Physical core speed"
+    units: "rpm"
+    subsystem: "HPC"
+  s10:
+    name: "epr"
+    description: "Engine pressure ratio (P50/P2)"
+    units: "--"
+    subsystem: "Combustor"
+  s11:
+    name: "Ps30"
+    description: "Static pressure at HPC outlet"
+    units: "psia"
+    subsystem: "HPC"
+  s12:
+    name: "phi"
+    description: "Ratio of fuel flow to Ps30"
+    units: "pps/psia"
+    subsystem: "Combustor"
+  s13:
+    name: "NRf"
+    description: "Corrected fan speed"
+    units: "rpm"
+    subsystem: "Fan"
+  s14:
+    name: "NRc"
+    description: "Corrected core speed"
+    units: "rpm"
+    subsystem: "HPC"
+  s15:
+    name: "BPR"
+    description: "Bypass Ratio"
+    units: "--"
+    subsystem: "Fan"
+  s16:
+    name: "farB"
+    description: "Burner fuel-air ratio"
+    units: "--"
+    subsystem: "Combustor"
+  s17:
+    name: "htBleed"
+    description: "Bleed Enthalpy"
+    units: "--"
+    subsystem: "Bleed/Cooling"
+  s18:
+    name: "Nf_dmd"
+    description: "Demanded fan speed"
+    units: "rpm"
+    subsystem: "Fan"
+  s19:
+    name: "PCNfR_dmd"
+    description: "Demanded corrected fan speed"
+    units: "rpm"
+    subsystem: "Fan"
+  s20:
+    name: "W31"
+    description: "HPT coolant bleed"
+    units: "lbm/s"
+    subsystem: "HPT"
+  s21:
+    name: "W32"
+    description: "LPT coolant bleed"
+    units: "lbm/s"
+    subsystem: "LPT"
+
+settings:
+  setting_1:
+    name: "Altitude"
+    units: "kft"
+  setting_2:
+    name: "Mach Number"
+    units: "Mach"
+  setting_3:
+    name: "Throttle Resolver Angle"
+    units: "deg"

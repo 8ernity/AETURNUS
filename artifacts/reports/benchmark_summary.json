@@ -1,0 +1,232 @@
+{
+  "benchmarks": [
+    {
+      "subset": "FD001",
+      "condition": "Single (Sea Level)",
+      "faults": "1 (HPC Degradation)",
+      "rmse": 13.4289,
+      "mae": 9.683,
+      "nasa_score": 244.48,
+      "pr_auc": 0.963,
+      "train_time_sec": 35.27,
+      "target_rmse": 14.0,
+      "status": "Target Met",
+      "interval_coverage": 0.78,
+      "mean_interval_width": 30.96,
+      "multi_seed": {
+        "seeds": [
+          42,
+          43,
+          44
+        ],
+        "rmse_mean": 13.34,
+        "rmse_std": 0.12,
+        "mae_mean": 9.53,
+        "mae_std": 0.21,
+        "nasa_mean": 264.31,
+        "nasa_std": 28.05,
+        "pr_auc_mean": 0.969,
+        "pr_auc_std": 0.008,
+        "coverage_mean": 0.7967,
+        "coverage_std": 0.0236
+      },
+      "deep_comparison": [
+        {
+          "model_name": "HistGradientBoosting Quantile (Champion)",
+          "architecture": "GBDT",
+          "rmse": 13.4289,
+          "mae": 9.683,
+          "nasa_score": 244.48,
+          "train_time_sec": 37.29
+        },
+        {
+          "model_name": "1D-CNN PyTorch",
+          "architecture": "CNN",
+          "rmse": 57.0219,
+          "mae": 44.1684,
+          "nasa_score": 520619.12,
+          "train_time_sec": 10.21
+        },
+        {
+          "model_name": "GRU PyTorch",
+          "architecture": "GRU",
+          "rmse": 50.8394,
+          "mae": 39.7308,
+          "nasa_score": 199533.63,
+          "train_time_sec": 1.21
+        }
+      ]
+    },
+    {
+      "subset": "FD002",
+      "condition": "Six Regimes",
+      "faults": "1 (HPC Degradation)",
+      "rmse": 24.5301,
+      "mae": 16.2273,
+      "nasa_score": 5726.39,
+      "pr_auc": 0.998,
+      "train_time_sec": 75.91,
+      "target_rmse": 22.0,
+      "status": "Target Missed",
+      "interval_coverage": 0.6178,
+      "mean_interval_width": 30.78,
+      "multi_seed": {
+        "seeds": [
+          42,
+          43,
+          44
+        ],
+        "rmse_mean": 25.41,
+        "rmse_std": 0.67,
+        "mae_mean": 16.65,
+        "mae_std": 0.36,
+        "nasa_mean": 7140.88,
+        "nasa_std": 1214.47,
+        "pr_auc_mean": 0.995,
+        "pr_auc_std": 0.002,
+        "coverage_mean": 0.6229,
+        "coverage_std": 0.0224
+      },
+      "deep_comparison": [
+        {
+          "model_name": "HistGradientBoosting Quantile (Champion)",
+          "architecture": "GBDT",
+          "rmse": 26.1497,
+          "mae": 17.1083,
+          "nasa_score": 8691.81,
+          "train_time_sec": 59.86
+        },
+        {
+          "model_name": "1D-CNN PyTorch",
+          "architecture": "CNN",
+          "rmse": 58.456,
+          "mae": 49.4929,
+          "nasa_score": 661288.1,
+          "train_time_sec": 8.36
+        },
+        {
+          "model_name": "GRU PyTorch",
+          "architecture": "GRU",
+          "rmse": 56.9482,
+          "mae": 48.0659,
+          "nasa_score": 434299.81,
+          "train_time_sec": 1.93
+        }
+      ]
+    },
+    {
+      "subset": "FD003",
+      "condition": "Single",
+      "faults": "2 (HPC + Fan)",
+      "rmse": 14.1655,
+      "mae": 10.3131,
+      "nasa_score": 349.36,
+      "pr_auc": 0.982,
+      "train_time_sec": 46.58,
+      "target_rmse": 15.0,
+      "status": "Target Met",
+      "interval_coverage": 0.6,
+      "mean_interval_width": 24.05,
+      "multi_seed": {
+        "seeds": [
+          42,
+          43,
+          44
+        ],
+        "rmse_mean": 15.21,
+        "rmse_std": 0.8,
+        "mae_mean": 11.31,
+        "mae_std": 0.72,
+        "nasa_mean": 406.04,
+        "nasa_std": 46.82,
+        "pr_auc_mean": 0.982,
+        "pr_auc_std": 0.003,
+        "coverage_mean": 0.5933,
+        "coverage_std": 0.0249
+      },
+      "deep_comparison": [
+        {
+          "model_name": "HistGradientBoosting Quantile (Champion)",
+          "architecture": "GBDT",
+          "rmse": 16.1257,
+          "mae": 11.9593,
+          "nasa_score": 464.02,
+          "train_time_sec": 40.79
+        },
+        {
+          "model_name": "1D-CNN PyTorch",
+          "architecture": "CNN",
+          "rmse": 42.9536,
+          "mae": 36.5813,
+          "nasa_score": 8037.34,
+          "train_time_sec": 8.17
+        },
+        {
+          "model_name": "GRU PyTorch",
+          "architecture": "GRU",
+          "rmse": 64.3235,
+          "mae": 52.4873,
+          "nasa_score": 1330131.67,
+          "train_time_sec": 1.18
+        }
+      ]
+    },
+    {
+      "subset": "FD004",
+      "condition": "Six Regimes",
+      "faults": "2 (HPC + Fan)",
+      "rmse": 26.0548,
+      "mae": 17.9162,
+      "nasa_score": 4490.35,
+      "pr_auc": 0.974,
+      "train_time_sec": 85.2,
+      "target_rmse": 22.0,
+      "status": "Target Missed",
+      "interval_coverage": 0.5726,
+      "mean_interval_width": 31.58,
+      "multi_seed": {
+        "seeds": [
+          42,
+          43,
+          44
+        ],
+        "rmse_mean": 26.37,
+        "rmse_std": 0.38,
+        "mae_mean": 18.36,
+        "mae_std": 0.39,
+        "nasa_mean": 4912.55,
+        "nasa_std": 564.51,
+        "pr_auc_mean": 0.966,
+        "pr_auc_std": 0.007,
+        "coverage_mean": 0.5215,
+        "coverage_std": 0.0447
+      },
+      "deep_comparison": [
+        {
+          "model_name": "HistGradientBoosting Quantile (Champion)",
+          "architecture": "GBDT",
+          "rmse": 26.1562,
+          "mae": 18.3163,
+          "nasa_score": 4536.87,
+          "train_time_sec": 66.14
+        },
+        {
+          "model_name": "1D-CNN PyTorch",
+          "architecture": "CNN",
+          "rmse": 56.1182,
+          "mae": 47.6606,
+          "nasa_score": 141298.29,
+          "train_time_sec": 8.19
+        },
+        {
+          "model_name": "GRU PyTorch",
+          "architecture": "GRU",
+          "rmse": 65.8355,
+          "mae": 55.1313,
+          "nasa_score": 3452492.86,
+          "train_time_sec": 1.51
+        }
+      ]
+    }
+  ]
+}

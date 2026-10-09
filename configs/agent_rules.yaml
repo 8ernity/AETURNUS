@@ -1,0 +1,26 @@
+# configs/agent_rules.yaml
+rules_version: "2026-10-07.1"
+
+severity_bands:
+  critical: 15
+  high: 30
+  medium: 60
+  low: 100
+
+escalation:
+  rul_drop_window: 10
+  rul_drop_threshold: 15
+  anomaly_threshold: 0.80
+  fail_prob_threshold: 0.70
+  deescalate_after_cycles: 5
+
+exceptions:
+  max_interval_width: 40
+  max_missing_fraction: 0.30
+  min_history_cycles: 15
+  data_gap_cycles: 5
+
+lifecycle:
+  cooldown_cycles: 20
+  default_due_by_factor: 0.5
+  suppression_window_cycles: 10
