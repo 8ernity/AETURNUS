@@ -96,67 +96,206 @@ class MLOpsManager:
                         "algorithm": "HistGradientBoosting Quantile (p10/p50/p90) + Isolation Forest",
                         "metrics": metrics,
                         "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "data_hash": data_hash
+                        "data_hash": data_hash,
+                        "model_path": f"artifacts/models/model_bundle_{self.subset}_v1.0.joblib"
                     }
                 ],
                 "active_champion": "v1.0"
             }
             with open(self.registry_file, "w", encoding="utf-8") as f:
                 json.dump(default_reg, f, indent=2)
-
-    def get_registry(self) -> Dict[str, Any]:
-        with open(self.registry_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        # Ensure v1.0 champion baseline metrics stay synced with the true evaluation report
-        base_metrics = self._get_baseline_metrics()
-        modified = False
-        for m in data.get("models", []):
-            if m.get("version") == "v1.0" and base_metrics.get("rmse", 0) > 0:
-                if m.get("metrics") != base_metrics:
-                    m["metrics"] = base_metrics
-                    modified = True
-        if modified:
+        else:
+            # At init time, ensure any registered models have model_path populated
             try:
-                with open(self.registry_file, "w", encoding="utf-8") as f:
-                    json.dump(data, f, indent=2)
+                with open(self.registry_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                updated = False
+                for m in data.get("models", []):
+                    if not m.get("model_path"):
+                        v = m.get("version", "v1.0")
+                        sub = m.get("subset", self.subset)
+                        m["model_path"] = f"artifacts/models/model_bundle_{sub}_{v}.joblib"
+                        updated = True
+                if updated:
+                    with open(self.registry_file, "w", encoding="utf-8") as f:
+                        json.dump(data, f, indent=2)
             except Exception:
                 pass
-        return data
+
+    def get_registry(self) -> Dict[str, Any]:
+        """Read-only view of the model registry. Does not modify disk."""
+        if not self.registry_file.exists():
+            self._init_registry()
+        with open(self.registry_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def register_model(
+        self,
+        version: str,
+        metrics: Dict[str, float],
+        model_path: str,
+        holdout_metrics: Optional[Dict[str, float]] = None,
+        algorithm: str = "HistGradientBoosting",
+        alias: str = "challenger",
+        data_hash: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Saves a model entry with real metrics and model_path to the registry at save time.
+        """
+        reg = self.get_registry()
+        models = reg.get("models", [])
+        entry = {
+            "version": version,
+            "subset": self.subset,
+            "alias": alias,
+            "algorithm": algorithm,
+            "metrics": metrics,
+            "holdout_metrics": holdout_metrics or {},
+            "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "data_hash": data_hash or self._compute_data_hash(),
+            "model_path": model_path
+        }
+        existing = next((m for m in models if m.get("version") == version), None)
+        if existing:
+            existing.update(entry)
+        else:
+            models.append(entry)
+
+        with open(self.registry_file, "w", encoding="utf-8") as f:
+            json.dump(reg, f, indent=2)
+        return entry
+
+    def promote_version(self, version: str) -> Dict[str, Any]:
+        """
+        Promotes specified version to champion, swaps served bundle, and updates registry.
+        """
+        reg = self.get_registry()
+        models = reg.get("models", [])
+        target = None
+        for m in models:
+            if m.get("version") == version or m.get("alias") == version:
+                target = m
+                break
+        if not target:
+            raise ValueError(f"Version '{version}' not found in registry for subset {self.subset}")
+
+        # Update aliases
+        for m in models:
+            if m.get("alias") == "champion":
+                m["alias"] = "previous"
+        target["alias"] = "champion"
+        reg["active_champion"] = target.get("version")
+
+        with open(self.registry_file, "w", encoding="utf-8") as f:
+            json.dump(reg, f, indent=2)
+
+        # Swap served bundle
+        ms = ModelService(self.subset)
+        ms.promote(version=target.get("version"))
+
+        return {
+            "status": "promoted",
+            "version": target.get("version"),
+            "alias": "champion",
+            "subset": self.subset,
+            "model_path": target.get("model_path")
+        }
+
+    def rollback(self, target_version: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Rolls back active champion to target_version (or previous champion), swaps served bundle, and updates registry.
+        """
+        reg = self.get_registry()
+        models = reg.get("models", [])
+        target = None
+        if target_version and target_version not in ["rollback", "default"]:
+            for m in models:
+                if m.get("version") == target_version or m.get("alias") == target_version:
+                    target = m
+                    break
+        else:
+            for m in models:
+                if m.get("alias") == "previous":
+                    target = m
+                    break
+
+        if not target:
+            if len(models) > 1:
+                target = models[0]
+            else:
+                raise ValueError("No previous or target model available to rollback to.")
+
+        for m in models:
+            if m.get("alias") == "champion":
+                m["alias"] = "rolled_back"
+        target["alias"] = "champion"
+        reg["active_champion"] = target.get("version")
+
+        with open(self.registry_file, "w", encoding="utf-8") as f:
+            json.dump(reg, f, indent=2)
+
+        # Swap served bundle
+        ms = ModelService(self.subset)
+        ms.promote(version=target.get("version"))
+
+        return {
+            "status": "rolled_back",
+            "version": target.get("version"),
+            "alias": "champion",
+            "subset": self.subset,
+            "model_path": target.get("model_path")
+        }
 
     def calculate_drift_report(self, ref_df: pd.DataFrame, curr_df: pd.DataFrame) -> Dict[str, Any]:
         """
-        Calculates PSI and KS drift between training reference and recent replay telemetry window.
+        Calculates PSI and KS drift comparing matched-age windows and residual features.
+        Default un-shifted state must not alarm.
         """
-        sensor_cols = [c for c in ref_df.columns if c.startswith("s") and c.endswith("_ewma")]
+        # 1. Match age windows if cycle column is present in both
+        if "cycle" in ref_df.columns and "cycle" in curr_df.columns:
+            c_min = int(curr_df["cycle"].min())
+            c_max = int(curr_df["cycle"].max())
+            matched_ref = ref_df[(ref_df["cycle"] >= c_min) & (ref_df["cycle"] <= c_max)]
+            if len(matched_ref) >= 30:
+                ref_df = matched_ref
+
+        # 2. Prefer residual features (_dev_base) or normalized features
+        sensor_cols = [c for c in ref_df.columns if c.endswith("_dev_base")]
+        if not sensor_cols:
+            sensor_cols = [c for c in ref_df.columns if c.startswith("s") and c.endswith("_ewma")]
         if not sensor_cols:
             sensor_cols = [c for c in ref_df.columns if c.startswith("s") and not c.endswith("_norm")][:14]
 
         sensor_metrics = {}
         drifting_count = 0
+        psi_threshold = self.monitoring_cfg.get("drift", {}).get("psi_threshold", 0.20)
 
         for col in sensor_cols:
             if col in curr_df.columns:
                 ref_vals = ref_df[col].dropna().values
                 curr_vals = curr_df[col].dropna().values
-                
+
                 if len(ref_vals) == 0 or len(curr_vals) == 0:
                     continue
 
                 psi = calculate_psi(ref_vals, curr_vals)
-                ks_stat, ks_pval, is_drift = calculate_ks_drift(ref_vals, curr_vals)
+                ks_stat, ks_pval, is_ks = calculate_ks_drift(ref_vals, curr_vals)
 
-                if psi > self.monitoring_cfg["drift"]["psi_threshold"] or is_drift:
+                # Drift condition: significant PSI or statistically significant with substantial KS effect size (>= 0.15)
+                is_drifting = bool(psi > psi_threshold or (is_ks and ks_stat >= 0.15))
+                if is_drifting:
                     drifting_count += 1
 
                 sensor_metrics[col] = {
                     "psi": round(psi, 4),
                     "ks_stat": round(ks_stat, 4),
                     "ks_pvalue": round(ks_pval, 4),
-                    "is_drifting": bool(psi > 0.20 or is_drift)
+                    "is_drifting": is_drifting
                 }
 
         share_drifting = drifting_count / max(1, len(sensor_metrics))
-        drift_alert = share_drifting >= self.monitoring_cfg["drift"]["drifting_features_ratio_threshold"]
+        ratio_threshold = self.monitoring_cfg.get("drift", {}).get("drifting_features_ratio_threshold", 0.30)
+        drift_alert = share_drifting >= ratio_threshold
 
         report = {
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -255,15 +394,16 @@ class MLOpsManager:
         from src.ingest.loader import CMAPSSLoader
         _, _, rul_truth = CMAPSSLoader(self.subset).load_raw_data()
 
-        # Partition engine units
-        all_units = sorted(df["unit"].unique())
-        n_units = len(all_units)
-        n_champ = max(1, int(n_units * 0.60))
-        n_chal = max(n_champ + 1, int(n_units * 0.80))
+        # Partition engine units using the persistent engine split
+        from src.common.splits import get_persistent_split
+        split = get_persistent_split(self.subset, sorted(df["unit"].unique()))
+        train_units = split["train_units"]
+        val_units = split["val_units"]
+        holdout_units = split["lifecycle_holdout_units"]
 
-        champ_units = all_units[:n_champ]
-        new_batch_units = all_units[n_champ:n_chal]
-        holdout_units = all_units[n_chal:]
+        n_champ = max(1, int(len(train_units) * 0.80))
+        champ_units = train_units[:n_champ]
+        new_batch_units = train_units[n_champ:] + val_units
 
         champ_train_df = df[df["unit"].isin(champ_units)].copy()
         new_batch_df = df[df["unit"].isin(new_batch_units)].copy()
@@ -371,8 +511,8 @@ class MLOpsManager:
                 "model_path": f"artifacts/models/model_bundle_{self.subset}_{chal_version}.joblib"
             })
             registry["active_champion"] = chal_version
-            # Set promoted challenger as the active serving bundle
-            chal_service.save(version=chal_version, is_active=True)
+            # Set promoted challenger as the active serving bundle via promote()
+            chal_service.promote(version=chal_version)
         else:
             registry["models"].append({
                 "version": chal_version,

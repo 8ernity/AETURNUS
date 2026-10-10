@@ -70,13 +70,32 @@ class ModelService:
         self.feature_cols = self._select_features(train_df)
         print(f"[{self.subset}] Selected {len(self.feature_cols)} active features.")
 
-        # 0. Engine-level Group Split (keep engines completely intact)
-        engine_units = np.unique(train_df["unit"].values)
-        rng = np.random.RandomState(random_state)
-        val_engine_count = max(1, int(len(engine_units) * 0.20)) if len(engine_units) > 3 else (1 if len(engine_units) > 1 else 0)
-        val_units = rng.choice(engine_units, size=val_engine_count, replace=False) if val_engine_count > 0 else np.array([])
-        train_mask = ~train_df["unit"].isin(val_units)
-        val_mask = train_df["unit"].isin(val_units)
+        # 0. Engine-level Group Split using persistent split (keep engines completely intact)
+        from src.common.splits import get_persistent_split
+        engine_units = [int(u) for u in np.unique(train_df["unit"].values)]
+        split = get_persistent_split(self.subset, all_units=engine_units)
+
+        persistent_train = set(split["train_units"])
+        persistent_val = set(split["val_units"])
+
+        if any(u in persistent_train for u in engine_units):
+            # Exclude lifecycle holdout from training and validation
+            val_units = persistent_val
+            train_mask = train_df["unit"].isin(persistent_train)
+            val_mask = train_df["unit"].isin(persistent_val)
+            if not np.any(val_mask):
+                rng = np.random.RandomState(random_state)
+                avail_units = list(train_df["unit"].unique())
+                val_count = max(1, int(len(avail_units) * 0.20)) if len(avail_units) > 3 else (1 if len(avail_units) > 1 else 0)
+                val_units = set(rng.choice(avail_units, size=val_count, replace=False)) if val_count > 0 else set()
+                train_mask = ~train_df["unit"].isin(val_units)
+                val_mask = train_df["unit"].isin(val_units)
+        else:
+            rng = np.random.RandomState(random_state)
+            val_engine_count = max(1, int(len(engine_units) * 0.20)) if len(engine_units) > 3 else (1 if len(engine_units) > 1 else 0)
+            val_units = set(rng.choice(engine_units, size=val_engine_count, replace=False)) if val_engine_count > 0 else set()
+            train_mask = ~train_df["unit"].isin(val_units)
+            val_mask = train_df["unit"].isin(val_units)
 
         X_train = train_df.loc[train_mask, self.feature_cols].values
         y_rul_train = train_df.loc[train_mask, "rul_capped"].values
@@ -159,8 +178,8 @@ class ModelService:
             "status": "trained",
             "features_count": len(self.feature_cols),
             "train_time_sec": self.training_time_sec,
-            "train_engines": len(engine_units) - len(val_units),
-            "val_engines": len(val_units),
+            "train_engines": int(train_df.loc[train_mask, "unit"].nunique()),
+            "val_engines": int(train_df.loc[val_mask, "unit"].nunique()),
             "calibration_offset": round(self.interval_calibration_offset, 3)
         }
 
@@ -175,7 +194,11 @@ class ModelService:
         - Permutation Feature Importances
         """
         last_indices = test_df.groupby("unit")["cycle"].idxmax()
-        eval_rows = test_df.loc[last_indices].sort_values("unit")
+        eval_rows = test_df.loc[last_indices].sort_values("unit").copy()
+
+        for c in self.feature_cols:
+            if c not in eval_rows.columns:
+                eval_rows[c] = 0.0
 
         X_test = eval_rows[self.feature_cols].values
         y_true = rul_truth
@@ -191,12 +214,13 @@ class ModelService:
         pred_p90 = np.maximum(pred_p50, np.maximum(raw_p90, pred_p50) + cal_offset)
 
         # Classifier metrics with calibrated probabilities
-        cls_probs = self.classifier.predict_proba(X_test)[:, 1]
+        cls_probs = self.classifier.predict_proba(X_test)
+        pos_prob = cls_probs[:, 1] if cls_probs.shape[1] > 1 else cls_probs[:, 0]
         y_true_cls = (y_true <= 30).astype(int)
-        try:
-            pr_auc = float(average_precision_score(y_true_cls, cls_probs))
-        except Exception:
-            pr_auc = 0.85
+        if len(np.unique(y_true_cls)) > 1:
+            pr_auc = float(average_precision_score(y_true_cls, pos_prob))
+        else:
+            pr_auc = float(np.mean(y_true_cls == (pos_prob >= 0.5)))
 
         # Regression metrics
         metrics = calculate_metrics(y_true, pred_p50)
@@ -359,11 +383,12 @@ class ModelService:
             cov = float(np.mean((y_true >= cal_p10) & (y_true <= cal_p90)))
             coverages.append(cov)
 
-            try:
-                probs = eval_ms.classifier.predict_proba(X_test)[:, 1]
+            probs_mat = eval_ms.classifier.predict_proba(X_test)
+            probs = probs_mat[:, 1] if probs_mat.shape[1] > 1 else probs_mat[:, 0]
+            if len(np.unique(y_true_cls)) > 1:
                 praucs.append(float(average_precision_score(y_true_cls, probs)))
-            except Exception:
-                praucs.append(0.85)
+            else:
+                praucs.append(float(np.mean(y_true_cls == (probs >= 0.5))))
 
         multi_seed_report = {
             "seeds": seeds,
@@ -410,10 +435,10 @@ class ModelService:
         gbdt_pred = np.maximum(0.0, self.rul_p50_model.predict(X_test))
         gbdt_metrics = calculate_metrics(y_test, gbdt_pred)
 
-        # 2. PyTorch Deep Models
-        bench = NeuralRULBenchmark(feature_cols=self.feature_cols, seed=42)
-        cnn_res = bench.evaluate_architecture("cnn", X_train, y_train, X_test, y_test)
-        gru_res = bench.evaluate_architecture("gru", X_train, y_train, X_test, y_test)
+        # 2. PyTorch Deep Models (Windowed 30-cycle sequences + scaled inputs)
+        bench = NeuralRULBenchmark(feature_cols=self.feature_cols, window_size=30, seed=42)
+        cnn_res = bench.evaluate_architecture("cnn", train_df, test_df, y_test)
+        gru_res = bench.evaluate_architecture("gru", train_df, test_df, y_test)
 
         comparison = {
             "subset": self.subset,
@@ -457,7 +482,12 @@ class ModelService:
         rul_p10 = float(np.maximum(0.0, min(raw_p10, rul_p50) - cal_offset))
         rul_p90 = float(max(rul_p50, max(raw_p90, rul_p50) + cal_offset))
 
-        fail_prob_30 = float(self.classifier.predict_proba(feats)[0, 1])
+        proba = self.classifier.predict_proba(feats)[0]
+        if len(proba) > 1:
+            fail_prob_30 = float(proba[1])
+        else:
+            cls_0 = getattr(self.classifier, "classes_", [0])[0]
+            fail_prob_30 = 1.0 if cls_0 == 1 else 0.0
         health_index = float(row_dict.get("health_index", 1.0))
 
         # Conservative RUL: median of last 3 p10 predictions
@@ -491,7 +521,7 @@ class ModelService:
             "anomaly_score": round(anomaly_score, 3),
             "health_index": round(health_index, 3),
             "top_sensors": top_sensors,
-            "model_version": f"rul-{self.subset.lower()}@champion"
+            "model_version": f"rul-{self.subset.lower()}@{getattr(self, 'version', 'v1.0')}"
         }
 
     def evaluate_dataframe(self, df: pd.DataFrame, target_col: str = "rul_capped") -> Dict[str, float]:
@@ -503,9 +533,9 @@ class ModelService:
         return metrics
 
     def _to_bundle(self, version: Optional[str] = None) -> Dict[str, Any]:
-        return {
+        bundle = {
             "subset": self.subset,
-            "version": version or "v1.0",
+            "version": version or getattr(self, "version", "v1.0"),
             "feature_cols": self.feature_cols,
             "anomaly_detector": self.anomaly_detector,
             "rul_p10_model": self.rul_p10_model,
@@ -515,6 +545,11 @@ class ModelService:
             "interval_calibration_offset": getattr(self, "interval_calibration_offset", 0.0),
             "training_time_sec": self.training_time_sec
         }
+        if hasattr(self, "bundle_metadata") and isinstance(self.bundle_metadata, dict):
+            for k, v in self.bundle_metadata.items():
+                if k not in bundle:
+                    bundle[k] = v
+        return bundle
 
     def save(self, version: Optional[str] = None, path: Optional[Path] = None) -> Path:
         """
@@ -543,13 +578,16 @@ class ModelService:
         if path:
             source_path = Path(path)
             bundle = joblib.load(source_path)
+            if version:
+                bundle["version"] = version
         elif version:
             versioned_path = self.artifacts_dir / f"model_bundle_{self.subset}_{version}.joblib"
             if not versioned_path.exists():
                 raise FileNotFoundError(f"Cannot promote missing versioned bundle: {versioned_path}")
             bundle = joblib.load(versioned_path)
+            bundle["version"] = version
         else:
-            bundle = self._to_bundle(version=version or "v1.0")
+            bundle = self._to_bundle(version=getattr(self, "version", "v1.0"))
 
         active_path = self.artifacts_dir / f"model_bundle_{self.subset}.joblib"
         joblib.dump(bundle, active_path)
@@ -575,4 +613,6 @@ class ModelService:
         self.classifier = bundle["classifier"]
         self.interval_calibration_offset = bundle.get("interval_calibration_offset", 0.0)
         self.training_time_sec = bundle.get("training_time_sec", 0.0)
+        self.version = bundle.get("version", version or "v1.0")
+        self.bundle_metadata = {k: v for k, v in bundle.items() if k not in ["rul_p10_model", "rul_p50_model", "rul_p90_model", "classifier", "anomaly_detector"]}
         return self

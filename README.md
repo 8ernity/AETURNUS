@@ -1,7 +1,7 @@
 # ⚡ AETURNUS
 
 > **Autonomous Equipment Tracking and Uptime Restoration through Networked Unified Systems**  
-> An industrial-grade, closed-loop predictive maintenance (PdM) ecosystem for commercial aircraft turbofans. Combines regime-aware signal processing, multi-head probabilistic machine learning, deep learning baselines, and a deterministic triage agent on the NASA C-MAPSS benchmark — with absolute zero hardcoded numbers.
+> An industrial-grade, closed-loop predictive maintenance (PdM) ecosystem for commercial aircraft turbofans. Combines regime-aware signal processing, multi-head probabilistic machine learning, deep learning baselines, and a deterministic triage agent on the NASA C-MAPSS benchmark — with empirical verification from artifact reports.
 
 <div align="center">
 
@@ -28,7 +28,7 @@
 Modern aerospace maintenance incurs tens of billions of dollars annually in unexpected component groundings and premature engine overhauls. **AETURNUS** (**A**utonomous **E**quipment **T**racking and **U**ptime **R**estoration through **N**etworked **U**nified **S**ystems) is an industrial-grade, closed-loop predictive maintenance (PdM) ecosystem designed to monitor fleets of gas turbine turbofans continuously across operating regimes.
 
 Built on the benchmark **NASA C-MAPSS dataset** (subsets `FD001` through `FD004`), AETURNUS unifies:
-1. **Regime-Normalized Data Engineering**: Operational regime clustering ($k=6$), strictly causal missing value imputation, and Hampel outlier filtering with zero lookahead leakage.
+1. **Regime-Normalized Data Engineering**: Operational regime clustering ($k=6$), strictly causal missing value imputation, and robust outlier clipping with zero lookahead leakage.
 2. **Multi-Head Machine Learning**: Calibrated Remaining Useful Life (RUL) quantile regressors ($p_{10}, p_{50}, p_{90}$), calibrated binary classifier for critical failure probability ($\le 30$ cycles), and unsupervised Isolation Forest anomaly detection.
 3. **Deep Learning Benchmarks**: PyTorch 1D-CNN and Gated Recurrent Unit (GRU) baselines benchmarked against the gradient boosting champion across multiple random seeds.
 4. **Deterministic Triage Agent (No-LLM)**: Fully explainable, auditable 9-step decision pipeline that evaluates hysteresis, manages technician overrides, suppresses noise, and tracks work orders with SQLite persistence.
@@ -106,7 +106,7 @@ flowchart TB
 
         subgraph IngestionPipe["🧹 Data Engineering & Causal Cleaning"]
             RawData["Raw Telemetry<br/><i>(Sensors s1..s21)</i>"]:::cleanStyle
-            CausalCleaner["Causal Imputer & Hampel<br/><i>(No-Backfill · Norm Post-Regime)</i>"]:::cleanStyle
+            CausalCleaner["Causal Imputer & Outlier Clipper<br/><i>(No-Backfill · Norm Post-Regime)</i>"]:::cleanStyle
             RegimeClustering["K-Means Clusterer<br/><i>(k=6 Flight Regimes)</i>"]:::cleanStyle
             FeatureEngineering["Feature Builder<br/><i>(Rolling EWMA · Norm Deviations)</i>"]:::cleanStyle
         end
@@ -153,7 +153,7 @@ sequenceDiagram
     participant UI as 🖥️ AETURNUS Cockpit (UI)
 
     Engine->>Pipe: Stream raw cycle telemetry row (unit, cycle, setting_*, s1..s21)
-    Note over Pipe: 1. Isolate sensors via regex (^s\d+$)<br/>2. Causal forward-fill & train median fallback<br/>3. Compute regime cluster & normalize<br/>4. Post-norm Hampel clipping & rolling EWMA
+    Note over Pipe: 1. Isolate sensors via regex (^s\d+$)<br/>2. Causal forward-fill & train median fallback<br/>3. Compute regime cluster & normalize<br/>4. Post-norm outlier clipping & rolling EWMA
     Pipe->>Model: Formatted feature vector (128-dim)
     Model->>Model: Compute monotonic quantiles [p10 &le; p50 &le; p90]
     Model->>Model: Calibrated fail_prob_30 & Isolation Forest anomaly
@@ -173,10 +173,10 @@ All metrics below are computed directly on the standard NASA C-MAPSS holdout tes
 
 | Dataset Subset | Operating Conditions | Fault Modes | Test Engines | Champion RMSE | NASA Asymmetric Score | PR-AUC (Fail $\le 30$) | Conformal Coverage | Target Status |
 |:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **FD001** | Single (Sea Level) | HPC Degradation | 100 | **13.43** | **226.7** | **0.993** | 80.0% | <span style="color:#22c55e;font-weight:bold;">TARGET MET</span> |
-| **FD002** | Six Regimes (Multi) | HPC Degradation | 259 | **22.58** | **2,479.2** | **0.933** | 79.5% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
-| **FD003** | Single (Sea Level) | HPC + Fan Degradation | 100 | **14.88** | **315.4** | **0.990** | 81.0% | <span style="color:#22c55e;font-weight:bold;">TARGET MET</span> |
-| **FD004** | Six Regimes (Multi) | HPC + Fan Degradation | 248 | **23.18** | **2,735.6** | **0.916** | 79.8% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
+| **FD001** | Single (Sea Level) | HPC Degradation | 100 | **13.43** | **244.5** | **0.963** | 78.0% | <span style="color:#22c55e;font-weight:bold;">TARGET MET</span> |
+| **FD002** | Six Regimes (Multi) | HPC Degradation | 259 | **24.53** | **5,726.4** | **0.998** | 61.8% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
+| **FD003** | Single (Sea Level) | HPC + Fan Degradation | 100 | **14.17** | **349.4** | **0.982** | 60.0% | <span style="color:#22c55e;font-weight:bold;">TARGET MET</span> |
+| **FD004** | Six Regimes (Multi) | HPC + Fan Degradation | 248 | **26.05** | **4,490.4** | **0.974** | 57.3% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
 
 > [!NOTE]
 > In accordance with strict engineering standards, the system reports **authentic benchmark metrics**. Multi-regime subsets (`FD002` and `FD004`) legitimately report "TARGET MISSED" against aggressive enterprise thresholds ($RMSE \le 18.0$), highlighting the genuine difficulty of turbofan degradation across varying altitudes and Mach numbers.
@@ -187,10 +187,10 @@ Evaluated across 3 distinct initialization seeds (42, 43, 44) to guarantee repro
 
 | Subset | RMSE ($mean \pm std$) | MAE ($mean \pm std$) | NASA Score ($mean \pm std$) | PR-AUC ($mean \pm std$) |
 |:---:|:---:|:---:|:---:|:---:|
-| **FD001** | $13.51 \pm 0.12$ | $9.32 \pm 0.15$ | $230.1 \pm 4.8$ | $0.992 \pm 0.002$ |
-| **FD002** | $22.65 \pm 0.10$ | $16.42 \pm 0.18$ | $2,512.4 \pm 45.2$ | $0.931 \pm 0.003$ |
-| **FD003** | $14.94 \pm 0.09$ | $10.15 \pm 0.12$ | $321.8 \pm 8.9$ | $0.989 \pm 0.002$ |
-| **FD004** | $23.25 \pm 0.11$ | $17.08 \pm 0.19$ | $2,780.2 \pm 62.1$ | $0.914 \pm 0.004$ |
+| **FD001** | $13.34 \pm 0.12$ | $9.53 \pm 0.21$ | $264.3 \pm 28.1$ | $0.969 \pm 0.008$ |
+| **FD002** | $25.41 \pm 0.67$ | $16.65 \pm 0.36$ | $7,140.9 \pm 1214.5$ | $0.995 \pm 0.002$ |
+| **FD003** | $15.21 \pm 0.80$ | $11.31 \pm 0.72$ | $406.0 \pm 46.8$ | $0.982 \pm 0.003$ |
+| **FD004** | $26.37 \pm 0.38$ | $18.36 \pm 0.39$ | $4,912.6 \pm 564.5$ | $0.966 \pm 0.007$ |
 
 ### Deep Learning Architecture Comparison
 
@@ -198,12 +198,12 @@ Evaluated on held-out test splits in [src/models/neural_baseline.py](src/models/
 
 | Subset | Model Architecture | Test RMSE | Test MAE | Training Speed / Epoch |
 |:---:|:---|:---:|:---:|:---:|
-| **FD001** | **Champion GBDT (HistGradientBoosting)** | **13.43** | **9.28** | *< 1.0s (Fit)* |
-| FD001 | 1D-CNN Baseline (Conv1D + MaxPool + BatchNorm) | 16.74 | 11.89 | ~0.3s / epoch |
-| FD001 | GRU Recurrent Baseline (2-Layer BiGRU + Linear) | 15.62 | 10.95 | ~0.5s / epoch |
-| **FD002** | **Champion GBDT (HistGradientBoosting)** | **22.58** | **16.35** | *< 2.5s (Fit)* |
-| FD002 | 1D-CNN Baseline | 25.80 | 18.92 | ~0.8s / epoch |
-| FD002 | GRU Recurrent Baseline | 24.31 | 17.80 | ~1.2s / epoch |
+| **FD001** | **HistGradientBoosting Quantile (Champion)** | **13.43** | **9.68** | *~37.3s total* |
+| FD001 | 1D-CNN PyTorch | 57.02 | 44.17 | ~10.2s total |
+| FD001 | GRU PyTorch | 50.84 | 39.73 | ~1.2s total |
+| **FD002** | **HistGradientBoosting Quantile (Champion)** | **26.15** | **17.11** | *~59.9s total* |
+| FD002 | 1D-CNN PyTorch | 58.46 | 49.49 | ~8.4s total |
+| FD002 | GRU PyTorch | 56.95 | 48.07 | ~1.9s total |
 
 ---
 
@@ -374,7 +374,7 @@ AETURNUS/
 │   ├── api/
 │   │   └── server.py                  # FastAPI application with REST & WebSocket endpoints
 │   ├── clean/
-│   │   └── cleaner.py                 # Causal imputer, regex filter, and Hampel clipping
+│   │   └── cleaner.py                 # Causal imputer, regex filter, and outlier clipping
 │   ├── common/
 │   │   └── utils.py                   # NASA scoring, PSI calculation, and YAML loaders
 │   ├── features/
