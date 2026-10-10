@@ -73,8 +73,8 @@ class ModelService:
         # 0. Engine-level Group Split (keep engines completely intact)
         engine_units = np.unique(train_df["unit"].values)
         rng = np.random.RandomState(random_state)
-        val_engine_count = max(2, int(len(engine_units) * 0.20))
-        val_units = rng.choice(engine_units, size=val_engine_count, replace=False)
+        val_engine_count = max(1, int(len(engine_units) * 0.20)) if len(engine_units) > 3 else (1 if len(engine_units) > 1 else 0)
+        val_units = rng.choice(engine_units, size=val_engine_count, replace=False) if val_engine_count > 0 else np.array([])
         train_mask = ~train_df["unit"].isin(val_units)
         val_mask = train_df["unit"].isin(val_units)
 
@@ -154,7 +154,7 @@ class ModelService:
         self.classifier.fit(X_train, y_cls_train)
 
         self.training_time_sec = round(time.time() - t0, 2)
-        self.save()
+        # NOTE: ModelService.train() must NOT write the active bundle. Only promote() writes model_bundle_{subset}.joblib.
         return {
             "status": "trained",
             "features_count": len(self.feature_cols),
@@ -333,39 +333,37 @@ class ModelService:
 
         for s in seeds:
             print(f"[{self.subset}] Evaluating seed {s}...")
+            eval_ms = ModelService(self.subset)
             if s != 42 or self.rul_p50_model is None:
                 if len(train_df) > 15000:
                     engine_units = np.unique(train_df["unit"].values)
                     sub_units = np.random.RandomState(s).choice(engine_units, size=int(len(engine_units) * 0.65), replace=False)
                     sub_df = train_df[train_df["unit"].isin(sub_units)]
-                    self.train(sub_df, random_state=s)
+                    eval_ms.train(sub_df, random_state=s)
                 else:
-                    self.train(train_df, random_state=s)
-            X_test = eval_rows[self.feature_cols].values
-            pred_p50 = np.maximum(0.0, self.rul_p50_model.predict(X_test))
+                    eval_ms.train(train_df, random_state=s)
+            else:
+                eval_ms = self
+
+            X_test = eval_rows[eval_ms.feature_cols].values
+            pred_p50 = np.maximum(0.0, eval_ms.rul_p50_model.predict(X_test))
             m = calculate_metrics(y_true, pred_p50)
             rmses.append(m["rmse"])
             maes.append(m["mae"])
             nasas.append(m["nasa_score"])
 
-            raw_p10 = self.rul_p10_model.predict(X_test)
-            raw_p90 = self.rul_p90_model.predict(X_test)
-            cal_p10 = np.maximum(0.0, np.minimum(raw_p10, pred_p50) - self.interval_calibration_offset)
-            cal_p90 = np.maximum(pred_p50, np.maximum(raw_p90, pred_p50) + self.interval_calibration_offset)
+            raw_p10 = eval_ms.rul_p10_model.predict(X_test)
+            raw_p90 = eval_ms.rul_p90_model.predict(X_test)
+            cal_p10 = np.maximum(0.0, np.minimum(raw_p10, pred_p50) - eval_ms.interval_calibration_offset)
+            cal_p90 = np.maximum(pred_p50, np.maximum(raw_p90, pred_p50) + eval_ms.interval_calibration_offset)
             cov = float(np.mean((y_true >= cal_p10) & (y_true <= cal_p90)))
             coverages.append(cov)
 
             try:
-                probs = self.classifier.predict_proba(X_test)[:, 1]
+                probs = eval_ms.classifier.predict_proba(X_test)[:, 1]
                 praucs.append(float(average_precision_score(y_true_cls, probs)))
             except Exception:
                 praucs.append(0.85)
-
-        # Restore active saved bundle
-        try:
-            self.load()
-        except Exception:
-            pass
 
         multi_seed_report = {
             "seeds": seeds,
@@ -504,8 +502,8 @@ class ModelService:
         metrics = calculate_metrics(y_true, pred_p50)
         return metrics
 
-    def save(self, version: Optional[str] = None, is_active: bool = False):
-        bundle = {
+    def _to_bundle(self, version: Optional[str] = None) -> Dict[str, Any]:
+        return {
             "subset": self.subset,
             "version": version or "v1.0",
             "feature_cols": self.feature_cols,
@@ -517,15 +515,46 @@ class ModelService:
             "interval_calibration_offset": getattr(self, "interval_calibration_offset", 0.0),
             "training_time_sec": self.training_time_sec
         }
-        if version:
-            versioned_path = self.artifacts_dir / f"model_bundle_{self.subset}_{version}.joblib"
-            joblib.dump(bundle, versioned_path)
-            print(f"[{self.subset}] Saved versioned model bundle to {versioned_path}")
 
-        if version is None or is_active:
-            file_path = self.artifacts_dir / f"model_bundle_{self.subset}.joblib"
-            joblib.dump(bundle, file_path)
-            print(f"[{self.subset}] Saved active model bundle to {file_path}")
+    def save(self, version: Optional[str] = None, path: Optional[Path] = None) -> Path:
+        """
+        Saves model bundle to a versioned or explicit file path.
+        NOTE: Must NOT write active model_bundle_{subset}.joblib. Only promote() writes that.
+        """
+        bundle = self._to_bundle(version=version)
+        if path:
+            target_path = Path(path)
+        elif version:
+            target_path = self.artifacts_dir / f"model_bundle_{self.subset}_{version}.joblib"
+        else:
+            target_path = self.artifacts_dir / f"model_bundle_{self.subset}_temp_{int(time.time()*1000)}.joblib"
+
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        joblib.dump(bundle, target_path)
+        print(f"[{self.subset}] Saved versioned model bundle to {target_path}")
+        return target_path
+
+    def promote(self, version: Optional[str] = None, path: Optional[Path] = None) -> Path:
+        """
+        Promotes a versioned bundle or the in-memory model to the active bundle:
+        artifacts/models/model_bundle_{subset}.joblib
+        Only promote() writes model_bundle_{subset}.joblib.
+        """
+        if path:
+            source_path = Path(path)
+            bundle = joblib.load(source_path)
+        elif version:
+            versioned_path = self.artifacts_dir / f"model_bundle_{self.subset}_{version}.joblib"
+            if not versioned_path.exists():
+                raise FileNotFoundError(f"Cannot promote missing versioned bundle: {versioned_path}")
+            bundle = joblib.load(versioned_path)
+        else:
+            bundle = self._to_bundle(version=version or "v1.0")
+
+        active_path = self.artifacts_dir / f"model_bundle_{self.subset}.joblib"
+        joblib.dump(bundle, active_path)
+        print(f"[{self.subset}] Successfully promoted model to active champion bundle at {active_path}")
+        return active_path
 
     def load(self, version: Optional[str] = None):
         if version:

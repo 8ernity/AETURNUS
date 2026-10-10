@@ -48,6 +48,38 @@ export const MLOpsTab: React.FC<MLOpsTabProps> = ({ currentSubset }) => {
   const models = registry?.models || [];
   const sensorDrifts = driftReport?.sensor_metrics || {};
 
+  const [healingHistory, setHealingHistory] = useState<any[]>([]);
+  const [isHealing, setIsHealing] = useState<boolean>(false);
+  const [healingFeedback, setHealingFeedback] = useState<any | null>(null);
+
+  const fetchHealing = () => {
+    fetch("/api/v1/self-healing/history")
+      .then((res) => res.json())
+      .then((data) => setHealingHistory(data.history || []))
+      .catch((err) => console.error(err));
+  };
+
+  const handleExecuteHealing = async (actionType: string) => {
+    setIsHealing(true);
+    setHealingFeedback(null);
+    try {
+      const res = await fetch(`/api/v1/self-healing/execute?engine_id=unit_1&action_type=${actionType}&subset=${currentSubset}`, {
+        method: "POST"
+      });
+      const data = await res.json();
+      setHealingFeedback(data.action);
+      fetchHealing();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsHealing(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchHealing();
+  }, [currentSubset]);
+
   return (
     <div className="space-y-6">
       {/* Retraining Trigger Card */}
@@ -128,6 +160,92 @@ export const MLOpsTab: React.FC<MLOpsTabProps> = ({ currentSubset }) => {
           </div>
         </div>
       )}
+
+      {/* Autonomous Self-Healing Closed-Loop Panel */}
+      <div className="glass-panel p-6 rounded-3xl space-y-4 border-cyan-500/30">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-5 h-5 text-cyan-400" />
+            <div>
+              <h3 className="font-bold text-sm text-white">Autonomous Self-Healing Closed-Loop Control</h3>
+              <p className="text-xs text-slate-400">
+                Executes dynamic thrust derates, active cooling bleed modulation, and zero-AOG logistics reservations.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleExecuteHealing("DYNAMIC_DERATE")}
+              disabled={isHealing}
+              className="text-xs bg-cyan-600/20 hover:bg-cyan-600/40 text-cyan-300 border border-cyan-500/40 px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 transition-colors"
+            >
+              <Flame className="w-3.5 h-3.5" />
+              <span>Apply Dynamic Derate</span>
+            </button>
+            <button
+              onClick={() => handleExecuteHealing("COOLING_BLEED_MODULATION")}
+              disabled={isHealing}
+              className="text-xs bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/40 px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 transition-colors"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Modulate Bleed Vane</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Live Feedback Banner */}
+        {healingFeedback && (
+          <div className="bg-cyan-500/10 border border-cyan-500/30 p-4 rounded-2xl flex items-center justify-between text-xs font-mono">
+            <div>
+              <span className="text-cyan-400 font-bold block">{healingFeedback.title} Executed!</span>
+              <span className="text-slate-300">
+                Engine {healingFeedback.engine_id} · Subsystem {healingFeedback.subsystem} · RUL extended from {healingFeedback.original_rul} to <b className="text-emerald-300">{healingFeedback.extended_rul} cycles</b> (+{healingFeedback.life_extension_pct}%).
+              </span>
+            </div>
+            <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+              LEDGER SYNCED
+            </span>
+          </div>
+        )}
+
+        {/* Self-Healing Ledger History */}
+        {healingHistory.length > 0 && (
+          <div className="overflow-x-auto pt-2">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-slate-900/80 text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-800">
+                <tr>
+                  <th className="p-3">Action ID</th>
+                  <th className="p-3">Engine</th>
+                  <th className="p-3">Remediation Type</th>
+                  <th className="p-3">Subsystem</th>
+                  <th className="p-3 font-mono">Derate</th>
+                  <th className="p-3 font-mono">Life Gain</th>
+                  <th className="p-3 font-mono">Extended RUL</th>
+                  <th className="p-3">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60 font-mono">
+                {healingHistory.slice(0, 5).map((act: any, idx: number) => (
+                  <tr key={idx} className="hover:bg-slate-800/30 transition-colors">
+                    <td className="p-3 font-bold text-white text-[10px] truncate max-w-[100px]">{act.action_id}</td>
+                    <td className="p-3 text-cyan-300">{act.engine_id}</td>
+                    <td className="p-3 font-sans text-slate-300">{act.action_type.replace(/_/g, " ")}</td>
+                    <td className="p-3 text-purple-300">{act.subsystem}</td>
+                    <td className="p-3 text-amber-300">-{act.derate_pct}%</td>
+                    <td className="p-3 text-emerald-300 font-bold">+{act.life_extension_pct}%</td>
+                    <td className="p-3 text-emerald-400 font-bold">{act.extended_rul} cyc</td>
+                    <td className="p-3">
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        {act.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       {/* Model Registry Table */}
       <div className="glass-panel p-6 rounded-3xl space-y-4">

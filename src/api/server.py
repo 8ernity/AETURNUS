@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import json
 import os
 import shutil
@@ -17,6 +18,7 @@ from pydantic import BaseModel
 from src.common.utils import get_root_dir, load_yaml
 from src.models.model_service import ModelService
 from src.agent.triage_agent import TriageAgent
+from src.agent.self_healing_engine import SelfHealingEngine
 from src.mlops.drift_and_retrain import MLOpsManager
 from src.features.streaming import StreamingEnginePipeline
 
@@ -39,6 +41,7 @@ ROOT_DIR = get_root_dir()
 current_subset = "FD001"
 model_services: Dict[str, ModelService] = {}
 triage_agent = TriageAgent()
+self_healing_engine = SelfHealingEngine()
 mlops_managers: Dict[str, MLOpsManager] = {}
 streaming_pipelines: Dict[str, StreamingEnginePipeline] = {}
 
@@ -56,29 +59,49 @@ class ReplayState:
 replay_state = ReplayState()
 active_websockets: List[WebSocket] = []
 
-# Cached processed dataframes
+# Cached processed dataframes (Single-subset active cache to keep RAM < 200MB)
 loaded_dfs: Dict[str, pd.DataFrame] = {}
+
+def _load_downcasted_parquet(path: Path) -> pd.DataFrame:
+    df = pd.read_parquet(path)
+    # Downcast float64 to float32: cuts memory usage by 50% with zero loss of accuracy
+    float_cols = df.select_dtypes(include=["float64"]).columns
+    if len(float_cols) > 0:
+        df[float_cols] = df[float_cols].astype("float32")
+    return df
 
 def get_model_service(subset: str = "FD001") -> ModelService:
     if subset not in model_services:
+        # Evict older models to prevent memory accumulation
+        to_evict = [s for s in list(model_services.keys()) if s != subset]
+        for s in to_evict:
+            del model_services[s]
+        gc.collect()
+
         ms = ModelService(subset)
         try:
             ms.load()
         except Exception:
             proc_train = ROOT_DIR / "data" / "processed" / subset / "train.parquet"
             if proc_train.exists():
-                train_df = pd.read_parquet(proc_train)
+                train_df = get_train_df(subset)
                 ms.train(train_df)
         model_services[subset] = ms
     return model_services[subset]
 
 def get_mlops_manager(subset: str = "FD001") -> MLOpsManager:
     if subset not in mlops_managers:
+        to_evict = [s for s in list(mlops_managers.keys()) if s != subset]
+        for s in to_evict:
+            del mlops_managers[s]
         mlops_managers[subset] = MLOpsManager(subset)
     return mlops_managers[subset]
 
 def get_streaming_pipeline(subset: str = "FD001") -> StreamingEnginePipeline:
     if subset not in streaming_pipelines:
+        to_evict = [s for s in list(streaming_pipelines.keys()) if s != subset]
+        for s in to_evict:
+            del streaming_pipelines[s]
         ms = get_model_service(subset)
         streaming_pipelines[subset] = StreamingEnginePipeline(subset=subset, model_service=ms, triage_agent=triage_agent)
     return streaming_pipelines[subset]
@@ -96,22 +119,34 @@ def get_test_df(subset: str = "FD001") -> pd.DataFrame:
     validate_subset(subset)
     key = f"test_{subset}"
     if key not in loaded_dfs:
+        # Evict other subsets from memory
+        to_evict = [k for k in list(loaded_dfs.keys()) if not k.endswith(f"_{subset}")]
+        for k in to_evict:
+            del loaded_dfs[k]
+        gc.collect()
+
         proc_path = ROOT_DIR / "data" / "processed" / subset / "test.parquet"
         if not proc_path.exists():
             from src.features.pipeline import DataPipeline
             DataPipeline(subset).run()
-        loaded_dfs[key] = pd.read_parquet(proc_path)
+        loaded_dfs[key] = _load_downcasted_parquet(proc_path)
     return loaded_dfs[key]
 
 def get_train_df(subset: str = "FD001") -> pd.DataFrame:
     validate_subset(subset)
     key = f"train_{subset}"
     if key not in loaded_dfs:
+        # Evict other subsets from memory
+        to_evict = [k for k in list(loaded_dfs.keys()) if not k.endswith(f"_{subset}")]
+        for k in to_evict:
+            del loaded_dfs[k]
+        gc.collect()
+
         proc_path = ROOT_DIR / "data" / "processed" / subset / "train.parquet"
         if not proc_path.exists():
             from src.features.pipeline import DataPipeline
             DataPipeline(subset).run()
-        loaded_dfs[key] = pd.read_parquet(proc_path)
+        loaded_dfs[key] = _load_downcasted_parquet(proc_path)
     return loaded_dfs[key]
 
 # ----------------- WebSocket Hub -----------------
@@ -199,14 +234,17 @@ async def replay_ticker_loop():
                         if order and order.get("created_at_cycle") == cycle:
                             await broadcast("work_order_created", order)
 
-                    if len(replay_state.recent_replay_window) > 1000:
-                        replay_state.recent_replay_window = replay_state.recent_replay_window[-1000:]
+                    if len(replay_state.recent_replay_window) > 100:
+                        replay_state.recent_replay_window = replay_state.recent_replay_window[-100:]
 
                     await broadcast("tick", {
                         "cycle": cycle,
                         "engine_count": len(all_units),
                         "predictions": fleet_predictions
                     })
+
+                if cycle % 50 == 0:
+                    gc.collect()
 
                 delay = max(0.05, 1.0 / replay_state.speed)
                 await asyncio.sleep(delay)
@@ -759,6 +797,122 @@ async def upload_data(
         "subset": subset,
         "saved_path": str(dest_path.relative_to(ROOT_DIR))
     }
+
+# ==============================================================================
+# MLOps & Drift Monitoring Endpoints
+# ==============================================================================
+@app.get("/api/v1/mlops/registry")
+def get_mlops_registry(subset: str = Query(default="FD001")):
+    validate_subset(subset)
+    if subset not in mlops_managers:
+        mlops_managers[subset] = MLOpsManager(subset)
+    return mlops_managers[subset].get_registry()
+
+@app.get("/api/v1/monitoring/drift")
+def get_monitoring_drift(subset: str = Query(default="FD001")):
+    validate_subset(subset)
+    if subset not in mlops_managers:
+        mlops_managers[subset] = MLOpsManager(subset)
+    mgr = mlops_managers[subset]
+    
+    if mgr.drift_history_file.exists():
+        try:
+            with open(mgr.drift_history_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+            
+    train_df = get_dataframe("train", subset)
+    test_df = get_dataframe("test", subset)
+    ref_sample = train_df.sample(min(1000, len(train_df)), random_state=42)
+    curr_sample = test_df.sample(min(500, len(test_df)), random_state=42)
+    return mgr.calculate_drift_report(ref_sample, curr_sample)
+
+@app.post("/api/v1/mlops/retrain")
+async def trigger_mlops_retrain(scenario: str = Query(default="B"), subset: str = Query(default="FD001")):
+    validate_subset(subset)
+    if subset not in mlops_managers:
+        mlops_managers[subset] = MLOpsManager(subset)
+    mgr = mlops_managers[subset]
+    
+    recent_df = None
+    if replay_state.recent_replay_window:
+        recent_df = pd.DataFrame(replay_state.recent_replay_window)
+        
+    result = mgr.run_retrain_demo(scenario=scenario, replay_window_df=recent_df)
+    
+    if result.get("gate_passed") and result.get("promoted_version"):
+        promoted_ver = result["promoted_version"]
+        svc = ModelService(subset)
+        svc.load(promoted_ver)
+        model_services[subset] = svc
+        await broadcast("model_promoted", {
+            "subset": subset,
+            "version": promoted_ver,
+            "metrics": result.get("challenger_metrics")
+        })
+        
+    return result
+
+# ==============================================================================
+# Autonomous Self-Healing Remediation Endpoints
+# ==============================================================================
+@app.get("/api/v1/self-healing/prescriptions/{engine_id}")
+def get_engine_prescriptions(engine_id: str, cycle: int = Query(default=30)):
+    order = triage_agent.open_orders.get(engine_id)
+    cons_rul = order["conservative_rul"] if order else 35.0
+    subsystem = order["suspected_subsystem"] if order else "HPC"
+    severity = order["severity"] if order else "MEDIUM"
+    
+    status_dict = {
+        "engine_id": engine_id,
+        "cycle": cycle,
+        "conservative_rul": cons_rul,
+        "suspected_subsystem": subsystem,
+        "severity": severity
+    }
+    return {
+        "engine_id": engine_id,
+        "prescriptions": self_healing_engine.generate_prescriptions(status_dict)
+    }
+
+@app.post("/api/v1/self-healing/execute")
+async def execute_self_healing_action(
+    engine_id: str = Query(...),
+    action_type: str = Query(default="DYNAMIC_DERATE"),
+    cycle: int = Query(default=30),
+    subset: str = Query(default="FD001")
+):
+    order = triage_agent.open_orders.get(engine_id)
+    cons_rul = order["conservative_rul"] if order else 35.0
+    subsystem = order["suspected_subsystem"] if order else "HPC"
+    
+    res = self_healing_engine.execute_action(
+        engine_id=engine_id,
+        action_type=action_type,
+        cycle=cycle,
+        cons_rul=cons_rul,
+        subsystem=subsystem
+    )
+    
+    if order:
+        order["status"] = "IN_PROGRESS"
+        order["events"].append({
+            "cycle": cycle,
+            "event": f"Autonomous Self-Healing: {res['title']} executed (+{res['life_extension_pct']:.0f}% RUL life extension).",
+            "actor": "SelfHealingEngine"
+        })
+        triage_agent._persist_order(order)
+        
+    await broadcast("self_healing_executed", res)
+    return {"status": "success", "action": res}
+
+@app.get("/api/v1/self-healing/history")
+def get_self_healing_history_endpoint(engine_id: Optional[str] = Query(default=None), limit: int = Query(default=50)):
+    return {
+        "history": self_healing_engine.get_history(engine_id=engine_id, limit=limit)
+    }
+
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def get_favicon_ico():

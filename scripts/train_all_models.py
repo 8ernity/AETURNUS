@@ -23,7 +23,9 @@ def main():
         ms = ModelService(subset=sub)
         print(f"\n>>> Training {sub} on {len(train_df)} rows...")
         ms.train(train_df)
-        print(f">>> {sub} trained in {time.time() - t0:.2f}s")
+        ms.save("v1.0")
+        ms.promote("v1.0")
+        print(f">>> {sub} trained and promoted in {time.time() - t0:.2f}s")
 
     print("\n[DONE] All models successfully trained and persisted.")
 

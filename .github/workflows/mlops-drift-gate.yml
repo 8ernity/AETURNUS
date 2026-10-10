@@ -1,0 +1,79 @@
+name: MLOps Drift & Challenger Gate
+
+on:
+  schedule:
+    # Run every 12 hours (06:00 and 18:00 UTC)
+    - cron: '0 6,18 * * *'
+  workflow_dispatch:
+    inputs:
+      subset:
+        description: 'C-MAPSS Subset to audit'
+        required: true
+        default: 'FD001'
+      scenario:
+        description: 'Retraining Scenario (A: Batch Arrival, B: Distribution Shift)'
+        required: true
+        default: 'B'
+
+permissions:
+  contents: read
+
+jobs:
+  mlops-audit:
+    name: Telemetry Drift Audit & Promotion Gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest httpx
+
+      - name: Run Drift Audit & Challenger Gate Evaluation
+        run: |
+          python -c "
+          import json
+          from src.mlops.drift_and_retrain import MLOpsManager
+
+          subset = '${{ inputs.subset || 'FD001' }}'
+          scenario = '${{ inputs.scenario || 'B' }}'
+          print(f'Starting MLOps Drift & Retrain Workflow for {subset} (Scenario {scenario})...')
+
+          mgr = MLOpsManager(subset=subset)
+          reg = mgr.get_registry()
+          print(f'Active Champion: {reg.get(\"active_champion\")} with {len(reg.get(\"models\", []))} registered models.')
+
+          result = mgr.run_retrain_demo(scenario=scenario)
+          print('=== GATE EVALUATION RESULT ===')
+          print('Gate Passed:', result.get('gate_passed'))
+          print('Reasons:', result.get('gate_reasons'))
+          print('Challenger Metrics:', result.get('challenger_metrics'))
+          "
+
+      - name: Verify Drift & Retraining Test Suite
+        run: |
+          python -m pytest tests/test_real_data_pipeline.py -v
+
+      - name: Publish MLOps Gate Step Summary
+        if: always()
+        run: |
+          echo "## 📊 AETURNUS MLOps Drift & Retraining Audit" >> $GITHUB_STEP_SUMMARY
+          echo "Evaluated subset: **${{ inputs.subset || 'FD001' }}** | Scenario: **${{ inputs.scenario || 'B' }}**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Gate Constraint | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Feature PSI Drift | $\psi \le 0.20$ | Monitored |" >> $GITHUB_STEP_SUMMARY
+          echo "| Kolmogorov-Smirnov | $p \ge 0.05$ | Monitored |" >> $GITHUB_STEP_SUMMARY
+          echo "| Holdout RMSE Margin | $\ge 2.0\%$ improvement | Evaluated |" >> $GITHUB_STEP_SUMMARY
+          echo "| NASA Score Degradation | $\le 5.0\%$ degradation | Evaluated |" >> $GITHUB_STEP_SUMMARY
+          echo "| Late-Prediction Rate | $\le 3.0$ pp increase | Evaluated |" >> $GITHUB_STEP_SUMMARY

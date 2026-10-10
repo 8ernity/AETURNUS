@@ -15,7 +15,15 @@ def main():
     port = int(os.environ.get("PORT", 8000))
     print(f"  Bound to:   http://{host}:{port}")
     print("=" * 60)
-    uvicorn.run("src.api.server:app", host=host, port=port, reload=False, log_level="info")
+    uvicorn.run(
+        "src.api.server:app",
+        host=host,
+        port=port,
+        reload=False,
+        log_level="info",
+        limit_concurrency=40,
+        timeout_keep_alive=15
+    )
 
 if __name__ == "__main__":
     main()
