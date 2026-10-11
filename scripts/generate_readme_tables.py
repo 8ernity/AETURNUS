@@ -87,7 +87,7 @@ def generate_model_comparison_table(reports_dir: Path) -> str:
     ]
     rows = []
 
-    for sub in ["FD001", "FD002"]:
+    for sub in ["FD001", "FD002", "FD003", "FD004"]:
         comp_file = reports_dir / f"model_comparison_{sub}.json"
         if comp_file.exists():
             with open(comp_file, "r", encoding="utf-8") as f:
@@ -125,6 +125,12 @@ def update_readme():
     content = content.replace("Hampel", "Outlier Clipper")
     content = content.replace("2-Layer BiGRU + Linear", "Sequence GRU + Linear")
     content = content.replace("BiGRU", "GRU")
+    content = content.replace("Zero-Falsification Guarantee", "Empirically Verified Metrics")
+    content = content.replace("Zero-Falsification", "Empirical Verification")
+    content = content.replace("100% deterministic", "Fully deterministic")
+    content = content.replace("42%20Passed", "69%20Passed")
+    content = content.replace("42-test Pytest suite", "69-test Pytest suite across 20 test modules")
+    content = content.replace("42-test", "69-test")
 
     # 2. Update Subset Performance Matrix table
     subset_tbl = generate_subset_table(reports_dir)

@@ -49,8 +49,7 @@ self_healing_engine = SelfHealingEngine()
 mlops_managers: Dict[str, MLOpsManager] = {}
 streaming_pipelines: Dict[str, StreamingEnginePipeline] = {}
 
-# Thread pool & per-cycle prediction cache
-_fleet_executor = concurrent.futures.ThreadPoolExecutor(max_workers=min(32, (os.cpu_count() or 4) * 4))
+_fleet_executor = concurrent.futures.ThreadPoolExecutor(max_workers=min(4, os.cpu_count() or 2))
 _prediction_cache: Dict[tuple, Dict[str, Any]] = {}
 _cache_lock = threading.Lock()
 
@@ -63,6 +62,8 @@ def get_cached_prediction(ms: ModelService, row_dict: Dict[str, Any], subset: st
             return _prediction_cache[cache_key]
     pred = ms.predict_point(row_dict)
     with _cache_lock:
+        if len(_prediction_cache) >= 2000:
+            _prediction_cache.clear()
         _prediction_cache[cache_key] = pred
     return pred
 
@@ -545,9 +546,15 @@ class WhatIfRequest(BaseModel):
 
 @app.post("/api/v1/rules/simulate")
 def simulate_what_if(req: WhatIfRequest, subset: str = Query(default="FD001")):
-    df = get_test_df(subset)
+    validate_subset(subset)
+    train_df = get_train_df(subset)
     ms = get_model_service(subset)
-    last_cycles = df.groupby("unit")["cycle"].max()
+
+    from src.common.splits import get_persistent_split
+    split = get_persistent_split(subset, sorted([int(u) for u in train_df["unit"].unique()]))
+    holdout_units = split.get("lifecycle_holdout_units", [])
+    if not holdout_units:
+        holdout_units = sorted([int(u) for u in train_df["unit"].unique()])[-15:]
 
     sim_cfg = json.loads(json.dumps(triage_agent.rules_cfg))
     sim_cfg.setdefault("severity_bands", {})
@@ -558,24 +565,56 @@ def simulate_what_if(req: WhatIfRequest, subset: str = Query(default="FD001")):
 
     sim_agent = TriageAgent(db_path=Path(":memory:"), rules_cfg=sim_cfg)
 
-    created_count = 0
     simulated_severities = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
 
-    for u in sorted(df["unit"].unique())[:30]:
-        max_c = last_cycles[u]
-        row = df[(df["unit"] == u) & (df["cycle"] == max_c)].iloc[0].to_dict()
-        pred = ms.predict_point(row)
-        order, _ = sim_agent.evaluate_engine_cycle(pred)
-        sev = order["severity"] if order else sim_agent.get_base_severity(pred["conservative_rul"])
+    # Replay lifecycle holdout engines chronologically over their run-to-failure lifecycle
+    holdout_df = train_df[train_df["unit"].isin(holdout_units)].sort_values(["unit", "cycle"])
+    X = holdout_df[ms.feature_cols].values
+    p10_preds = np.maximum(0.0, ms.rul_p10_model.predict(X))
+    p50_preds = np.maximum(0.0, ms.rul_p50_model.predict(X))
+    p90_preds = np.maximum(0.0, ms.rul_p90_model.predict(X))
+    fail_probs = ms.classifier.predict_proba(X)[:, 1] if ms.classifier else np.zeros(len(X))
+    if ms.anomaly_detector:
+        scores = -ms.anomaly_detector.score_samples(X)
+        norm_scores = (scores - scores.min()) / max(1e-5, scores.max() - scores.min())
+    else:
+        norm_scores = np.zeros(len(X))
+
+    records = holdout_df.to_dict("records")
+    for i, row in enumerate(records):
+        pred = {
+            "engine_id": f"{subset}-{int(row.get('unit', 1)):03d}",
+            "unit": int(row.get("unit", 1)),
+            "subset": subset,
+            "cycle": int(row.get("cycle", 1)),
+            "rul_p10": round(float(p10_preds[i]), 1),
+            "rul_p50": round(float(p50_preds[i]), 1),
+            "rul_p90": round(float(p90_preds[i]), 1),
+            "conservative_rul": round(float(p10_preds[i]), 1),
+            "fail_prob_30": round(float(fail_probs[i]), 3),
+            "anomaly_score": round(float(norm_scores[i]), 3),
+            "health_index": round(float(row.get("health_index", 1.0)), 3),
+            "top_sensors": ["s2", "s3", "s4"],
+            "model_version": f"rul-{subset.lower()}@{getattr(ms, 'version', 'v1.0')}"
+        }
+        sim_agent.evaluate_engine_cycle(pred)
+
+    # Aggregate orders created across all holdout engines
+    all_orders = list(sim_agent.open_orders.values())
+    for hist_list in sim_agent.closed_orders_history.values():
+        all_orders.extend(hist_list)
+
+    for o in all_orders:
+        sev = o.get("severity", "LOW")
         if sev in simulated_severities:
             simulated_severities[sev] += 1
-        if order is not None:
-            created_count += 1
 
     return {
         "subset": subset,
         "simulated_params": req.dict(),
-        "total_simulated_orders": created_count,
+        "holdout_engines_count": len(holdout_units),
+        "total_cycles_replayed": len(records),
+        "total_simulated_orders": len(all_orders),
         "severities": simulated_severities
     }
 
@@ -619,6 +658,15 @@ def get_model_details(subset: str):
         "feature_importance": data.get("feature_importance", []),
         "status": data.get("status", "Evaluated")
     }
+
+@app.get("/api/v1/models/{subset}/comparison")
+def get_model_comparison(subset: str):
+    validate_subset(subset)
+    comp_file = ROOT_DIR / "artifacts" / "reports" / f"model_comparison_{subset}.json"
+    if comp_file.exists():
+        with open(comp_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    raise HTTPException(status_code=404, detail=f"Comparison report for {subset} not found")
 
 # ----------------- MLOps & Monitoring -----------------
 @app.get("/api/v1/mlops/registry")
@@ -723,6 +771,8 @@ def promote_model(
     mgr = get_mlops_manager(subset)
     try:
         res = mgr.promote_version(model_name)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=409, detail=f"Model bundle file missing on disk: {e}")
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -751,6 +801,8 @@ def rollback_model(
     mgr = get_mlops_manager(subset)
     try:
         res = mgr.rollback(model_name)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=409, detail=f"Model bundle file missing on disk: {e}")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

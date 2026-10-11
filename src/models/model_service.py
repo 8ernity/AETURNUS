@@ -13,7 +13,6 @@ from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import precision_recall_curve, auc, average_precision_score
 from sklearn.inspection import permutation_importance
 from src.common.utils import get_root_dir, load_yaml, calculate_metrics
-from src.models.neural_baseline import NeuralRULBenchmark
 
 SENSOR_REGEX = re.compile(r"^s\d+$")
 
@@ -436,7 +435,8 @@ class ModelService:
         gbdt_pred = np.maximum(0.0, self.rul_p50_model.predict(X_test))
         gbdt_metrics = calculate_metrics(y_test, gbdt_pred)
 
-        # 2. PyTorch Deep Models (Windowed 30-cycle sequences + scaled inputs)
+        # 2. PyTorch Deep Models (Windowed 30-cycle sequences + scaled inputs - lazy imported)
+        from src.models.neural_baseline import NeuralRULBenchmark
         bench = NeuralRULBenchmark(feature_cols=self.feature_cols, window_size=30, seed=42)
         cnn_res = bench.evaluate_architecture("cnn", train_df, test_df, y_test)
         gru_res = bench.evaluate_architecture("gru", train_df, test_df, y_test)

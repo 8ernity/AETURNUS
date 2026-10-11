@@ -19,8 +19,13 @@ class TriageAgent:
         
         # SQLite Database Path
         self.db_path = db_path or (self.root_dir / "data" / "work_orders.db")
-        if self.db_path != Path(":memory:"):
+        self.is_memory_db = str(self.db_path) == ":memory:"
+        if not self.is_memory_db:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._shared_conn = None
+        else:
+            self._shared_conn = sqlite3.connect(":memory:", check_same_thread=False)
+            self._shared_conn.row_factory = sqlite3.Row
         
         # In-memory caches (synchronized with SQLite)
         self.open_orders: Dict[str, Dict[str, Any]] = {} # engine_id -> order
@@ -49,6 +54,8 @@ class TriageAgent:
         return "HEALTHY"
 
     def _get_db(self) -> sqlite3.Connection:
+        if self._shared_conn is not None:
+            return self._shared_conn
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         return conn

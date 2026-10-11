@@ -13,10 +13,18 @@ class SelfHealingEngine:
         self.rules_cfg = load_yaml("configs/agent_rules.yaml")
         self.sensor_cfg = load_yaml("configs/sensor_map.yaml")
         self.db_path = db_path or (self.root_dir / "data" / "work_orders.db")
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.is_memory_db = str(self.db_path) == ":memory:"
+        if not self.is_memory_db:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._shared_conn = None
+        else:
+            self._shared_conn = sqlite3.connect(":memory:", check_same_thread=False)
+            self._shared_conn.row_factory = sqlite3.Row
         self._init_db()
 
     def _get_db(self) -> sqlite3.Connection:
+        if self._shared_conn is not None:
+            return self._shared_conn
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         return conn
@@ -24,6 +32,35 @@ class SelfHealingEngine:
     def _init_db(self):
         with self._get_db() as conn:
             conn.executescript("""
+                CREATE TABLE IF NOT EXISTS work_orders (
+                    work_order_id TEXT PRIMARY KEY,
+                    engine_id TEXT NOT NULL,
+                    unit INTEGER NOT NULL,
+                    subset TEXT NOT NULL,
+                    created_at_cycle INTEGER NOT NULL,
+                    current_cycle INTEGER NOT NULL,
+                    closed_at_cycle INTEGER,
+                    severity TEXT NOT NULL,
+                    raw_severity TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    conservative_rul REAL NOT NULL,
+                    rul_p10 REAL NOT NULL,
+                    rul_p50 REAL NOT NULL,
+                    rul_p90 REAL NOT NULL,
+                    fail_prob_30 REAL NOT NULL,
+                    anomaly_score REAL NOT NULL,
+                    due_by_cycle INTEGER NOT NULL,
+                    suspected_subsystem TEXT NOT NULL,
+                    top_sensors TEXT NOT NULL,
+                    recommended_action TEXT NOT NULL,
+                    decision_trace TEXT NOT NULL,
+                    model_version TEXT NOT NULL,
+                    rules_version TEXT NOT NULL,
+                    exception TEXT,
+                    events TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS self_healing_actions (
                     action_id TEXT PRIMARY KEY,
                     engine_id TEXT NOT NULL,

@@ -179,6 +179,16 @@ class MLOpsManager:
         if not target:
             raise ValueError(f"Version '{version}' not found in registry for subset {self.subset}")
 
+        # Check that physical model bundle exists on disk
+        target_version = target.get("version")
+        target_path = Path(target.get("model_path", ""))
+        if not target_path.is_absolute():
+            target_path = self.root_dir / target_path
+        bundle_file = self.artifacts_dir / "models" / f"model_bundle_{self.subset}_{target_version}.joblib"
+        default_file = self.artifacts_dir / "models" / f"model_bundle_{self.subset}.joblib"
+        if not target_path.exists() and not bundle_file.exists() and not (target_version == "v1.0" and default_file.exists()):
+            raise FileNotFoundError(f"Model bundle file for version '{target_version}' is missing on disk: {target_path}")
+
         # Update aliases
         for m in models:
             if m.get("alias") == "champion":
@@ -224,6 +234,16 @@ class MLOpsManager:
                 target = models[0]
             else:
                 raise ValueError("No previous or target model available to rollback to.")
+
+        # Check that physical model bundle exists on disk
+        target_ver = target.get("version")
+        target_path = Path(target.get("model_path", ""))
+        if not target_path.is_absolute():
+            target_path = self.root_dir / target_path
+        bundle_file = self.artifacts_dir / "models" / f"model_bundle_{self.subset}_{target_ver}.joblib"
+        default_file = self.artifacts_dir / "models" / f"model_bundle_{self.subset}.joblib"
+        if not target_path.exists() and not bundle_file.exists() and not (target_ver == "v1.0" and default_file.exists()):
+            raise FileNotFoundError(f"Model bundle file for rollback version '{target_ver}' is missing on disk: {target_path}")
 
         for m in models:
             if m.get("alias") == "champion":

@@ -15,7 +15,7 @@
 [![MLflow](https://img.shields.io/badge/MLflow-3.0+-0194E2.svg?style=flat&logo=mlflow)](https://mlflow.org/)
 [![SQLite](https://img.shields.io/badge/SQLite-3-003B57.svg?style=flat&logo=sqlite)](https://sqlite.org/)
 [![Dataset](https://img.shields.io/badge/Dataset-NASA%20C--MAPSS-0B3D91.svg?style=flat&logo=nasa)](https://data.nasa.gov/)
-[![Tests](https://img.shields.io/badge/Tests-42%20Passed-brightgreen.svg?style=flat&logo=pytest)](https://docs.pytest.org/)
+[![Tests](https://img.shields.io/badge/Tests-69%20Passed-brightgreen.svg?style=flat&logo=pytest)](https://docs.pytest.org/)
 [![CI](https://img.shields.io/badge/CI-Smoke%20Passed-brightgreen.svg?style=flat&logo=githubactions)](https://github.com/features/actions)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat)](LICENSE)
 
@@ -33,7 +33,7 @@ Built on the benchmark **NASA C-MAPSS dataset** (subsets `FD001` through `FD004`
 3. **Deep Learning Benchmarks**: PyTorch 1D-CNN and Gated Recurrent Unit (GRU) baselines benchmarked against the gradient boosting champion across multiple random seeds.
 4. **Deterministic Triage Agent (No-LLM)**: Fully explainable, auditable 9-step decision pipeline that evaluates hysteresis, manages technician overrides, suppresses noise, and tracks work orders with SQLite persistence.
 5. **Self-Healing MLOps**: Streaming drift monitoring (Population Stability Index & Kolmogorov-Smirnov test), automated retrain triggers with WebSocket streaming, and a strict 3-criteria holdout gate.
-6. **Zero-Falsification Guarantee**: Every metric, badge, bucket breakdown, and curve displayed in the UI traces directly to real code-generated disk reports (`artifacts/reports/*.json`).
+6. **Empirically Verified Metrics**: Every metric, badge, bucket breakdown, and curve displayed in the UI traces directly to real code-generated disk reports (`artifacts/reports/*.json`).
 
 ---
 
@@ -71,7 +71,7 @@ Built on the benchmark **NASA C-MAPSS dataset** (subsets `FD001` through `FD004`
 | **Probabilistic RUL Regressors** | Quantile gradient boosting heads ($p_{10}, p_{50}, p_{90}$) with mathematical enforcement of $p_{10} \le p_{50} \le p_{90}$. | Conformalized prediction intervals provide bounded risk metrics for flight planners. |
 | **Calibrated Early Warning** | `HistGradientBoostingClassifier` with balanced class weights wrapped in `CalibratedClassifierCV` (sigmoid). | Well-calibrated probability of failure within 30 cycles eliminates overconfident false alerts. |
 | **Deep Learning Baselines** | PyTorch 1D-Convolutional Neural Network and GRU recurrent models trained on sequential sensor slices. | Allows direct empirical comparison between tabular gradient boosting and deep sequential architectures. |
-| **Deterministic Triage Agent** | 9-step decision engine reading rules from `agent_rules.yaml`. Hysteresis hold, REJECT suppression window, and UUID tracking. | 100% deterministic, explainable, and sub-millisecond execution without reliance on LLMs or hallucinations. |
+| **Deterministic Triage Agent** | 9-step decision engine reading rules from `agent_rules.yaml`. Hysteresis hold, REJECT suppression window, and UUID tracking. | Fully deterministic, explainable, and sub-millisecond execution without reliance on LLMs or hallucinations. |
 | **Continuous Drift Detection** | Multi-sensor Population Stability Index (PSI) and 2-sample Kolmogorov-Smirnov tests comparing reference training sets against recent streaming windows. | Detects subtle sensor degradation and environmental drift before catastrophic failure. |
 | **Self-Healing Retraining Loop** | Automated retraining pipeline with real SHA-256 data hashing and a 3-criteria validation holdout gate. | Automatically validates challengers against champions, rolling back degrading models seamlessly. |
 | **Glassmorphic Cockpit UI** | High-performance React 18 + Vite dashboard with 7 comprehensive tabs inspired by professional audio telemetry hardware. | Real-time fleet health, engine telemetry, model comparison, MLOps registry, and maintenance work orders. |
@@ -204,6 +204,12 @@ Evaluated on held-out test splits in [src/models/neural_baseline.py](src/models/
 | **FD002** | **HistGradientBoosting Quantile (Champion)** | **25.27** | **16.54** | *~74.2s total* |
 | FD002 | 1D-CNN PyTorch (30-Cycle Window) | 24.69 | 16.62 | ~11.1s total |
 | FD002 | GRU PyTorch (30-Cycle Sequence) | 25.22 | 17.01 | ~19.9s total |
+| **FD003** | **HistGradientBoosting Quantile (Champion)** | **15.16** | **11.32** | *~42.6s total* |
+| FD003 | 1D-CNN PyTorch (30-Cycle Window) | 17.05 | 12.18 | ~7.5s total |
+| FD003 | GRU PyTorch (30-Cycle Sequence) | 14.01 | 10.22 | ~18.1s total |
+| **FD004** | **HistGradientBoosting Quantile (Champion)** | **25.86** | **18.09** | *~79.4s total* |
+| FD004 | 1D-CNN PyTorch (30-Cycle Window) | 24.91 | 18.10 | ~11.6s total |
+| FD004 | GRU PyTorch (30-Cycle Sequence) | 26.11 | 18.09 | ~24.8s total |
 
 ---
 
@@ -236,7 +242,20 @@ flowchart TD
 ### Monotonic Quantiles & Conformal Coverage
 To eliminate quantile crossings caused by independently trained pinball regressors, predictions undergo post-hoc sorting and clipping:
 $$\hat{p}_{10} \le \hat{p}_{50} \le \hat{p}_{90}$$
-Residual conformal calibration adjustments are calculated on engine-split validation sets to ensure nominal $[p_{10}, p_{90}]$ prediction intervals consistently achieve their target coverage of $\approx 80\%$.
+
+Residual conformal calibration adjustments are calculated on engine-split validation sets with a nominal target coverage of 80% ($[p_{10}, p_{90}]$).
+
+#### 🎯 Empirical Coverage (55.2%–73.0%) vs 80% Nominal Target
+On standard held-out NASA C-MAPSS test engines, the empirical conformal coverage achieved across subsets is:
+- **FD001**: **73.0%** (Single condition, single fault — close to nominal 80% target)
+- **FD002**: **64.1%** (Six operational regimes, single fault — non-stationary flight conditions)
+- **FD003**: **59.0%** (Single condition, dual fault — compounding HPC + Fan wear)
+- **FD004**: **55.2%** (Six operational regimes, dual fault — maximum operating complexity)
+
+**Why empirical coverage is 55%–73% instead of 80%**:
+1. **Regime Distribution Shift**: In multi-regime subsets (`FD002`, `FD004`), flight conditions shift dynamically across 6 altitude/Mach regimes. Late-stage degradation induces severe covariate shift where residuals in extreme flight envelopes exhibit heavier tails than the stationary validation cohort.
+2. **Compound Degradation Modes**: Subsets with dual fault modes (`FD003`, `FD004`) exhibit coupled degradation between high-pressure compressors and fan modules. Wear accelerates non-linearly near end-of-life, causing wider residual dispersion.
+3. **Engineering Transparency**: Rather than artificially widening prediction bounds to claim inflated coverage, AETURNUS reports honest empirical coverage directly from code-generated test reports (`artifacts/reports/evaluation_*.json`).
 
 ### Engine-Level Group Splitting
 To prevent future cycle leakage and optimistic test bias, data splits are grouped strictly by engine unit (`GroupKFold` / `train_test_split(by="unit")`). Engines allocated to validation or holdout sets are never observed in training.
@@ -385,7 +404,7 @@ AETURNUS/
 │   └── models/
 │       ├── model_service.py           # Multi-head quantile model inference & calibration
 │       └── neural_baseline.py         # PyTorch 1D-CNN and GRU deep learning architectures
-├── tests/                             # Comprehensive 42-test test suite
+├── tests/                             # Comprehensive 69-test test suite
 │   ├── test_benchmark_and_reports.py  # Report disk verification tests
 │   ├── test_cleaner.py                # Causal cleaning & regex sensor tests
 │   ├── test_metrics.py                # NASA score & metric verification tests
@@ -470,10 +489,10 @@ Open your browser to **http://127.0.0.1:8000** to interact with the fleet cockpi
 
 ## 🧪 Testing & CI Validation
 
-The platform includes a rigorous **42-test Pytest suite** and an autonomous **CI smoke test**:
+The platform includes a rigorous **69-test Pytest suite across 20 test modules** and an autonomous **CI smoke test**:
 
 ```bash
-# Run the complete test suite (cleaner, metrics, agent, mlops, api, ml-quality)
+# Run the complete test suite across all 20 modules
 make test
 # Or: pytest tests/ -v
 
@@ -488,7 +507,34 @@ Every commit and pull request triggers [.github/workflows/ci.yml](.github/workfl
 2. Dependency installation (`pip install -r requirements.txt`).
 3. Frontend bundle compilation (`npm run build`).
 4. Lightning CI smoke test verification (`scripts/ci_smoke_test.py`).
-5. Complete 42-test Pytest suite (`pytest tests/ -v`).
+5. Complete 69-test Pytest suite (`pytest tests/ -v`).
+
+### Test Suite Verification Matrix (20 Modules, 69 Passing Tests)
+
+The test suite rigorously verifies all system invariants across data engineering, ML quality, deterministic triage, MLOps, and API contracts:
+
+| Test File | Verified Functionality & Invariants | Test Count |
+|---|---|:---:|
+| `tests/test_agent_auto_close_and_x7.py` | Automatic work order resolution on recovery, idempotency of transitions, model version verification, and X7 unknown model exception handling. | 4 |
+| `tests/test_benchmark_and_reports.py` | Verifies existence, integrity, schema conformity, and metric bounds of all artifact disk reports (`evaluation_*.json`, `benchmark_summary.json`). | 5 |
+| `tests/test_cleaner.py` | Causal forward-fill without lookahead leakage, regex sensor isolation (`^s\d+$`), missing telemetry fallback, and post-norm outlier clipping. | 4 |
+| `tests/test_drift_matched_age.py` | Population Stability Index (PSI) and Kolmogorov-Smirnov drift scoring against age-matched baseline cohorts to isolate sensor drift from operating age. | 2 |
+| `tests/test_fleet_threading_and_caching.py` | Concurrency and thread safety of `/api/v1/fleet` endpoint, memory cache invalidation, and sub-100ms response latencies across 100+ engines. | 3 |
+| `tests/test_metrics.py` | Asymmetric penalty formulation of NASA scoring function ($s \ge 0$ late penalty vs $s < 0$ early penalty), MAE, RMSE, and PR-AUC precision. | 3 |
+| `tests/test_ml_quality.py` | Multi-head model quality: monotonic quantiles ($p_{10} \le p_{50} \le p_{90}$), Brier score calibration of failure classifier, and baseline shapes. | 6 |
+| `tests/test_mlops.py` | Statistical drift monitoring, retrain triggers, MLflow model registry aliases (`champion`, `challenger`, `previous`), and audit metadata tracking. | 4 |
+| `tests/test_model_service_promotion.py` | Zero-downtime model hot-reloading, cache flushing, and live serving bundle transitions in `ModelService`. | 1 |
+| `tests/test_persistent_engine_split.py` | Engine unit grouping in dataset splits (`train_test_split(by="unit")`), ensuring zero unit leakage between train, validation, and holdout. | 2 |
+| `tests/test_pipeline.py` | Full data pipeline execution: raw C-MAPSS ingestion, parquet feature generation, multi-regime K-Means clustering ($k=6$), and causal EWMA features. | 5 |
+| `tests/test_readme_tables.py` | Automated documentation validation: ensures README benchmark tables match disk reports with zero unverified claims. | 1 |
+| `tests/test_registry_promote_rollback.py` | Model registry promotion and rollback state machine, missing bundle file validation, and HTTP 409 conflict detection. | 2 |
+| `tests/test_replay_api.py` | Telemetry streaming replay endpoints, WebSocket lifecycle broadcasts, and HTTP 400 parameter validation for invalid engines/subsets. | 6 |
+| `tests/test_self_healing.py` | End-to-end autonomous self-healing loop: drift alarm triggers retraining, fixed holdout gate evaluation, and conditional champion promotion. | 2 |
+| `tests/test_stream_vs_batch.py` | Numerical equivalence between single-cycle streaming inference pipeline (`StreamingEnginePipeline`) and batch feature extraction. | 1 |
+| `tests/test_subsystem_and_live_model_version.py` | Sensor subsystem hierarchy mapping (HPC, HPT, LPT, Fan, Core) and live model version propagation in inference payloads. | 2 |
+| `tests/test_triage_agent.py` | Deterministic 9-step decision pipeline, severity bands (Critical/High/Medium/Low), 5-cycle hysteresis hold, technician overrides, and REJECT cooldown. | 10 |
+| `tests/test_upload_validation_and_wiring.py` | Multipart file upload security, CSV/TXT schema validation, malformed file rejection, and evaluation wiring. | 4 |
+| `tests/test_windowed_neural_baseline.py` | PyTorch 1D-CNN and GRU 30-cycle sliding window sequence generation, input shape validation, and sequence inference. | 2 |
 
 ---
 

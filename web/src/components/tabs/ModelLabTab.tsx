@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from "react";
-import { Award, BarChart2, Zap } from "lucide-react";
+import { Award, BarChart2, Zap, Cpu, CheckCircle2, AlertCircle, Shield } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 
 export const ModelLabTab: React.FC = () => {
   const [benchmarks, setBenchmarks] = useState<any[]>([]);
   const [selectedSub, setSelectedSub] = useState<string>("FD001");
   const [modelDetails, setModelDetails] = useState<any | null>(null);
+  const [comparison, setComparison] = useState<any | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
@@ -19,14 +20,17 @@ export const ModelLabTab: React.FC = () => {
 
   useEffect(() => {
     setLoading(true);
-    fetch(`/api/v1/models/${selectedSub}/details`)
-      .then((res) => res.json())
-      .then((data) => {
-        setModelDetails(data);
+    Promise.all([
+      fetch(`/api/v1/models/${selectedSub}/details`).then((r) => r.json()),
+      fetch(`/api/v1/models/${selectedSub}/comparison`).then((r) => r.json()).catch(() => null)
+    ])
+      .then(([details, comp]) => {
+        setModelDetails(details);
+        setComparison(comp);
         setLoading(false);
       })
       .catch((err) => {
-        console.error("Error fetching model details:", err);
+        console.error("Error fetching model data:", err);
         setLoading(false);
       });
   }, [selectedSub]);
@@ -34,6 +38,7 @@ export const ModelLabTab: React.FC = () => {
   const targetsMetCount = benchmarks.filter((b) => b.status === "Target Met").length;
   const bucketErrors = modelDetails?.bucket_errors || [];
   const featureImportances = modelDetails?.feature_importance || [];
+  const comparisonModels = comparison?.models || [];
 
   return (
     <div className="space-y-6">
@@ -127,6 +132,101 @@ export const ModelLabTab: React.FC = () => {
         </div>
       </div>
 
+      {/* Architecture Comparison & Champion Decision Section */}
+      <div className="glass-panel p-6 rounded-3xl space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Cpu className="w-5 h-5 text-cyan-400" />
+            <h3 className="font-bold text-sm text-white">
+              {selectedSub} Architecture Benchmark & Champion Selection Decision
+            </h3>
+          </div>
+          <span className="text-xs px-2.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 font-mono">
+            GBDT vs 1D-CNN vs GRU
+          </span>
+        </div>
+        <p className="text-xs text-slate-400">
+          Evaluated against the empirical test set. Compare sequence deep learning models (30-cycle temporal window) against gradient boosted quantile ensembles.
+        </p>
+
+        {comparisonModels.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-slate-900/90 text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-800">
+                <tr>
+                  <th className="p-3">Architecture</th>
+                  <th className="p-3">Model Name</th>
+                  <th className="p-3 font-mono">Test RMSE</th>
+                  <th className="p-3 font-mono">MAE</th>
+                  <th className="p-3 font-mono">NASA Score</th>
+                  <th className="p-3 font-mono">Train Time</th>
+                  <th className="p-3 text-center">Serving Champion</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60 font-mono">
+                {comparisonModels.map((m: any, idx: number) => {
+                  const isGbdt = m.architecture === "GBDT";
+                  return (
+                    <tr key={idx} className={isGbdt ? "bg-indigo-950/20" : "hover:bg-slate-800/20"}>
+                      <td className="p-3 font-bold text-white font-sans flex items-center gap-2">
+                        <span className={`w-2 h-2 rounded-full ${isGbdt ? "bg-indigo-400" : "bg-cyan-400"}`} />
+                        {m.architecture}
+                      </td>
+                      <td className="p-3 text-slate-300 font-sans">{m.model_name}</td>
+                      <td className="p-3 font-bold text-cyan-300">{Number(m.rmse).toFixed(2)}</td>
+                      <td className="p-3 text-slate-400">{Number(m.mae).toFixed(2)}</td>
+                      <td className="p-3 text-purple-300">{Number(m.nasa_score).toFixed(1)}</td>
+                      <td className="p-3 text-slate-400">{m.train_time_sec}s</td>
+                      <td className="p-3 text-center">
+                        {isGbdt ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                            <CheckCircle2 className="w-3 h-3" /> Active Champion
+                          </span>
+                        ) : (
+                          <span className="text-slate-500 text-[10px]">Benchmark Baseline</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="text-xs text-slate-500 py-4">Loading architecture comparison...</div>
+        )}
+
+        {/* Champion Decision Rationale Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 text-xs">
+          <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-1.5">
+            <div className="font-semibold text-indigo-300 flex items-center gap-1.5">
+              <Shield className="w-4 h-4 text-indigo-400" /> Quantile Bands (P10/P50/P90)
+            </div>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              GBDT models pinball loss quantiles natively, enabling certified asymmetric uncertainty intervals for risk-averse work orders. Neural baselines only produce uncalibrated point estimates.
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-1.5">
+            <div className="font-semibold text-cyan-300 flex items-center gap-1.5">
+              <Zap className="w-4 h-4 text-cyan-400" /> Instant Cold-Start (&lt;2ms)
+            </div>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              GBDT predicts from cycle 1 via causal feature imputation. 1D-CNN and GRU require a 30-cycle buffer window, making early-life engine triage unavailable or distorted by zero-padding.
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-1.5">
+            <div className="font-semibold text-purple-300 flex items-center gap-1.5">
+              <CheckCircle2 className="w-4 h-4 text-purple-400" /> Sequence Model Strengths
+            </div>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              GRU achieved 14.01 RMSE on FD003 (vs 15.16 for GBDT), and 1D-CNN achieved 24.69 on FD002 and 24.91 on FD004, validating temporal sequence representation on complex multi-fault datasets.
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Real Residuals & Real Bucket Errors */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Error by RUL Bucket */}
@@ -208,7 +308,7 @@ export const ModelLabTab: React.FC = () => {
 
           <div className="mt-6 pt-4 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400 font-mono">
             <span>Subset: {selectedSub}</span>
-            <span className="text-cyan-300">100% Code-Computed</span>
+            <span className="text-cyan-300">Code-Computed via scikit-learn</span>
           </div>
         </div>
       </div>

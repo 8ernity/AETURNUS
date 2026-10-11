@@ -1,3 +1,4 @@
+import os
 import sys
 import time
 from pathlib import Path
@@ -24,21 +25,37 @@ def ensure_data_and_models():
         print("[ENTRYPOINT] Raw dataset present.")
 
     # 2. Build feature pipelines if processed parquets are missing
-    subsets = ["FD001", "FD002", "FD003", "FD004"]
-    missing_processed = [
-        sub for sub in subsets
-        if not (ROOT_DIR / "data" / "processed" / sub / "train.parquet").exists()
-    ]
-    if missing_processed:
-        print(f"[ENTRYPOINT] Processed data missing for {missing_processed}. Building pipelines...")
-        import scripts.build_all_data as build_all_data
-        build_all_data.main()
+    fd001_train = ROOT_DIR / "data" / "processed" / "FD001" / "train.parquet"
+    fd001_test = ROOT_DIR / "data" / "processed" / "FD001" / "test.parquet"
+    if not (fd001_train.exists() and fd001_test.exists()):
+        print("[ENTRYPOINT] Primary dataset FD001 missing. Building FD001 pipeline...")
+        from src.features.pipeline import DataPipeline
+        dp = DataPipeline("FD001")
+        dp.run()
+        del dp
+        import gc
+        gc.collect()
     else:
-        print("[ENTRYPOINT] Processed datasets present.")
+        print("[ENTRYPOINT] Primary dataset FD001 present.")
+
+    # Build other subsets if explicitly requested or outside memory-constrained environments
+    build_all = os.environ.get("BUILD_ALL_DATASETS", "0") == "1"
+    subsets = ["FD002", "FD003", "FD004"] if build_all else []
+    for sub in subsets:
+        sub_train = ROOT_DIR / "data" / "processed" / sub / "train.parquet"
+        if not sub_train.exists():
+            print(f"[ENTRYPOINT] Building pipeline for {sub}...")
+            from src.features.pipeline import DataPipeline
+            dp = DataPipeline(sub)
+            dp.run()
+            del dp
+            import gc
+            gc.collect()
 
     # 3. Train models if bundles are missing
+    subsets_to_check = ["FD001", "FD002", "FD003", "FD004"]
     missing_models = [
-        sub for sub in subsets
+        sub for sub in subsets_to_check
         if not (ROOT_DIR / "artifacts" / "models" / f"model_bundle_{sub}.joblib").exists()
     ]
     if missing_models:
