@@ -28,10 +28,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies with lightweight CPU torch wheel
+# Install Python production dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copy backend, configs, data loaders, reports, scripts, and initial data
@@ -42,8 +41,8 @@ COPY artifacts/ /app/artifacts/
 COPY data/ /app/data/
 COPY download_data.py run_app.py Procfile LICENSE README.md /app/
 
-# Build all processed data and feature pipelines during image build
-RUN python download_data.py && python -m scripts.build_all_data
+# Build primary FD001 dataset at image build so it starts immediately without runtime delay
+RUN python -c "from src.features.pipeline import DataPipeline; DataPipeline('FD001', inject_faults=False).run()"
 
 # Copy compiled frontend from Stage 1 into web/dist
 COPY --from=frontend-builder /app/web/dist /app/web/dist

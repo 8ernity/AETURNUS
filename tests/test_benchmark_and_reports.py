@@ -122,6 +122,10 @@ def test_bundle_rmse_within_threshold_of_evaluation_json():
         ms = ModelService(subset=sub).load()
         assert hasattr(ms, "sklearn_version")
         test_path = root_dir / "data" / "processed" / sub / "test.parquet"
+        if not test_path.exists():
+            from src.features.pipeline import DataPipeline
+            dp = DataPipeline(subset=sub, inject_faults=False)
+            dp.run()
         test_df = pd.read_parquet(test_path)
         loader = CMAPSSLoader(subset=sub)
         _, _, rul_truth = loader.load_raw_data()

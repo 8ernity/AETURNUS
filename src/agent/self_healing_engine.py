@@ -107,9 +107,31 @@ class SelfHealingEngine:
             "LOW": f"Continue standard monitoring and schedule routine {subsystem} check.",
             "HEALTHY": f"Nominal operations. Routine {subsystem} telemetry monitoring."
         }
-        primary_action = rule_actions.get(severity, f"Inspect {subsystem}")
+        primary_action = rule_actions.get(severity, rule_actions["MEDIUM"])
+        from src.agent.aerospace_pdm import calculate_throttle_derating, generate_parts_bom
+        top_sensors = engine_status.get("top_sensors", ["s9", "s14"])
+        derate_info = calculate_throttle_derating(cons_rul, severity, subsystem)
+        bom = generate_parts_bom(f"WO-{engine_id}-{cycle}", top_sensors, subsystem)
 
-        prescriptions = [
+        prescriptions = []
+        if derate_info.get("derate_recommended"):
+            prescriptions.append({
+                "prescription_id": f"RX-DERATE-{engine_id}-{cycle}",
+                "action_type": "THROTTLE_DERATE",
+                "title": f"FADEC Throttle De-rating ({derate_info.get('fadec_mode')})",
+                "description": (
+                    f"Reduce Max Takeoff Thrust by {derate_info.get('derate_percentage')}%. "
+                    f"Extends {subsystem} life by +{derate_info.get('life_extension_cycles')} cycles to {derate_info.get('effective_rul_with_derate')} cycles, "
+                    f"permitting safe reach to {derate_info.get('mission_replanning', {}).get('target_hub', 'JFK Hangar')}."
+                ),
+                "subsystem": subsystem,
+                "severity": severity,
+                "conservative_rul": cons_rul,
+                "status": "RECOMMENDED",
+                "derate_plan": derate_info
+            })
+
+        prescriptions.extend([
             {
                 "prescription_id": f"RX-MAINT-{engine_id}-{cycle}",
                 "action_type": "MAINTENANCE_INSPECTION",
@@ -123,14 +145,15 @@ class SelfHealingEngine:
             {
                 "prescription_id": f"RX-LOGISTICS-{engine_id}-{cycle}",
                 "action_type": "LOGISTICS_DISPATCH",
-                "title": f"Queue {subsystem} Replacement Parts",
-                "description": f"Request supply chain staging of certified replacement components for {subsystem}.",
+                "title": f"Queue {subsystem} Replacement Parts ({bom.get('bom_id')})",
+                "description": f"Dispatch certified {subsystem} components ({', '.join(it['part_number'] for it in bom.get('items', []))}) to {bom.get('target_hub')}.",
                 "subsystem": subsystem,
                 "severity": severity,
                 "conservative_rul": cons_rul,
-                "status": "RECOMMENDED"
+                "status": "RECOMMENDED",
+                "parts_bom": bom
             }
-        ]
+        ])
         return prescriptions
 
     def execute_action(
