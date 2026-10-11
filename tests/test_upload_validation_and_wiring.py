@@ -5,7 +5,14 @@ from src.api.server import app
 from src.common.utils import get_root_dir
 
 client = TestClient(app)
-root_dir = get_root_dir()
+
+@pytest.fixture(autouse=True)
+def isolate_uploads(tmp_path, monkeypatch):
+    import src.api.server as server
+    # Redirect ROOT_DIR to tmp_path during upload tests
+    monkeypatch.setattr(server, "ROOT_DIR", tmp_path)
+    (tmp_path / "data" / "uploads" / "FD001").mkdir(parents=True, exist_ok=True)
+    yield
 
 def test_upload_filename_sanitization():
     # Attempt directory traversal in filename
@@ -18,7 +25,7 @@ def test_upload_filename_sanitization():
     # Filename must be sanitized to pure basename without '../'
     assert data["filename"] == "malicious_file.csv"
     assert ".." not in data["saved_path"]
-    assert data["saved_path"].startswith("data")
+    assert "malicious_file.csv" in data["saved_path"]
 
 def test_upload_extension_and_size_validation():
     # Disallowed extension

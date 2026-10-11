@@ -11,15 +11,16 @@ SEVERITY_ORDER = ["HEALTHY", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
 HUMAN_STATUSES = {"APPROVED", "REJECTED", "OVERRIDDEN", "IN_PROGRESS"}
 
 class TriageAgent:
-    def __init__(self, db_path: Optional[Path] = None):
+    def __init__(self, db_path: Optional[Path] = None, rules_cfg: Optional[Dict[str, Any]] = None):
         self.root_dir = get_root_dir()
-        self.rules_cfg = load_yaml("configs/agent_rules.yaml")
+        self.rules_cfg = rules_cfg or load_yaml("configs/agent_rules.yaml")
         self.sensor_cfg = load_yaml("configs/sensor_map.yaml")
         self.rules_version = self.rules_cfg.get("rules_version", "2026-10-07.1")
         
         # SQLite Database Path
         self.db_path = db_path or (self.root_dir / "data" / "work_orders.db")
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        if self.db_path != Path(":memory:"):
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
         
         # In-memory caches (synchronized with SQLite)
         self.open_orders: Dict[str, Dict[str, Any]] = {} # engine_id -> order
@@ -30,6 +31,22 @@ class TriageAgent:
 
         self._init_db()
         self._load_from_db()
+
+    def get_base_severity(self, cons_rul: float) -> str:
+        sev_bands = self.rules_cfg.get("severity_bands", {})
+        crit_thresh = sev_bands.get("critical", 15)
+        high_thresh = sev_bands.get("high", 30)
+        med_thresh = sev_bands.get("medium", 60)
+        low_thresh = sev_bands.get("low", 100)
+        if cons_rul <= crit_thresh:
+            return "CRITICAL"
+        elif cons_rul <= high_thresh:
+            return "HIGH"
+        elif cons_rul <= med_thresh:
+            return "MEDIUM"
+        elif cons_rul <= low_thresh:
+            return "LOW"
+        return "HEALTHY"
 
     def _get_db(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.db_path))
@@ -222,7 +239,7 @@ class TriageAgent:
                 json.dumps(order.get("top_sensors", [])),
                 order.get("recommended_action", ""),
                 json.dumps(order.get("decision_trace", [])),
-                order.get("model_version", "unknown"),
+                order.get("model_version") or "unknown",
                 order.get("rules_version", self.rules_version),
                 order.get("exception"),
                 json.dumps(order.get("events", [])),
@@ -621,7 +638,7 @@ class TriageAgent:
             "top_sensors": top_sensors,
             "recommended_action": recommended_action,
             "decision_trace": trace,
-            "model_version": prediction.get("model_version", f"rul-{subset.lower()}@champion"),
+            "model_version": prediction.get("model_version") or "unknown",
             "rules_version": self.rules_version,
             "exception": "; ".join(triggered_exceptions) if triggered_exceptions else None,
             "events": [{

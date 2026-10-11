@@ -37,7 +37,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY configs/ /app/configs/
 COPY scripts/ /app/scripts/
 COPY src/ /app/src/
-COPY artifacts/reports/ /app/artifacts/reports/
+COPY artifacts/ /app/artifacts/
 COPY download_data.py run_app.py Procfile LICENSE README.md /app/
 
 # Copy compiled frontend from Stage 1 into web/dist

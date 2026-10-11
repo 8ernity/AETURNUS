@@ -173,10 +173,10 @@ All metrics below are computed directly on the standard NASA C-MAPSS holdout tes
 
 | Dataset Subset | Operating Conditions | Fault Modes | Test Engines | Champion RMSE | NASA Asymmetric Score | PR-AUC (Fail $\le 30$) | Conformal Coverage | Target Status |
 |:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **FD001** | Single (Sea Level) | HPC Degradation | 100 | **13.43** | **244.5** | **0.963** | 78.0% | <span style="color:#22c55e;font-weight:bold;">TARGET MET</span> |
-| **FD002** | Six Regimes (Multi) | HPC Degradation | 259 | **24.53** | **5,726.4** | **0.998** | 61.8% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
-| **FD003** | Single (Sea Level) | HPC + Fan Degradation | 100 | **14.17** | **349.4** | **0.982** | 60.0% | <span style="color:#22c55e;font-weight:bold;">TARGET MET</span> |
-| **FD004** | Six Regimes (Multi) | HPC + Fan Degradation | 248 | **26.05** | **4,490.4** | **0.974** | 57.3% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
+| **FD001** | Single (Sea Level) | HPC Degradation | 100 | **13.68** | **247.4** | **0.960** | 73.0% | <span style="color:#22c55e;font-weight:bold;">TARGET MET</span> |
+| **FD002** | Six Regimes (Multi) | HPC Degradation | 259 | **25.27** | **7,150.5** | **0.998** | 64.1% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
+| **FD003** | Single (Sea Level) | HPC + Fan Degradation | 100 | **15.16** | **429.7** | **0.980** | 59.0% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
+| **FD004** | Six Regimes (Multi) | HPC + Fan Degradation | 248 | **25.86** | **4,680.1** | **0.970** | 55.2% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
 
 > [!NOTE]
 > In accordance with strict engineering standards, the system reports **authentic benchmark metrics**. Multi-regime subsets (`FD002` and `FD004`) legitimately report "TARGET MISSED" against aggressive enterprise thresholds ($RMSE \le 18.0$), highlighting the genuine difficulty of turbofan degradation across varying altitudes and Mach numbers.
@@ -187,10 +187,10 @@ Evaluated across 3 distinct initialization seeds (42, 43, 44) to guarantee repro
 
 | Subset | RMSE ($mean \pm std$) | MAE ($mean \pm std$) | NASA Score ($mean \pm std$) | PR-AUC ($mean \pm std$) |
 |:---:|:---:|:---:|:---:|:---:|
-| **FD001** | $13.34 \pm 0.12$ | $9.53 \pm 0.21$ | $264.3 \pm 28.1$ | $0.969 \pm 0.008$ |
-| **FD002** | $25.41 \pm 0.67$ | $16.65 \pm 0.36$ | $7,140.9 \pm 1214.5$ | $0.995 \pm 0.002$ |
-| **FD003** | $15.21 \pm 0.80$ | $11.31 \pm 0.72$ | $406.0 \pm 46.8$ | $0.982 \pm 0.003$ |
-| **FD004** | $26.37 \pm 0.38$ | $18.36 \pm 0.39$ | $4,912.6 \pm 564.5$ | $0.966 \pm 0.007$ |
+| **FD001** | $14.82 \pm 0.87$ | $10.37 \pm 0.51$ | $304.2 \pm 48.2$ | $0.964 \pm 0.006$ |
+| **FD002** | $25.39 \pm 0.09$ | $16.62 \pm 0.14$ | $6,816.4 \pm 237.0$ | $0.996 \pm 0.002$ |
+| **FD003** | $16.23 \pm 0.82$ | $11.95 \pm 0.52$ | $548.0 \pm 94.8$ | $0.980 \pm 0.004$ |
+| **FD004** | $26.32 \pm 0.36$ | $18.38 \pm 0.21$ | $5,005.6 \pm 381.5$ | $0.964 \pm 0.010$ |
 
 ### Deep Learning Architecture Comparison
 
@@ -198,12 +198,12 @@ Evaluated on held-out test splits in [src/models/neural_baseline.py](src/models/
 
 | Subset | Model Architecture | Test RMSE | Test MAE | Training Speed / Epoch |
 |:---:|:---|:---:|:---:|:---:|
-| **FD001** | **HistGradientBoosting Quantile (Champion)** | **13.43** | **9.68** | *~37.3s total* |
-| FD001 | 1D-CNN PyTorch | 57.02 | 44.17 | ~10.2s total |
-| FD001 | GRU PyTorch | 50.84 | 39.73 | ~1.2s total |
-| **FD002** | **HistGradientBoosting Quantile (Champion)** | **26.15** | **17.11** | *~59.9s total* |
-| FD002 | 1D-CNN PyTorch | 58.46 | 49.49 | ~8.4s total |
-| FD002 | GRU PyTorch | 56.95 | 48.07 | ~1.9s total |
+| **FD001** | **HistGradientBoosting Quantile (Champion)** | **13.68** | **9.65** | *~37.8s total* |
+| FD001 | 1D-CNN PyTorch (30-Cycle Window) | 15.67 | 11.85 | ~11.8s total |
+| FD001 | GRU PyTorch (30-Cycle Sequence) | 14.29 | 10.58 | ~18.5s total |
+| **FD002** | **HistGradientBoosting Quantile (Champion)** | **25.27** | **16.54** | *~74.2s total* |
+| FD002 | 1D-CNN PyTorch (30-Cycle Window) | 24.69 | 16.62 | ~11.1s total |
+| FD002 | GRU PyTorch (30-Cycle Sequence) | 25.22 | 17.01 | ~19.9s total |
 
 ---
 

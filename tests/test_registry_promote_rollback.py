@@ -58,88 +58,93 @@ def test_rollback_and_promote_swaps_bundle_and_reloads_cached_modelservice():
     active_bundle_path = root_dir / "artifacts" / "models" / f"model_bundle_{subset}.joblib"
     assert active_bundle_path.exists()
 
+    reg_backup = mgr.registry_file.read_text(encoding="utf-8")
+    bundle_backup = active_bundle_path.read_bytes()
+
     # Create two distinct test model versions to test swapping
     v_a = "v_test_a"
     v_b = "v_test_b"
 
-    ms_a = ModelService(subset)
-    ms_a.load()
-    # Mark a custom attribute to verify cache reload
-    ms_a.custom_test_marker = "MARKER_A"
-    bundle_a = ms_a._to_bundle(version=v_a)
-    bundle_a["test_marker"] = "MARKER_A"
     path_a = root_dir / "artifacts" / "models" / f"model_bundle_{subset}_{v_a}.joblib"
-    joblib.dump(bundle_a, path_a)
-
-    ms_b = ModelService(subset)
-    ms_b.load()
-    bundle_b = ms_b._to_bundle(version=v_b)
-    bundle_b["test_marker"] = "MARKER_B"
     path_b = root_dir / "artifacts" / "models" / f"model_bundle_{subset}_{v_b}.joblib"
-    joblib.dump(bundle_b, path_b)
 
-    # Register both in registry
-    mgr.register_model(
-        version=v_a,
-        metrics={"rmse": 12.0, "mae": 8.0, "nasa_score": 200.0},
-        model_path=f"artifacts/models/model_bundle_{subset}_{v_a}.joblib",
-        alias="challenger"
-    )
-    mgr.register_model(
-        version=v_b,
-        metrics={"rmse": 11.5, "mae": 7.5, "nasa_score": 180.0},
-        model_path=f"artifacts/models/model_bundle_{subset}_{v_b}.joblib",
-        alias="challenger"
-    )
+    try:
+        ms_a = ModelService(subset)
+        ms_a.load()
+        ms_a.custom_test_marker = "MARKER_A"
+        bundle_a = ms_a._to_bundle(version=v_a)
+        bundle_a["test_marker"] = "MARKER_A"
+        joblib.dump(bundle_a, path_a)
 
-    # Step 1: Promote v_a
-    resp_promote_a = client.post(f"/api/v1/models/{v_a}/promote?subset={subset}")
-    assert resp_promote_a.status_code == 200
-    assert resp_promote_a.json()["status"] == "promoted"
-    assert resp_promote_a.json()["version"] == v_a
+        ms_b = ModelService(subset)
+        ms_b.load()
+        bundle_b = ms_b._to_bundle(version=v_b)
+        bundle_b["test_marker"] = "MARKER_B"
+        joblib.dump(bundle_b, path_b)
 
-    # Verify active bundle on disk now has MARKER_A
-    loaded_active_a = joblib.load(active_bundle_path)
-    assert loaded_active_a.get("test_marker") == "MARKER_A"
+        # Register both in registry
+        mgr.register_model(
+            version=v_a,
+            metrics={"rmse": 12.0, "mae": 8.0, "nasa_score": 200.0},
+            model_path=f"artifacts/models/model_bundle_{subset}_{v_a}.joblib",
+            alias="challenger"
+        )
+        mgr.register_model(
+            version=v_b,
+            metrics={"rmse": 11.5, "mae": 7.5, "nasa_score": 180.0},
+            model_path=f"artifacts/models/model_bundle_{subset}_{v_b}.joblib",
+            alias="challenger"
+        )
 
-    # Verify cached model_service was reloaded in server
-    assert subset in model_services
-    cached_bundle = model_services[subset]._to_bundle()
-    assert cached_bundle.get("test_marker") == "MARKER_A"
+        # Step 1: Promote v_a
+        resp_promote_a = client.post(f"/api/v1/models/{v_a}/promote?subset={subset}")
+        assert resp_promote_a.status_code == 200
+        assert resp_promote_a.json()["status"] == "promoted"
+        assert resp_promote_a.json()["version"] == v_a
 
-    # Step 2: Promote v_b
-    resp_promote_b = client.post(f"/api/v1/models/{v_b}/promote?subset={subset}")
-    assert resp_promote_b.status_code == 200
-    assert resp_promote_b.json()["status"] == "promoted"
-    assert resp_promote_b.json()["version"] == v_b
+        # Verify active bundle on disk now has MARKER_A
+        loaded_active_a = joblib.load(active_bundle_path)
+        assert loaded_active_a.get("test_marker") == "MARKER_A"
 
-    # Verify active bundle on disk now has MARKER_B
-    loaded_active_b = joblib.load(active_bundle_path)
-    assert loaded_active_b.get("test_marker") == "MARKER_B"
+        # Verify cached model_service was reloaded in server
+        assert subset in model_services
+        cached_bundle = model_services[subset]._to_bundle()
+        assert cached_bundle.get("test_marker") == "MARKER_A"
 
-    # Verify cached model_service in server has MARKER_B
-    cached_bundle_b = model_services[subset]._to_bundle()
-    assert cached_bundle_b.get("test_marker") == "MARKER_B"
+        # Step 2: Promote v_b
+        resp_promote_b = client.post(f"/api/v1/models/{v_b}/promote?subset={subset}")
+        assert resp_promote_b.status_code == 200
+        assert resp_promote_b.json()["status"] == "promoted"
+        assert resp_promote_b.json()["version"] == v_b
 
-    # Step 3: Rollback to previous (which should be v_a)
-    resp_rollback = client.post(f"/api/v1/models/rollback?subset={subset}&target_name={v_a}")
-    assert resp_rollback.status_code == 200
-    assert resp_rollback.json()["status"] == "rolled_back"
-    assert resp_rollback.json()["version"] == v_a
+        # Verify active bundle on disk now has MARKER_B
+        loaded_active_b = joblib.load(active_bundle_path)
+        assert loaded_active_b.get("test_marker") == "MARKER_B"
 
-    # Verify active bundle swapped back to MARKER_A
-    loaded_active_rolled = joblib.load(active_bundle_path)
-    assert loaded_active_rolled.get("test_marker") == "MARKER_A"
+        # Verify cached model_service in server has MARKER_B
+        cached_bundle_b = model_services[subset]._to_bundle()
+        assert cached_bundle_b.get("test_marker") == "MARKER_B"
 
-    # Verify cached model_service reloaded with MARKER_A
-    cached_rolled = model_services[subset]._to_bundle()
-    assert cached_rolled.get("test_marker") == "MARKER_A"
+        # Step 3: Rollback to previous (which should be v_a)
+        resp_rollback = client.post(f"/api/v1/models/rollback?subset={subset}&target_name={v_a}")
+        assert resp_rollback.status_code == 200
+        assert resp_rollback.json()["status"] == "rolled_back"
+        assert resp_rollback.json()["version"] == v_a
 
-    # Cleanup test bundles and registry entries
-    if path_a.exists():
-        path_a.unlink()
-    if path_b.exists():
-        path_b.unlink()
-    # Restore v1.0 as active champion
-    mgr.promote_version("v1.0")
-    client.post(f"/api/v1/models/v1.0/promote?subset={subset}")
+        # Verify active bundle swapped back to MARKER_A
+        loaded_active_rolled = joblib.load(active_bundle_path)
+        assert loaded_active_rolled.get("test_marker") == "MARKER_A"
+
+        # Verify cached model_service reloaded with MARKER_A
+        cached_rolled = model_services[subset]._to_bundle()
+        assert cached_rolled.get("test_marker") == "MARKER_A"
+
+    finally:
+        # Cleanup test bundles and restore original registry
+        if path_a.exists():
+            path_a.unlink()
+        if path_b.exists():
+            path_b.unlink()
+        active_bundle_path.write_bytes(bundle_backup)
+        mgr.registry_file.write_text(reg_backup, encoding="utf-8")
+        model_services[subset] = ModelService(subset).load()

@@ -4,26 +4,28 @@
     {
       "model_name": "HistGradientBoosting Quantile (Champion)",
       "architecture": "GBDT",
-      "rmse": 26.1562,
-      "mae": 18.3163,
-      "nasa_score": 4536.87,
-      "train_time_sec": 66.14
+      "rmse": 25.8579,
+      "mae": 18.0853,
+      "nasa_score": 4680.06,
+      "train_time_sec": 79.39
     },
     {
-      "model_name": "1D-CNN PyTorch",
+      "model_name": "1D-CNN PyTorch (30-Cycle Window)",
       "architecture": "CNN",
-      "rmse": 56.1182,
-      "mae": 47.6606,
-      "nasa_score": 141298.29,
-      "train_time_sec": 8.19
+      "window_size": 30,
+      "rmse": 24.91,
+      "mae": 18.1,
+      "nasa_score": 4067.04,
+      "train_time_sec": 11.57
     },
     {
-      "model_name": "GRU PyTorch",
+      "model_name": "GRU PyTorch (30-Cycle Sequence)",
       "architecture": "GRU",
-      "rmse": 65.8355,
-      "mae": 55.1313,
-      "nasa_score": 3452492.86,
-      "train_time_sec": 1.51
+      "window_size": 30,
+      "rmse": 26.11,
+      "mae": 18.09,
+      "nasa_score": 4684.59,
+      "train_time_sec": 24.81
     }
   ]
 }

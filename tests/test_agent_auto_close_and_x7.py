@@ -144,3 +144,19 @@ def test_x7_real_exceptions(agent):
     ord_flag, tr_flag = agent.evaluate_engine_cycle(pred_flag_gap, data_quality_flags={"has_gap": True, "cycle_gap": 8})
     assert ord_flag["status"] == "NEEDS_REVIEW"
     assert "exception:X7" in tr_flag
+
+    # 5. X7: Missing model version defaults to 'unknown' before persisting
+    pred_no_model = {
+        "engine_id": "ENG-X7-NOMODEL", "unit": 9, "subset": "FD001", "cycle": 30,
+        "conservative_rul": 80.0, "rul_p10": 75.0, "rul_p50": 85.0, "rul_p90": 95.0,
+        "fail_prob_30": 0.05, "anomaly_score": 0.15
+    }
+    ord_no_model, tr_no_model = agent.evaluate_engine_cycle(pred_no_model)
+    assert ord_no_model["status"] == "NEEDS_REVIEW"
+    assert "exception:X7" in tr_no_model
+    assert ord_no_model["model_version"] == "unknown"
+
+    with agent._get_db() as conn:
+        persisted = conn.execute("SELECT model_version FROM work_orders WHERE engine_id = 'ENG-X7-NOMODEL'").fetchone()
+        assert persisted is not None
+        assert persisted["model_version"] == "unknown"

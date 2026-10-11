@@ -6,6 +6,9 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent
 
 def main():
+    from scripts.entrypoint import ensure_data_and_models
+    ensure_data_and_models()
+
     print("=" * 60)
     print("  AETURNUS: Autonomous Equipment Tracking and Uptime Restoration")
     print("  Networked Unified Systems · NASA C-MAPSS Benchmark")

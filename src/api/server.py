@@ -288,15 +288,38 @@ async def replay_ticker_loop():
             print(f"Replay ticker loop error: {e}")
             await asyncio.sleep(0.5)
 
+_system_ready = False
+
+def is_system_ready() -> bool:
+    global _system_ready
+    if _system_ready:
+        return True
+    train_file = ROOT_DIR / "data" / "processed" / "FD001" / "train.parquet"
+    test_file = ROOT_DIR / "data" / "processed" / "FD001" / "test.parquet"
+    model_file = ROOT_DIR / "artifacts" / "models" / "model_bundle_FD001.joblib"
+    if train_file.exists() and test_file.exists() and model_file.exists():
+        _system_ready = True
+        return True
+    return False
+
 @app.on_event("startup")
 async def startup_event():
-    get_model_service(current_subset)
+    try:
+        ms = get_model_service(current_subset)
+        df = get_test_df(current_subset)
+        last_indices = df.groupby("unit")["cycle"].idxmax()
+        records = df.loc[last_indices].sort_values("unit").to_dict("records")
+        list(_fleet_executor.map(lambda r: get_cached_prediction(ms, r, current_subset), records))
+    except Exception as e:
+        print(f"Startup precomputation notice: {e}")
     asyncio.create_task(replay_ticker_loop())
 
 # ----------------- REST Endpoints -----------------
 
 @app.get("/api/v1/health")
 def health():
+    if not is_system_ready():
+        raise HTTPException(status_code=503, detail="System initializing: data and models not ready yet")
     return {"status": "ok", "timestamp": time.time(), "version": "1.0.0"}
 
 @app.get("/api/v1/fleet")
@@ -328,7 +351,7 @@ def get_fleet(subset: str = Query(default="FD001")):
 
         order = triage_agent.open_orders.get(pred["engine_id"])
         c_rul = float(pred["conservative_rul"])
-        severity = order["severity"] if order else ("CRITICAL" if c_rul <= 15 else "HIGH" if c_rul <= 30 else "MEDIUM" if c_rul <= 60 else "LOW" if c_rul <= 100 else "HEALTHY")
+        severity = order["severity"] if order else triage_agent.get_base_severity(c_rul)
         severity_counts[severity] = severity_counts.get(severity, 0) + 1
         total_rul += c_rul
 
@@ -526,6 +549,15 @@ def simulate_what_if(req: WhatIfRequest, subset: str = Query(default="FD001")):
     ms = get_model_service(subset)
     last_cycles = df.groupby("unit")["cycle"].max()
 
+    sim_cfg = json.loads(json.dumps(triage_agent.rules_cfg))
+    sim_cfg.setdefault("severity_bands", {})
+    sim_cfg["severity_bands"]["critical"] = req.critical_threshold
+    sim_cfg["severity_bands"]["high"] = req.high_threshold
+    sim_cfg.setdefault("escalation", {})
+    sim_cfg["escalation"]["anomaly_threshold"] = req.anomaly_threshold
+
+    sim_agent = TriageAgent(db_path=Path(":memory:"), rules_cfg=sim_cfg)
+
     created_count = 0
     simulated_severities = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
 
@@ -533,20 +565,12 @@ def simulate_what_if(req: WhatIfRequest, subset: str = Query(default="FD001")):
         max_c = last_cycles[u]
         row = df[(df["unit"] == u) & (df["cycle"] == max_c)].iloc[0].to_dict()
         pred = ms.predict_point(row)
-        
-        c_rul = pred["conservative_rul"]
-        anom = pred["anomaly_score"]
-
-        if c_rul <= req.critical_threshold or (anom >= req.anomaly_threshold and c_rul <= 25):
-            simulated_severities["CRITICAL"] += 1
+        order, _ = sim_agent.evaluate_engine_cycle(pred)
+        sev = order["severity"] if order else sim_agent.get_base_severity(pred["conservative_rul"])
+        if sev in simulated_severities:
+            simulated_severities[sev] += 1
+        if order is not None:
             created_count += 1
-        elif c_rul <= req.high_threshold:
-            simulated_severities["HIGH"] += 1
-            created_count += 1
-        elif c_rul <= 60:
-            simulated_severities["MEDIUM"] += 1
-        else:
-            simulated_severities["LOW"] += 1
 
     return {
         "subset": subset,
@@ -981,7 +1005,7 @@ async def execute_self_healing_action(
         order["status"] = "IN_PROGRESS"
         order["events"].append({
             "cycle": cycle,
-            "event": f"Autonomous Self-Healing: {res['title']} executed (+{res['life_extension_pct']:.0f}% RUL life extension).",
+            "event": f"Action Executed: {res['title']} - {res['recommended_action']}",
             "actor": "SelfHealingEngine"
         })
         triage_agent._persist_order(order)

@@ -1,7 +1,13 @@
+import sys
 import json
 import time
 import pandas as pd
 from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 from src.common.utils import get_root_dir
 from src.models.model_service import ModelService
 from src.ingest.loader import CMAPSSLoader

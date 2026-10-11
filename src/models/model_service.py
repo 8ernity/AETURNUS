@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
+import sklearn
 from sklearn.ensemble import IsolationForest, HistGradientBoostingRegressor, HistGradientBoostingClassifier
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import precision_recall_curve, auc, average_precision_score
@@ -536,6 +537,7 @@ class ModelService:
         bundle = {
             "subset": self.subset,
             "version": version or getattr(self, "version", "v1.0"),
+            "sklearn_version": sklearn.__version__,
             "feature_cols": self.feature_cols,
             "anomaly_detector": self.anomaly_detector,
             "rul_p10_model": self.rul_p10_model,
@@ -605,6 +607,16 @@ class ModelService:
         if not file_path.exists():
             raise FileNotFoundError(f"Model bundle not found at {file_path}")
         bundle = joblib.load(file_path)
+
+        bundle_sklearn = bundle.get("sklearn_version")
+        if bundle_sklearn and bundle_sklearn != sklearn.__version__:
+            import warnings
+            warnings.warn(
+                f"Model bundle '{file_path.name}' was serialized with scikit-learn {bundle_sklearn}, "
+                f"but active environment has {sklearn.__version__}."
+            )
+        self.sklearn_version = bundle_sklearn or sklearn.__version__
+
         self.feature_cols = bundle["feature_cols"]
         self.anomaly_detector = bundle["anomaly_detector"]
         self.rul_p10_model = bundle["rul_p10_model"]

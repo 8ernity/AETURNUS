@@ -4,56 +4,58 @@
       "subset": "FD001",
       "condition": "Single (Sea Level)",
       "faults": "1 (HPC Degradation)",
-      "rmse": 13.4289,
-      "mae": 9.683,
-      "nasa_score": 244.48,
-      "pr_auc": 0.963,
-      "train_time_sec": 35.27,
+      "rmse": 13.6786,
+      "mae": 9.6546,
+      "nasa_score": 247.45,
+      "pr_auc": 0.96,
+      "train_time_sec": 37.8,
       "target_rmse": 14.0,
       "status": "Target Met",
-      "interval_coverage": 0.78,
-      "mean_interval_width": 30.96,
+      "interval_coverage": 0.73,
+      "mean_interval_width": 27.06,
       "multi_seed": {
         "seeds": [
           42,
           43,
           44
         ],
-        "rmse_mean": 13.34,
-        "rmse_std": 0.12,
-        "mae_mean": 9.53,
-        "mae_std": 0.21,
-        "nasa_mean": 264.31,
-        "nasa_std": 28.05,
-        "pr_auc_mean": 0.969,
-        "pr_auc_std": 0.008,
-        "coverage_mean": 0.7967,
-        "coverage_std": 0.0236
+        "rmse_mean": 14.82,
+        "rmse_std": 0.87,
+        "mae_mean": 10.37,
+        "mae_std": 0.51,
+        "nasa_mean": 304.2,
+        "nasa_std": 48.19,
+        "pr_auc_mean": 0.964,
+        "pr_auc_std": 0.006,
+        "coverage_mean": 0.76,
+        "coverage_std": 0.0245
       },
       "deep_comparison": [
         {
           "model_name": "HistGradientBoosting Quantile (Champion)",
           "architecture": "GBDT",
-          "rmse": 13.4289,
-          "mae": 9.683,
-          "nasa_score": 244.48,
-          "train_time_sec": 37.29
+          "rmse": 13.6786,
+          "mae": 9.6546,
+          "nasa_score": 247.45,
+          "train_time_sec": 37.8
         },
         {
-          "model_name": "1D-CNN PyTorch",
+          "model_name": "1D-CNN PyTorch (30-Cycle Window)",
           "architecture": "CNN",
-          "rmse": 57.0219,
-          "mae": 44.1684,
-          "nasa_score": 520619.12,
-          "train_time_sec": 10.21
+          "window_size": 30,
+          "rmse": 15.67,
+          "mae": 11.85,
+          "nasa_score": 383.75,
+          "train_time_sec": 11.76
         },
         {
-          "model_name": "GRU PyTorch",
+          "model_name": "GRU PyTorch (30-Cycle Sequence)",
           "architecture": "GRU",
-          "rmse": 50.8394,
-          "mae": 39.7308,
-          "nasa_score": 199533.63,
-          "train_time_sec": 1.21
+          "window_size": 30,
+          "rmse": 14.29,
+          "mae": 10.58,
+          "nasa_score": 325.33,
+          "train_time_sec": 18.52
         }
       ]
     },
@@ -61,56 +63,58 @@
       "subset": "FD002",
       "condition": "Six Regimes",
       "faults": "1 (HPC Degradation)",
-      "rmse": 24.5301,
-      "mae": 16.2273,
-      "nasa_score": 5726.39,
+      "rmse": 25.2748,
+      "mae": 16.5372,
+      "nasa_score": 7150.49,
       "pr_auc": 0.998,
-      "train_time_sec": 75.91,
+      "train_time_sec": 74.25,
       "target_rmse": 22.0,
       "status": "Target Missed",
-      "interval_coverage": 0.6178,
-      "mean_interval_width": 30.78,
+      "interval_coverage": 0.6409,
+      "mean_interval_width": 31.35,
       "multi_seed": {
         "seeds": [
           42,
           43,
           44
         ],
-        "rmse_mean": 25.41,
-        "rmse_std": 0.67,
-        "mae_mean": 16.65,
-        "mae_std": 0.36,
-        "nasa_mean": 7140.88,
-        "nasa_std": 1214.47,
-        "pr_auc_mean": 0.995,
+        "rmse_mean": 25.39,
+        "rmse_std": 0.09,
+        "mae_mean": 16.62,
+        "mae_std": 0.14,
+        "nasa_mean": 6816.43,
+        "nasa_std": 237.03,
+        "pr_auc_mean": 0.996,
         "pr_auc_std": 0.002,
-        "coverage_mean": 0.6229,
-        "coverage_std": 0.0224
+        "coverage_mean": 0.6461,
+        "coverage_std": 0.0048
       },
       "deep_comparison": [
         {
           "model_name": "HistGradientBoosting Quantile (Champion)",
           "architecture": "GBDT",
-          "rmse": 26.1497,
-          "mae": 17.1083,
-          "nasa_score": 8691.81,
-          "train_time_sec": 59.86
+          "rmse": 25.2748,
+          "mae": 16.5372,
+          "nasa_score": 7150.49,
+          "train_time_sec": 74.25
         },
         {
-          "model_name": "1D-CNN PyTorch",
+          "model_name": "1D-CNN PyTorch (30-Cycle Window)",
           "architecture": "CNN",
-          "rmse": 58.456,
-          "mae": 49.4929,
-          "nasa_score": 661288.1,
-          "train_time_sec": 8.36
+          "window_size": 30,
+          "rmse": 24.69,
+          "mae": 16.62,
+          "nasa_score": 5705.12,
+          "train_time_sec": 11.14
         },
         {
-          "model_name": "GRU PyTorch",
+          "model_name": "GRU PyTorch (30-Cycle Sequence)",
           "architecture": "GRU",
-          "rmse": 56.9482,
-          "mae": 48.0659,
-          "nasa_score": 434299.81,
-          "train_time_sec": 1.93
+          "window_size": 30,
+          "rmse": 25.22,
+          "mae": 17.01,
+          "nasa_score": 5180.32,
+          "train_time_sec": 19.87
         }
       ]
     },
@@ -118,56 +122,58 @@
       "subset": "FD003",
       "condition": "Single",
       "faults": "2 (HPC + Fan)",
-      "rmse": 14.1655,
-      "mae": 10.3131,
-      "nasa_score": 349.36,
-      "pr_auc": 0.982,
-      "train_time_sec": 46.58,
+      "rmse": 15.1575,
+      "mae": 11.3179,
+      "nasa_score": 429.7,
+      "pr_auc": 0.98,
+      "train_time_sec": 42.6,
       "target_rmse": 15.0,
-      "status": "Target Met",
-      "interval_coverage": 0.6,
-      "mean_interval_width": 24.05,
+      "status": "Target Missed",
+      "interval_coverage": 0.59,
+      "mean_interval_width": 23.98,
       "multi_seed": {
         "seeds": [
           42,
           43,
           44
         ],
-        "rmse_mean": 15.21,
-        "rmse_std": 0.8,
-        "mae_mean": 11.31,
-        "mae_std": 0.72,
-        "nasa_mean": 406.04,
-        "nasa_std": 46.82,
-        "pr_auc_mean": 0.982,
-        "pr_auc_std": 0.003,
-        "coverage_mean": 0.5933,
-        "coverage_std": 0.0249
+        "rmse_mean": 16.23,
+        "rmse_std": 0.82,
+        "mae_mean": 11.95,
+        "mae_std": 0.52,
+        "nasa_mean": 547.97,
+        "nasa_std": 94.79,
+        "pr_auc_mean": 0.98,
+        "pr_auc_std": 0.004,
+        "coverage_mean": 0.5833,
+        "coverage_std": 0.0094
       },
       "deep_comparison": [
         {
           "model_name": "HistGradientBoosting Quantile (Champion)",
           "architecture": "GBDT",
-          "rmse": 16.1257,
-          "mae": 11.9593,
-          "nasa_score": 464.02,
-          "train_time_sec": 40.79
+          "rmse": 15.1575,
+          "mae": 11.3179,
+          "nasa_score": 429.7,
+          "train_time_sec": 42.6
         },
         {
-          "model_name": "1D-CNN PyTorch",
+          "model_name": "1D-CNN PyTorch (30-Cycle Window)",
           "architecture": "CNN",
-          "rmse": 42.9536,
-          "mae": 36.5813,
-          "nasa_score": 8037.34,
-          "train_time_sec": 8.17
+          "window_size": 30,
+          "rmse": 17.05,
+          "mae": 12.18,
+          "nasa_score": 786.32,
+          "train_time_sec": 7.52
         },
         {
-          "model_name": "GRU PyTorch",
+          "model_name": "GRU PyTorch (30-Cycle Sequence)",
           "architecture": "GRU",
-          "rmse": 64.3235,
-          "mae": 52.4873,
-          "nasa_score": 1330131.67,
-          "train_time_sec": 1.18
+          "window_size": 30,
+          "rmse": 14.01,
+          "mae": 10.22,
+          "nasa_score": 323.37,
+          "train_time_sec": 18.12
         }
       ]
     },
@@ -175,56 +181,58 @@
       "subset": "FD004",
       "condition": "Six Regimes",
       "faults": "2 (HPC + Fan)",
-      "rmse": 26.0548,
-      "mae": 17.9162,
-      "nasa_score": 4490.35,
-      "pr_auc": 0.974,
-      "train_time_sec": 85.2,
+      "rmse": 25.8579,
+      "mae": 18.0853,
+      "nasa_score": 4680.06,
+      "pr_auc": 0.97,
+      "train_time_sec": 79.39,
       "target_rmse": 22.0,
       "status": "Target Missed",
-      "interval_coverage": 0.5726,
-      "mean_interval_width": 31.58,
+      "interval_coverage": 0.5524,
+      "mean_interval_width": 31.52,
       "multi_seed": {
         "seeds": [
           42,
           43,
           44
         ],
-        "rmse_mean": 26.37,
-        "rmse_std": 0.38,
-        "mae_mean": 18.36,
-        "mae_std": 0.39,
-        "nasa_mean": 4912.55,
-        "nasa_std": 564.51,
-        "pr_auc_mean": 0.966,
-        "pr_auc_std": 0.007,
-        "coverage_mean": 0.5215,
-        "coverage_std": 0.0447
+        "rmse_mean": 26.32,
+        "rmse_std": 0.36,
+        "mae_mean": 18.38,
+        "mae_std": 0.21,
+        "nasa_mean": 5005.63,
+        "nasa_std": 381.48,
+        "pr_auc_mean": 0.964,
+        "pr_auc_std": 0.01,
+        "coverage_mean": 0.5578,
+        "coverage_std": 0.005
       },
       "deep_comparison": [
         {
           "model_name": "HistGradientBoosting Quantile (Champion)",
           "architecture": "GBDT",
-          "rmse": 26.1562,
-          "mae": 18.3163,
-          "nasa_score": 4536.87,
-          "train_time_sec": 66.14
+          "rmse": 25.8579,
+          "mae": 18.0853,
+          "nasa_score": 4680.06,
+          "train_time_sec": 79.39
         },
         {
-          "model_name": "1D-CNN PyTorch",
+          "model_name": "1D-CNN PyTorch (30-Cycle Window)",
           "architecture": "CNN",
-          "rmse": 56.1182,
-          "mae": 47.6606,
-          "nasa_score": 141298.29,
-          "train_time_sec": 8.19
+          "window_size": 30,
+          "rmse": 24.91,
+          "mae": 18.1,
+          "nasa_score": 4067.04,
+          "train_time_sec": 11.57
         },
         {
-          "model_name": "GRU PyTorch",
+          "model_name": "GRU PyTorch (30-Cycle Sequence)",
           "architecture": "GRU",
-          "rmse": 65.8355,
-          "mae": 55.1313,
-          "nasa_score": 3452492.86,
-          "train_time_sec": 1.51
+          "window_size": 30,
+          "rmse": 26.11,
+          "mae": 18.09,
+          "nasa_score": 4684.59,
+          "train_time_sec": 24.81
         }
       ]
     }

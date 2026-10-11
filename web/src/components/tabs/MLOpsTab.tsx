@@ -167,28 +167,28 @@ export const MLOpsTab: React.FC<MLOpsTabProps> = ({ currentSubset }) => {
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-5 h-5 text-cyan-400" />
             <div>
-              <h3 className="font-bold text-sm text-white">Autonomous Self-Healing Closed-Loop Control</h3>
+              <h3 className="font-bold text-sm text-white">Rule-Based Closed-Loop Remediation</h3>
               <p className="text-xs text-slate-400">
-                Executes dynamic thrust derates, active cooling bleed modulation, and zero-AOG logistics reservations.
+                Executes verified rule-based maintenance prescriptions and logistics dispatch on work orders.
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => handleExecuteHealing("DYNAMIC_DERATE")}
+              onClick={() => handleExecuteHealing("MAINTENANCE_INSPECTION")}
               disabled={isHealing}
               className="text-xs bg-cyan-600/20 hover:bg-cyan-600/40 text-cyan-300 border border-cyan-500/40 px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 transition-colors"
             >
               <Flame className="w-3.5 h-3.5" />
-              <span>Apply Dynamic Derate</span>
+              <span>Dispatch Inspection Order</span>
             </button>
             <button
-              onClick={() => handleExecuteHealing("COOLING_BLEED_MODULATION")}
+              onClick={() => handleExecuteHealing("LOGISTICS_DISPATCH")}
               disabled={isHealing}
               className="text-xs bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/40 px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 transition-colors"
             >
               <RefreshCw className="w-3.5 h-3.5" />
-              <span>Modulate Bleed Vane</span>
+              <span>Stage Replacement Parts</span>
             </button>
           </div>
         </div>
@@ -199,7 +199,7 @@ export const MLOpsTab: React.FC<MLOpsTabProps> = ({ currentSubset }) => {
             <div>
               <span className="text-cyan-400 font-bold block">{healingFeedback.title} Executed!</span>
               <span className="text-slate-300">
-                Engine {healingFeedback.engine_id} · Subsystem {healingFeedback.subsystem} · RUL extended from {healingFeedback.original_rul} to <b className="text-emerald-300">{healingFeedback.extended_rul} cycles</b> (+{healingFeedback.life_extension_pct}%).
+                Engine {healingFeedback.engine_id} · Subsystem {healingFeedback.subsystem} · Recommended Action: <b className="text-emerald-300">{healingFeedback.recommended_action || healingFeedback.title}</b>
               </span>
             </div>
             <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
@@ -218,9 +218,7 @@ export const MLOpsTab: React.FC<MLOpsTabProps> = ({ currentSubset }) => {
                   <th className="p-3">Engine</th>
                   <th className="p-3">Remediation Type</th>
                   <th className="p-3">Subsystem</th>
-                  <th className="p-3 font-mono">Derate</th>
-                  <th className="p-3 font-mono">Life Gain</th>
-                  <th className="p-3 font-mono">Extended RUL</th>
+                  <th className="p-3">Recommended Action</th>
                   <th className="p-3">Status</th>
                 </tr>
               </thead>
@@ -231,9 +229,7 @@ export const MLOpsTab: React.FC<MLOpsTabProps> = ({ currentSubset }) => {
                     <td className="p-3 text-cyan-300">{act.engine_id}</td>
                     <td className="p-3 font-sans text-slate-300">{act.action_type.replace(/_/g, " ")}</td>
                     <td className="p-3 text-purple-300">{act.subsystem}</td>
-                    <td className="p-3 text-amber-300">-{act.derate_pct}%</td>
-                    <td className="p-3 text-emerald-300 font-bold">+{act.life_extension_pct}%</td>
-                    <td className="p-3 text-emerald-400 font-bold">{act.extended_rul} cyc</td>
+                    <td className="p-3 font-sans text-slate-200">{act.recommended_action || "Routine rule-based maintenance"}</td>
                     <td className="p-3">
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                         {act.status}
