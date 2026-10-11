@@ -38,6 +38,10 @@ jobs:
           npm ci || npm install
           npm run build
 
+      - name: Build Processed Data
+        run: |
+          python -m scripts.build_all_data
+
       - name: Run CI Smoke Test
         run: |
           python scripts/ci_smoke_test.py

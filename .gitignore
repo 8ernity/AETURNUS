@@ -52,5 +52,6 @@ uploads/
 mlruns/
 artifacts/models/*_v*.joblib
 
-# Product Requirements Documents
+# Product Requirements Documents & Case Studies
 PRD*.pdf
+Case Study*.pdf
