@@ -47,3 +47,6 @@ data/processed/
 data/uploads/
 mlruns/
 artifacts/models/*_v*.joblib
+
+# Product Requirements Documents
+PRD*.pdf
