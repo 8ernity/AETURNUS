@@ -532,7 +532,94 @@ def take_human_action(work_order_id: str, req: HumanActionRequest):
     )
     if not success:
         raise HTTPException(status_code=400, detail="Unable to apply action to work order")
-    return {"status": "success", "action": req.action, "work_order_id": work_order_id}
+@app.post("/api/v1/work-orders/{work_order_id}/advance")
+def advance_work_order(work_order_id: str, reason: str = Query(default="Stage progression")):
+    success = triage_agent.human_action(
+        work_order_id, "ADVANCE", reason=reason, current_cycle=replay_state.current_cycle
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail="Unable to advance work order stage")
+    return {"status": "success", "work_order_id": work_order_id}
+
+@app.post("/api/v1/work-orders/{work_order_id}/derate")
+def apply_derate(work_order_id: str, reason: str = Query(default="Flight operations FADEC derate authorization")):
+    success = triage_agent.human_action(
+        work_order_id, "APPLY_DERATE", reason=reason, current_cycle=replay_state.current_cycle
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail="Unable to apply derate to work order")
+    return {"status": "success", "work_order_id": work_order_id}
+
+@app.get("/api/v1/work-orders/{work_order_id}/airworthiness-report.pdf")
+def download_airworthiness_report_by_wo(work_order_id: str):
+    from src.agent.aerospace_pdm import generate_airworthiness_pdf
+    target_wo = None
+    for o in triage_agent.open_orders.values():
+        if o["work_order_id"] == work_order_id:
+            target_wo = o
+            break
+    if not target_wo:
+        for h_list in triage_agent.closed_orders_history.values():
+            for o in h_list:
+                if o["work_order_id"] == work_order_id:
+                    target_wo = o
+                    break
+            if target_wo:
+                break
+    if not target_wo:
+        raise HTTPException(status_code=404, detail=f"Work order {work_order_id} not found")
+
+    engine_id = target_wo["engine_id"]
+    pdf_bytes = generate_airworthiness_pdf(engine_id, target_wo)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="airworthiness_report_{work_order_id}.pdf"'}
+    )
+
+@app.get("/api/v1/engines/{engine_id}/airworthiness-report.pdf")
+def download_airworthiness_report_by_engine(engine_id: str, subset: str = Query(default="FD001")):
+    from src.agent.aerospace_pdm import generate_airworthiness_pdf, calculate_throttle_derating, generate_parts_bom
+    target_wo = triage_agent.open_orders.get(engine_id)
+    if not target_wo:
+        closed = triage_agent.closed_orders_history.get(engine_id, [])
+        if closed:
+            target_wo = closed[-1]
+
+    if not target_wo:
+        df = get_test_df(subset)
+        unit = int(engine_id.split("-")[-1]) if "-" in engine_id else 1
+        unit_df = df[df["unit"] == unit]
+        cycle = int(unit_df["cycle"].max()) if not unit_df.empty else 100
+        ms = get_model_service(subset)
+        row = unit_df[unit_df["cycle"] == cycle].iloc[0].to_dict() if not unit_df.empty else {}
+        pred = ms.predict_point(row) if row else {"conservative_rul": 55.0, "rul_p10": 50.0, "rul_p50": 60.0, "rul_p90": 70.0}
+        target_wo = {
+            "work_order_id": f"WO-{engine_id}-CERT",
+            "engine_id": engine_id,
+            "unit": unit,
+            "subset": subset,
+            "created_at_cycle": cycle,
+            "current_cycle": cycle,
+            "severity": "LOW",
+            "status": "AIRWORTHY_CLOSED",
+            "conservative_rul": pred.get("conservative_rul", 50.0),
+            "rul_p10": pred.get("rul_p10", 45.0),
+            "rul_p50": pred.get("rul_p50", 55.0),
+            "rul_p90": pred.get("rul_p90", 65.0),
+            "suspected_subsystem": "HPC",
+            "top_sensors": pred.get("top_sensors", ["s9", "s14"]),
+            "events": [{"cycle": cycle, "actor": "Inspector", "event": "Routine airworthiness baseline certified"}],
+            "derate_plan": calculate_throttle_derating(pred.get("conservative_rul", 50.0), "LOW", "HPC"),
+            "parts_bom": generate_parts_bom(f"WO-{engine_id}-CERT", pred.get("top_sensors", ["s9", "s14"]), "HPC")
+        }
+
+    pdf_bytes = generate_airworthiness_pdf(engine_id, target_wo)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="airworthiness_report_{engine_id}.pdf"'}
+    )
 
 # ----------------- Rules & What-If Simulator -----------------
 @app.get("/api/v1/rules")

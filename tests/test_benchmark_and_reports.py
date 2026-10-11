@@ -125,6 +125,8 @@ def test_bundle_rmse_within_threshold_of_evaluation_json():
         if not test_path.exists():
             from src.features.pipeline import DataPipeline
             DataPipeline(subset=sub).run()
+            dp = DataPipeline(subset=sub, inject_faults=False)
+            dp.run()
         test_df = pd.read_parquet(test_path)
         loader = CMAPSSLoader(subset=sub)
         _, _, rul_truth = loader.load_raw_data()

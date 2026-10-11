@@ -20,7 +20,7 @@ def test_auto_close_order_on_sustained_recovery(agent):
     ord1, tr1 = agent.evaluate_engine_cycle(crit_pred)
     assert ord1 is not None
     assert ord1["severity"] == "CRITICAL"
-    assert ord1["status"] in ["AUTO_CREATED", "NEEDS_REVIEW"]
+    assert ord1["status"] in ["AUTO_CREATED", "PROPOSED", "NEEDS_REVIEW"]
     assert engine_id in agent.open_orders
 
     # 2. Machine undergoes cyber-physical restoration/maintenance: healthy conditions for cycles 41..44

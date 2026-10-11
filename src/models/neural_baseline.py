@@ -1,19 +1,32 @@
 import time
 import numpy as np
 import pandas as pd
-import torch
-import torch.nn as nn
-from torch.utils.data import TensorDataset, DataLoader
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 from sklearn.preprocessing import StandardScaler
 from src.common.utils import calculate_metrics
 
-class WindowedCNN1DRegressor(nn.Module):
+try:
+    import torch
+    import torch.nn as nn
+    from torch.utils.data import TensorDataset, DataLoader
+    HAS_TORCH = True
+except ImportError:
+    torch = None
+    nn = None
+    TensorDataset = None
+    DataLoader = None
+    HAS_TORCH = False
+
+ModuleBase = nn.Module if nn is not None else object
+
+class WindowedCNN1DRegressor(ModuleBase):
     """
     1D-CNN Sequence Architecture for Turbofan RUL Prediction.
     Expects scaled windowed inputs of shape (batch, seq_len, features) or (batch, features).
     """
     def __init__(self, num_features: int = 14, input_dim: int = None, window_size: int = 30):
+        if not HAS_TORCH:
+            raise ImportError("PyTorch is required to instantiate WindowedCNN1DRegressor.")
         super().__init__()
         feats = input_dim if input_dim is not None else num_features
         self.conv1 = nn.Conv1d(feats, 64, kernel_size=3, padding=1)
@@ -30,7 +43,7 @@ class WindowedCNN1DRegressor(nn.Module):
             nn.Linear(32, 1)
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: Any) -> Any:
         if x.ndim == 2:
             x = x.unsqueeze(1)
         # x: (batch, seq_len, features) -> transpose to (batch, features, seq_len)
@@ -43,12 +56,14 @@ class WindowedCNN1DRegressor(nn.Module):
         return self.fc(out).squeeze(-1)
 
 
-class WindowedGRURegressor(nn.Module):
+class WindowedGRURegressor(ModuleBase):
     """
     Sequence GRU Architecture for Turbofan RUL Prediction.
     Expects scaled 30-cycle windowed inputs of shape (batch, seq_len=30, features) or (batch, features).
     """
     def __init__(self, num_features: int = 14, input_dim: int = None, hidden_dim: int = 64, num_layers: int = 2):
+        if not HAS_TORCH:
+            raise ImportError("PyTorch is required to instantiate WindowedGRURegressor.")
         super().__init__()
         feats = input_dim if input_dim is not None else num_features
         self.gru = nn.GRU(
@@ -65,7 +80,7 @@ class WindowedGRURegressor(nn.Module):
             nn.Linear(32, 1)
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: Any) -> Any:
         if x.ndim == 2:
             x = x.unsqueeze(1)
         # x: (batch, seq_len, features)
@@ -86,6 +101,8 @@ class NeuralRULBenchmark:
     using scaled inputs and 30-cycle sequence windows.
     """
     def __init__(self, feature_cols: List[str], window_size: int = 30, seed: int = 42):
+        if not HAS_TORCH:
+            raise ImportError("PyTorch is required to instantiate NeuralRULBenchmark.")
         self.feature_cols = feature_cols
         self.window_size = window_size
         self.seed = seed
@@ -123,29 +140,24 @@ class NeuralRULBenchmark:
                     seq = np.vstack([pad, scaled_feats])
 
                 sequences.append(seq)
-                if rul_truth is not None and idx < len(rul_truth):
-                    targets.append(float(rul_truth[idx]))
-                else:
-                    targets.append(float(eng_df["rul_capped"].iloc[-1]))
+                true_val = float(rul_truth[idx]) if (rul_truth is not None and idx < len(rul_truth)) else 0.0
+                targets.append(true_val)
         else:
-            # For training: sliding sequences sampled across engines
-            unit_ids = sorted(df["unit"].unique())
-            for u in unit_ids:
-                eng_df = df[df["unit"] == u].sort_values("cycle")
+            # For training: extract rolling 30-cycle windows for every time step
+            for u, group in df.groupby("unit"):
+                eng_df = group.sort_values("cycle")
                 raw_feats = eng_df[self.feature_cols].values
                 scaled_feats = self.scaler.transform(raw_feats)
                 y_vals = eng_df["rul_capped"].values
 
-                n_cycles = len(eng_df)
-                # Sample stride = 2 to keep dataset compact and fast
-                for t in range(0, n_cycles, 2):
-                    if t + 1 >= self.window_size:
-                        seq = scaled_feats[t + 1 - self.window_size : t + 1]
-                    else:
-                        pad_len = self.window_size - (t + 1)
-                        pad = np.repeat(scaled_feats[:1], pad_len, axis=0)
-                        seq = np.vstack([pad, scaled_feats[: t + 1]])
-
+                L = len(scaled_feats)
+                for t in range(L):
+                    start = max(0, t - self.window_size + 1)
+                    seq = scaled_feats[start : t + 1]
+                    if len(seq) < self.window_size:
+                        pad_len = self.window_size - len(seq)
+                        pad = np.repeat(seq[:1], pad_len, axis=0)
+                        seq = np.vstack([pad, seq])
                     sequences.append(seq)
                     targets.append(float(y_vals[t]))
 
@@ -153,12 +165,12 @@ class NeuralRULBenchmark:
 
     def _train_model(
         self,
-        model: nn.Module,
+        model: Any,
         X_seq: np.ndarray,
         y_seq: np.ndarray,
         epochs: int = 8,
         batch_size: int = 64
-    ) -> nn.Module:
+    ) -> Any:
         model.to(self.device)
         model.train()
         criterion = nn.SmoothL1Loss()

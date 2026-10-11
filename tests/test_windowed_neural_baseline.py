@@ -1,4 +1,5 @@
 import pytest
+torch = pytest.importorskip("torch")
 import numpy as np
 import pandas as pd
 from src.models.neural_baseline import (

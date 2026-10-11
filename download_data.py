@@ -38,4 +38,8 @@ def download_and_extract():
         return False
 
 if __name__ == "__main__":
-    download_and_extract()
+    import sys
+    success = download_and_extract()
+    expected = ["train_FD001.txt", "test_FD001.txt", "RUL_FD001.txt"]
+    if not (success or all((DATA_DIR / f).exists() for f in expected)):
+        sys.exit(1)

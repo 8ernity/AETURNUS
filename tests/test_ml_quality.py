@@ -79,11 +79,11 @@ def test_multi_seed_metrics_reporting():
 
 def test_deep_learning_gru_and_cnn_architectures():
     """Verify PyTorch 1D-CNN and GRU models can instantiate, train, and predict."""
+    torch = pytest.importorskip("torch")
     input_dim = 20
     cnn = CNN1DRegressor(input_dim=input_dim)
     gru = GRURegressor(input_dim=input_dim)
     
-    import torch
     dummy_x = torch.randn(4, input_dim)
     cnn_out = cnn(dummy_x)
     gru_out = gru(dummy_x)
