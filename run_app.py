@@ -1,5 +1,14 @@
 import os
 import sys
+
+# Constrain thread pools and glibc memory arenas to prevent memory explosion on 512MB cloud instances
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+os.environ["MALLOC_ARENA_MAX"] = "2"
+
 import uvicorn
 from pathlib import Path
 

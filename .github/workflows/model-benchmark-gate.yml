@@ -1,0 +1,63 @@
+name: MLOps Model Gate & Benchmark Regression
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'artifacts/models/**'
+      - 'artifacts/reports/**'
+      - 'src/models/**'
+      - 'src/mlops/**'
+      - 'scripts/verify_model_gate.py'
+      - '.github/workflows/model-benchmark-gate.yml'
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'artifacts/models/**'
+      - 'artifacts/reports/**'
+      - 'src/models/**'
+      - 'src/mlops/**'
+      - 'scripts/verify_model_gate.py'
+      - '.github/workflows/model-benchmark-gate.yml'
+  workflow_dispatch:
+
+jobs:
+  model-benchmark-gate:
+    name: Verify Model Bundles & Benchmark Monotonicity
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install pytest httpx
+
+      - name: Build processed data cache
+        run: |
+          python -m scripts.build_all_data
+
+      - name: Execute MLOps Model Gate & Benchmark Verification
+        run: |
+          python -m scripts.verify_model_gate
+
+      - name: Run Benchmark & Promotion Pytest Suite
+        run: |
+          python -m pytest tests/test_benchmark_and_reports.py tests/test_model_service_promotion.py tests/test_mlops.py -v
+
+      - name: Upload Model Evaluation Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-evaluation-reports
+          path: artifacts/reports/

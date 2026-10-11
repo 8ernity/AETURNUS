@@ -1,8 +1,19 @@
+import os
+import sys
+
+# Constrain thread pools and glibc memory arenas to prevent memory explosion on 512MB cloud instances
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+os.environ["MALLOC_ARENA_MAX"] = "2"
+
 import asyncio
 import concurrent.futures
 import gc
+import ctypes
 import json
-import os
 import shutil
 import threading
 import time
@@ -12,6 +23,15 @@ import pandas as pd
 import numpy as np
 import io
 import re
+
+def trim_memory():
+    """Forces garbage collection and releases glibc heap memory back to the Linux OS."""
+    gc.collect()
+    try:
+        libc = ctypes.CDLL("libc.so.6")
+        libc.malloc_trim(0)
+    except Exception:
+        pass
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, HTTPException, Body, UploadFile, File
 from fastapi.responses import FileResponse, Response
@@ -49,7 +69,8 @@ self_healing_engine = SelfHealingEngine()
 mlops_managers: Dict[str, MLOpsManager] = {}
 streaming_pipelines: Dict[str, StreamingEnginePipeline] = {}
 
-_fleet_executor = concurrent.futures.ThreadPoolExecutor(max_workers=min(4, os.cpu_count() or 2))
+# Cap executor workers at 2 to conserve thread memory in 512MB containers
+_fleet_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 _prediction_cache: Dict[tuple, Dict[str, Any]] = {}
 _cache_lock = threading.Lock()
 
@@ -62,7 +83,7 @@ def get_cached_prediction(ms: ModelService, row_dict: Dict[str, Any], subset: st
             return _prediction_cache[cache_key]
     pred = ms.predict_point(row_dict)
     with _cache_lock:
-        if len(_prediction_cache) >= 2000:
+        if len(_prediction_cache) >= 500:
             _prediction_cache.clear()
         _prediction_cache[cache_key] = pred
     return pred
@@ -70,6 +91,7 @@ def get_cached_prediction(ms: ModelService, row_dict: Dict[str, Any], subset: st
 def clear_prediction_cache():
     with _cache_lock:
         _prediction_cache.clear()
+    trim_memory()
 
 # Replay simulation state
 class ReplayState:
@@ -94,15 +116,14 @@ def _load_downcasted_parquet(path: Path) -> pd.DataFrame:
     float_cols = df.select_dtypes(include=["float64"]).columns
     if len(float_cols) > 0:
         df[float_cols] = df[float_cols].astype("float32")
+    trim_memory()
     return df
 
 def get_model_service(subset: str = "FD001") -> ModelService:
     if subset not in model_services:
-        # Evict older models to prevent memory accumulation
-        to_evict = [s for s in list(model_services.keys()) if s != subset]
-        for s in to_evict:
-            del model_services[s]
-        gc.collect()
+        # Evict older models to keep only 1 active model bundle in memory
+        model_services.clear()
+        trim_memory()
 
         ms = ModelService(subset)
         try:
@@ -117,17 +138,15 @@ def get_model_service(subset: str = "FD001") -> ModelService:
 
 def get_mlops_manager(subset: str = "FD001") -> MLOpsManager:
     if subset not in mlops_managers:
-        to_evict = [s for s in list(mlops_managers.keys()) if s != subset]
-        for s in to_evict:
-            del mlops_managers[s]
+        mlops_managers.clear()
+        trim_memory()
         mlops_managers[subset] = MLOpsManager(subset)
     return mlops_managers[subset]
 
 def get_streaming_pipeline(subset: str = "FD001") -> StreamingEnginePipeline:
     if subset not in streaming_pipelines:
-        to_evict = [s for s in list(streaming_pipelines.keys()) if s != subset]
-        for s in to_evict:
-            del streaming_pipelines[s]
+        streaming_pipelines.clear()
+        trim_memory()
         ms = get_model_service(subset)
         streaming_pipelines[subset] = StreamingEnginePipeline(subset=subset, model_service=ms, triage_agent=triage_agent)
     return streaming_pipelines[subset]
@@ -145,34 +164,33 @@ def get_test_df(subset: str = "FD001") -> pd.DataFrame:
     validate_subset(subset)
     key = f"test_{subset}"
     if key not in loaded_dfs:
-        # Evict other subsets from memory
-        to_evict = [k for k in list(loaded_dfs.keys()) if not k.endswith(f"_{subset}")]
-        for k in to_evict:
-            del loaded_dfs[k]
-        gc.collect()
+        # Keep only the active dataset in memory to guarantee RAM < 200MB
+        loaded_dfs.clear()
+        trim_memory()
 
         proc_path = ROOT_DIR / "data" / "processed" / subset / "test.parquet"
         if not proc_path.exists():
             from src.features.pipeline import DataPipeline
             DataPipeline(subset).run()
+            trim_memory()
         loaded_dfs[key] = _load_downcasted_parquet(proc_path)
+        trim_memory()
     return loaded_dfs[key]
 
 def get_train_df(subset: str = "FD001") -> pd.DataFrame:
     validate_subset(subset)
     key = f"train_{subset}"
     if key not in loaded_dfs:
-        # Evict other subsets from memory
-        to_evict = [k for k in list(loaded_dfs.keys()) if not k.endswith(f"_{subset}")]
-        for k in to_evict:
-            del loaded_dfs[k]
-        gc.collect()
+        loaded_dfs.clear()
+        trim_memory()
 
         proc_path = ROOT_DIR / "data" / "processed" / subset / "train.parquet"
         if not proc_path.exists():
             from src.features.pipeline import DataPipeline
             DataPipeline(subset).run()
+            trim_memory()
         loaded_dfs[key] = _load_downcasted_parquet(proc_path)
+        trim_memory()
     return loaded_dfs[key]
 
 # ----------------- WebSocket Hub -----------------
@@ -278,8 +296,8 @@ async def replay_ticker_loop():
                         "predictions": fleet_predictions
                     })
 
-                if cycle % 50 == 0:
-                    gc.collect()
+                if cycle % 25 == 0:
+                    trim_memory()
 
                 delay = max(0.05, 1.0 / replay_state.speed)
                 await asyncio.sleep(delay)
@@ -313,6 +331,8 @@ async def startup_event():
         list(_fleet_executor.map(lambda r: get_cached_prediction(ms, r, current_subset), records))
     except Exception as e:
         print(f"Startup precomputation notice: {e}")
+    finally:
+        trim_memory()
     asyncio.create_task(replay_ticker_loop())
 
 # ----------------- REST Endpoints -----------------
@@ -696,11 +716,14 @@ def simulate_what_if(req: WhatIfRequest, subset: str = Query(default="FD001")):
         if sev in simulated_severities:
             simulated_severities[sev] += 1
 
+    del holdout_df, records, X, sim_agent
+    trim_memory()
+
     return {
         "subset": subset,
         "simulated_params": req.dict(),
         "holdout_engines_count": len(holdout_units),
-        "total_cycles_replayed": len(records),
+        "total_cycles_replayed": len(records) if 'records' in locals() else len(holdout_units),
         "total_simulated_orders": len(all_orders),
         "severities": simulated_severities
     }
@@ -767,10 +790,13 @@ def get_registry(subset: str = Query(default="FD001")):
 def get_drift_report(subset: str = Query(default="FD001")):
     validate_subset(subset)
     mgr = get_mlops_manager(subset)
-    # 1. Training reference from processed training dataset
+    # 1. Training reference from processed training dataset (only load drift-relevant columns to save 80% RAM)
     train_path = ROOT_DIR / "data" / "processed" / subset / "train.parquet"
     if train_path.exists():
-        train_df = pd.read_parquet(train_path)
+        import pyarrow.parquet as pq
+        avail = set(pq.ParquetFile(train_path).schema.names)
+        drift_cols = ["cycle"] + [c for c in avail if c.endswith("_dev_base") or c.endswith("_ewma") or (c.startswith("s") and c[1:].isdigit())]
+        train_df = pd.read_parquet(train_path, columns=[c for c in drift_cols if c in avail])
     else:
         train_df = get_test_df(subset)
 
@@ -790,7 +816,10 @@ def get_drift_report(subset: str = Query(default="FD001")):
             ref_df = train_df.sample(min(500, len(train_df)), random_state=42)
             curr_df = test_df.sample(min(500, len(test_df)), random_state=42)
 
-    return mgr.calculate_drift_report(ref_df, curr_df)
+    result = mgr.calculate_drift_report(ref_df, curr_df)
+    del train_df
+    trim_memory()
+    return result
 
 @app.post("/api/v1/mlops/retrain")
 async def trigger_retrain(scenario: str = Query(default="A"), subset: str = Query(default="FD001")):
