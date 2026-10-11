@@ -105,6 +105,8 @@ def run_smoke_test():
 
     # 5. FastAPI Endpoints & Contract
     print("[5/6] Testing FastAPI Server Endpoints via TestClient...")
+    from scripts.entrypoint import ensure_data_and_models
+    ensure_data_and_models()
     from fastapi.testclient import TestClient
     from src.api.server import app
     client = TestClient(app)

@@ -39,12 +39,16 @@ Thumbs.db
 *.db-wal
 *.db-shm
 *.db-journal
+*.sqlite
+*.sqlite3
 smoke_test.db
 test_*.db
 
 # Generated data, duplicate checkpoints, and uploads
 data/processed/
 data/uploads/
+uploads/
+**/uploads/
 mlruns/
 artifacts/models/*_v*.joblib
 

@@ -1,12 +1,17 @@
 import asyncio
+import concurrent.futures
+import gc
 import json
 import os
 import shutil
+import threading
 import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import pandas as pd
 import numpy as np
+import io
+import re
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, HTTPException, Body, UploadFile, File
 from fastapi.responses import FileResponse, Response
@@ -17,6 +22,7 @@ from pydantic import BaseModel
 from src.common.utils import get_root_dir, load_yaml
 from src.models.model_service import ModelService
 from src.agent.triage_agent import TriageAgent
+from src.agent.self_healing_engine import SelfHealingEngine
 from src.mlops.drift_and_retrain import MLOpsManager
 from src.features.streaming import StreamingEnginePipeline
 
@@ -39,8 +45,31 @@ ROOT_DIR = get_root_dir()
 current_subset = "FD001"
 model_services: Dict[str, ModelService] = {}
 triage_agent = TriageAgent()
+self_healing_engine = SelfHealingEngine()
 mlops_managers: Dict[str, MLOpsManager] = {}
 streaming_pipelines: Dict[str, StreamingEnginePipeline] = {}
+
+_fleet_executor = concurrent.futures.ThreadPoolExecutor(max_workers=min(4, os.cpu_count() or 2))
+_prediction_cache: Dict[tuple, Dict[str, Any]] = {}
+_cache_lock = threading.Lock()
+
+def get_cached_prediction(ms: ModelService, row_dict: Dict[str, Any], subset: str) -> Dict[str, Any]:
+    unit = int(row_dict.get("unit", 1))
+    cycle = int(row_dict.get("cycle", 1))
+    cache_key = (str(subset), unit, cycle, getattr(ms, "version", "v1"))
+    with _cache_lock:
+        if cache_key in _prediction_cache:
+            return _prediction_cache[cache_key]
+    pred = ms.predict_point(row_dict)
+    with _cache_lock:
+        if len(_prediction_cache) >= 2000:
+            _prediction_cache.clear()
+        _prediction_cache[cache_key] = pred
+    return pred
+
+def clear_prediction_cache():
+    with _cache_lock:
+        _prediction_cache.clear()
 
 # Replay simulation state
 class ReplayState:
@@ -56,29 +85,49 @@ class ReplayState:
 replay_state = ReplayState()
 active_websockets: List[WebSocket] = []
 
-# Cached processed dataframes
+# Cached processed dataframes (Single-subset active cache to keep RAM < 200MB)
 loaded_dfs: Dict[str, pd.DataFrame] = {}
+
+def _load_downcasted_parquet(path: Path) -> pd.DataFrame:
+    df = pd.read_parquet(path)
+    # Downcast float64 to float32: cuts memory usage by 50% with zero loss of accuracy
+    float_cols = df.select_dtypes(include=["float64"]).columns
+    if len(float_cols) > 0:
+        df[float_cols] = df[float_cols].astype("float32")
+    return df
 
 def get_model_service(subset: str = "FD001") -> ModelService:
     if subset not in model_services:
+        # Evict older models to prevent memory accumulation
+        to_evict = [s for s in list(model_services.keys()) if s != subset]
+        for s in to_evict:
+            del model_services[s]
+        gc.collect()
+
         ms = ModelService(subset)
         try:
             ms.load()
         except Exception:
             proc_train = ROOT_DIR / "data" / "processed" / subset / "train.parquet"
             if proc_train.exists():
-                train_df = pd.read_parquet(proc_train)
+                train_df = get_train_df(subset)
                 ms.train(train_df)
         model_services[subset] = ms
     return model_services[subset]
 
 def get_mlops_manager(subset: str = "FD001") -> MLOpsManager:
     if subset not in mlops_managers:
+        to_evict = [s for s in list(mlops_managers.keys()) if s != subset]
+        for s in to_evict:
+            del mlops_managers[s]
         mlops_managers[subset] = MLOpsManager(subset)
     return mlops_managers[subset]
 
 def get_streaming_pipeline(subset: str = "FD001") -> StreamingEnginePipeline:
     if subset not in streaming_pipelines:
+        to_evict = [s for s in list(streaming_pipelines.keys()) if s != subset]
+        for s in to_evict:
+            del streaming_pipelines[s]
         ms = get_model_service(subset)
         streaming_pipelines[subset] = StreamingEnginePipeline(subset=subset, model_service=ms, triage_agent=triage_agent)
     return streaming_pipelines[subset]
@@ -96,22 +145,34 @@ def get_test_df(subset: str = "FD001") -> pd.DataFrame:
     validate_subset(subset)
     key = f"test_{subset}"
     if key not in loaded_dfs:
+        # Evict other subsets from memory
+        to_evict = [k for k in list(loaded_dfs.keys()) if not k.endswith(f"_{subset}")]
+        for k in to_evict:
+            del loaded_dfs[k]
+        gc.collect()
+
         proc_path = ROOT_DIR / "data" / "processed" / subset / "test.parquet"
         if not proc_path.exists():
             from src.features.pipeline import DataPipeline
             DataPipeline(subset).run()
-        loaded_dfs[key] = pd.read_parquet(proc_path)
+        loaded_dfs[key] = _load_downcasted_parquet(proc_path)
     return loaded_dfs[key]
 
 def get_train_df(subset: str = "FD001") -> pd.DataFrame:
     validate_subset(subset)
     key = f"train_{subset}"
     if key not in loaded_dfs:
+        # Evict other subsets from memory
+        to_evict = [k for k in list(loaded_dfs.keys()) if not k.endswith(f"_{subset}")]
+        for k in to_evict:
+            del loaded_dfs[k]
+        gc.collect()
+
         proc_path = ROOT_DIR / "data" / "processed" / subset / "train.parquet"
         if not proc_path.exists():
             from src.features.pipeline import DataPipeline
             DataPipeline(subset).run()
-        loaded_dfs[key] = pd.read_parquet(proc_path)
+        loaded_dfs[key] = _load_downcasted_parquet(proc_path)
     return loaded_dfs[key]
 
 # ----------------- WebSocket Hub -----------------
@@ -153,18 +214,26 @@ async def replay_ticker_loop():
     while True:
         try:
             if replay_state.is_running:
-                replay_state.current_cycle += 1
-                if replay_state.current_cycle > replay_state.max_cycle:
-                    replay_state.current_cycle = 15
+                if replay_state.current_cycle >= replay_state.max_cycle:
+                    replay_state.is_running = False
+                    await broadcast("replay_finished", {
+                        "cycle": replay_state.current_cycle,
+                        "status": "completed"
+                    })
+                    await asyncio.sleep(0.5)
+                    continue
 
+                replay_state.current_cycle += 1
                 cycle = replay_state.current_cycle
 
                 # In lifecycle demo mode, evaluate held-out run-to-failure train engine over full lifespan
                 if replay_state.mode == "lifecycle_demo":
                     train_df = get_train_df(current_subset)
-                    holdout_units = sorted(train_df["unit"].unique())[int(len(train_df["unit"].unique()) * 0.8):]
+                    from src.common.splits import get_persistent_split
+                    split = get_persistent_split(current_subset, sorted([int(u) for u in train_df["unit"].unique()]))
+                    holdout_units = split["lifecycle_holdout_units"]
                     unit = replay_state.selected_lifecycle_unit
-                    if unit not in train_df["unit"].values:
+                    if unit not in holdout_units:
                         unit = int(holdout_units[-1])
                         replay_state.selected_lifecycle_unit = unit
 
@@ -189,24 +258,28 @@ async def replay_ticker_loop():
                     ms = get_model_service(current_subset)
                     sub_rows = df[df["cycle"] == cycle]
                     all_units = sorted(sub_rows["unit"].unique())
+                    rows = [sub_rows[sub_rows["unit"] == u].iloc[0].to_dict() for u in all_units]
+                    preds = list(_fleet_executor.map(lambda r: get_cached_prediction(ms, r, current_subset), rows))
+                    
                     fleet_predictions = []
-                    for u in all_units:
-                        row = sub_rows[sub_rows["unit"] == u].iloc[0].to_dict()
+                    for row, pred in zip(rows, preds):
                         replay_state.recent_replay_window.append(row)
-                        pred = ms.predict_point(row)
                         order, trace = triage_agent.evaluate_engine_cycle(pred)
                         fleet_predictions.append(pred)
                         if order and order.get("created_at_cycle") == cycle:
                             await broadcast("work_order_created", order)
 
-                    if len(replay_state.recent_replay_window) > 1000:
-                        replay_state.recent_replay_window = replay_state.recent_replay_window[-1000:]
+                    if len(replay_state.recent_replay_window) > 100:
+                        replay_state.recent_replay_window = replay_state.recent_replay_window[-100:]
 
                     await broadcast("tick", {
                         "cycle": cycle,
                         "engine_count": len(all_units),
                         "predictions": fleet_predictions
                     })
+
+                if cycle % 50 == 0:
+                    gc.collect()
 
                 delay = max(0.05, 1.0 / replay_state.speed)
                 await asyncio.sleep(delay)
@@ -216,15 +289,38 @@ async def replay_ticker_loop():
             print(f"Replay ticker loop error: {e}")
             await asyncio.sleep(0.5)
 
+_system_ready = False
+
+def is_system_ready() -> bool:
+    global _system_ready
+    if _system_ready:
+        return True
+    train_file = ROOT_DIR / "data" / "processed" / "FD001" / "train.parquet"
+    test_file = ROOT_DIR / "data" / "processed" / "FD001" / "test.parquet"
+    model_file = ROOT_DIR / "artifacts" / "models" / "model_bundle_FD001.joblib"
+    if train_file.exists() and test_file.exists() and model_file.exists():
+        _system_ready = True
+        return True
+    return False
+
 @app.on_event("startup")
 async def startup_event():
-    get_model_service(current_subset)
+    try:
+        ms = get_model_service(current_subset)
+        df = get_test_df(current_subset)
+        last_indices = df.groupby("unit")["cycle"].idxmax()
+        records = df.loc[last_indices].sort_values("unit").to_dict("records")
+        list(_fleet_executor.map(lambda r: get_cached_prediction(ms, r, current_subset), records))
+    except Exception as e:
+        print(f"Startup precomputation notice: {e}")
     asyncio.create_task(replay_ticker_loop())
 
 # ----------------- REST Endpoints -----------------
 
 @app.get("/api/v1/health")
 def health():
+    if not is_system_ready():
+        raise HTTPException(status_code=503, detail="System initializing: data and models not ready yet")
     return {"status": "ok", "timestamp": time.time(), "version": "1.0.0"}
 
 @app.get("/api/v1/fleet")
@@ -246,19 +342,23 @@ def get_fleet(subset: str = Query(default="FD001")):
     total_rul = 0.0
 
     all_units = sorted(df["unit"].unique())
+    records = last_rows_df.to_dict("records")
+    preds = list(_fleet_executor.map(lambda r: get_cached_prediction(ms, r, subset), records))
+    sensor_map = load_yaml("configs/sensor_map.yaml").get("sensors", {})
 
-    for row_dict in last_rows_df.to_dict("records"):
+    for row_dict, pred in zip(records, preds):
         u = int(row_dict["unit"])
         max_c = int(row_dict["cycle"])
-        pred = ms.predict_point(row_dict)
 
         order = triage_agent.open_orders.get(pred["engine_id"])
         c_rul = float(pred["conservative_rul"])
-        severity = order["severity"] if order else ("CRITICAL" if c_rul <= 15 else "HIGH" if c_rul <= 30 else "MEDIUM" if c_rul <= 60 else "LOW" if c_rul <= 100 else "HEALTHY")
+        severity = order["severity"] if order else triage_agent.get_base_severity(c_rul)
         severity_counts[severity] = severity_counts.get(severity, 0) + 1
         total_rul += c_rul
 
         sparkline = history_by_unit.get(u, [float(pred["health_index"])])
+        top_s = pred["top_sensors"][0] if pred.get("top_sensors") else "s11"
+        subsystem_name = sensor_map.get(top_s, {}).get("subsystem", "HPC")
 
         engines.append({
             "engine_id": str(pred["engine_id"]),
@@ -271,13 +371,17 @@ def get_fleet(subset: str = Query(default="FD001")):
             "severity": str(severity),
             "has_open_order": bool(order is not None),
             "sparkline": sparkline,
-            "suspected_subsystem": str(pred["top_sensors"][0] if pred.get("top_sensors") else "HPC")
+            "suspected_subsystem": subsystem_name
         })
 
     avg_rul = round(float(total_rul) / max(1, len(engines)), 1)
     critical_count = int(severity_counts["CRITICAL"])
     open_orders_count = int(len(triage_agent.open_orders))
     needs_review_count = int(sum(1 for o in triage_agent.open_orders.values() if o.get("status") == "NEEDS_REVIEW"))
+
+    mgr = get_mlops_manager(subset)
+    reg = mgr.get_registry()
+    champ_ver = reg.get("active_champion", "v1.0")
 
     return {
         "subset": str(subset),
@@ -287,7 +391,7 @@ def get_fleet(subset: str = Query(default="FD001")):
             "open_work_orders": open_orders_count,
             "exception_queue_size": needs_review_count,
             "mean_conservative_rul": avg_rul,
-            "live_model_version": f"rul-{subset.lower()}@champion"
+            "live_model_version": f"rul-{subset.lower()}@{champ_ver}"
         },
         "severity_distribution": {str(k): int(v) for k, v in severity_counts.items()},
         "engines": engines
@@ -334,17 +438,19 @@ def get_engine_detail(engine_id: str, subset: str = Query(default="FD001")):
             "s7_ewma": round(float(r_dict.get("s7_ewma", 0.0)), 2),
         })
 
-    # Top contributing sensors (SHAP approximation)
-    sensor_map = load_yaml("configs/sensor_map.yaml")["sensors"]
-    shap_bars = []
-    for s in pred["top_sensors"]:
-        subsystem = sensor_map.get(s, {}).get("subsystem", "HPC")
+    # Sensor attributions computed via sensor_map.yaml
+    sensor_map = load_yaml("configs/sensor_map.yaml").get("sensors", {})
+    sensor_attributions = []
+    for s in pred.get("top_sensors", []):
+        info = sensor_map.get(s, {})
+        subsystem = info.get("subsystem", "HPC")
         dev = abs(float(last_row.get(f"{s}_dev_base", 1.0)))
-        shap_bars.append({
+        sensor_attributions.append({
             "sensor": s,
-            "name": sensor_map.get(s, {}).get("name", s),
+            "name": info.get("name", s),
             "subsystem": subsystem,
-            "contribution": round(min(1.0, dev / 10.0), 3)
+            "contribution": round(min(1.0, dev / 10.0), 3),
+            "deviation_score": round(dev, 3)
         })
 
     return {
@@ -355,7 +461,8 @@ def get_engine_detail(engine_id: str, subset: str = Query(default="FD001")):
         "prediction": pred,
         "work_order": order,
         "trajectory": trajectory,
-        "shap_bars": shap_bars,
+        "sensor_attributions": sensor_attributions,
+        "shap_bars": sensor_attributions,
         "regime": int(last_row.get("regime", 0))
     }
 
@@ -439,36 +546,75 @@ class WhatIfRequest(BaseModel):
 
 @app.post("/api/v1/rules/simulate")
 def simulate_what_if(req: WhatIfRequest, subset: str = Query(default="FD001")):
-    df = get_test_df(subset)
+    validate_subset(subset)
+    train_df = get_train_df(subset)
     ms = get_model_service(subset)
-    last_cycles = df.groupby("unit")["cycle"].max()
 
-    created_count = 0
+    from src.common.splits import get_persistent_split
+    split = get_persistent_split(subset, sorted([int(u) for u in train_df["unit"].unique()]))
+    holdout_units = split.get("lifecycle_holdout_units", [])
+    if not holdout_units:
+        holdout_units = sorted([int(u) for u in train_df["unit"].unique()])[-15:]
+
+    sim_cfg = json.loads(json.dumps(triage_agent.rules_cfg))
+    sim_cfg.setdefault("severity_bands", {})
+    sim_cfg["severity_bands"]["critical"] = req.critical_threshold
+    sim_cfg["severity_bands"]["high"] = req.high_threshold
+    sim_cfg.setdefault("escalation", {})
+    sim_cfg["escalation"]["anomaly_threshold"] = req.anomaly_threshold
+
+    sim_agent = TriageAgent(db_path=Path(":memory:"), rules_cfg=sim_cfg)
+
     simulated_severities = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
 
-    for u in sorted(df["unit"].unique())[:30]:
-        max_c = last_cycles[u]
-        row = df[(df["unit"] == u) & (df["cycle"] == max_c)].iloc[0].to_dict()
-        pred = ms.predict_point(row)
-        
-        c_rul = pred["conservative_rul"]
-        anom = pred["anomaly_score"]
+    # Replay lifecycle holdout engines chronologically over their run-to-failure lifecycle
+    holdout_df = train_df[train_df["unit"].isin(holdout_units)].sort_values(["unit", "cycle"])
+    X = holdout_df[ms.feature_cols].values
+    p10_preds = np.maximum(0.0, ms.rul_p10_model.predict(X))
+    p50_preds = np.maximum(0.0, ms.rul_p50_model.predict(X))
+    p90_preds = np.maximum(0.0, ms.rul_p90_model.predict(X))
+    fail_probs = ms.classifier.predict_proba(X)[:, 1] if ms.classifier else np.zeros(len(X))
+    if ms.anomaly_detector:
+        scores = -ms.anomaly_detector.score_samples(X)
+        norm_scores = (scores - scores.min()) / max(1e-5, scores.max() - scores.min())
+    else:
+        norm_scores = np.zeros(len(X))
 
-        if c_rul <= req.critical_threshold or (anom >= req.anomaly_threshold and c_rul <= 25):
-            simulated_severities["CRITICAL"] += 1
-            created_count += 1
-        elif c_rul <= req.high_threshold:
-            simulated_severities["HIGH"] += 1
-            created_count += 1
-        elif c_rul <= 60:
-            simulated_severities["MEDIUM"] += 1
-        else:
-            simulated_severities["LOW"] += 1
+    records = holdout_df.to_dict("records")
+    for i, row in enumerate(records):
+        pred = {
+            "engine_id": f"{subset}-{int(row.get('unit', 1)):03d}",
+            "unit": int(row.get("unit", 1)),
+            "subset": subset,
+            "cycle": int(row.get("cycle", 1)),
+            "rul_p10": round(float(p10_preds[i]), 1),
+            "rul_p50": round(float(p50_preds[i]), 1),
+            "rul_p90": round(float(p90_preds[i]), 1),
+            "conservative_rul": round(float(p10_preds[i]), 1),
+            "fail_prob_30": round(float(fail_probs[i]), 3),
+            "anomaly_score": round(float(norm_scores[i]), 3),
+            "health_index": round(float(row.get("health_index", 1.0)), 3),
+            "top_sensors": ["s2", "s3", "s4"],
+            "model_version": f"rul-{subset.lower()}@{getattr(ms, 'version', 'v1.0')}"
+        }
+        sim_agent.evaluate_engine_cycle(pred)
+
+    # Aggregate orders created across all holdout engines
+    all_orders = list(sim_agent.open_orders.values())
+    for hist_list in sim_agent.closed_orders_history.values():
+        all_orders.extend(hist_list)
+
+    for o in all_orders:
+        sev = o.get("severity", "LOW")
+        if sev in simulated_severities:
+            simulated_severities[sev] += 1
 
     return {
         "subset": subset,
         "simulated_params": req.dict(),
-        "total_simulated_orders": created_count,
+        "holdout_engines_count": len(holdout_units),
+        "total_cycles_replayed": len(records),
+        "total_simulated_orders": len(all_orders),
         "severities": simulated_severities
     }
 
@@ -513,8 +659,18 @@ def get_model_details(subset: str):
         "status": data.get("status", "Evaluated")
     }
 
+@app.get("/api/v1/models/{subset}/comparison")
+def get_model_comparison(subset: str):
+    validate_subset(subset)
+    comp_file = ROOT_DIR / "artifacts" / "reports" / f"model_comparison_{subset}.json"
+    if comp_file.exists():
+        with open(comp_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    raise HTTPException(status_code=404, detail=f"Comparison report for {subset} not found")
+
 # ----------------- MLOps & Monitoring -----------------
 @app.get("/api/v1/mlops/registry")
+@app.get("/api/v1/registry")
 def get_registry(subset: str = Query(default="FD001")):
     validate_subset(subset)
     mgr = get_mlops_manager(subset)
@@ -528,18 +684,24 @@ def get_drift_report(subset: str = Query(default="FD001")):
     train_path = ROOT_DIR / "data" / "processed" / subset / "train.parquet"
     if train_path.exists():
         train_df = pd.read_parquet(train_path)
-        ref_df = train_df.sample(min(1000, len(train_df)), random_state=42)
     else:
-        test_df = get_test_df(subset)
-        ref_df = test_df.sample(min(500, len(test_df)), random_state=42)
+        train_df = get_test_df(subset)
 
-    # 2. Current telemetry from recent replay window if available, else recent streaming test cycles
+    # 2. Current telemetry from recent replay window if available, else nominal matched baseline
     if len(replay_state.recent_replay_window) >= 30:
         curr_df = pd.DataFrame(replay_state.recent_replay_window)
+        c_min = int(curr_df["cycle"].min())
+        c_max = int(curr_df["cycle"].max())
+        matched_train = train_df[(train_df["cycle"] >= c_min) & (train_df["cycle"] <= c_max)]
+        ref_df = matched_train if len(matched_train) >= 30 else train_df
     else:
+        # Default state: nominal operating window (cycles 1..50)
         test_df = get_test_df(subset)
-        max_c = test_df["cycle"].max()
-        curr_df = test_df[test_df["cycle"] >= max(1, max_c - 25)]
+        curr_df = test_df[(test_df["cycle"] >= 1) & (test_df["cycle"] <= 50)]
+        ref_df = train_df[(train_df["cycle"] >= 1) & (train_df["cycle"] <= 50)]
+        if len(ref_df) == 0 or len(curr_df) == 0:
+            ref_df = train_df.sample(min(500, len(train_df)), random_state=42)
+            curr_df = test_df.sample(min(500, len(test_df)), random_state=42)
 
     return mgr.calculate_drift_report(ref_df, curr_df)
 
@@ -594,108 +756,65 @@ def get_data_quality(subset: str = Query(default="FD001")):
     raise HTTPException(status_code=404, detail=f"Data quality report for {subset} not found")
 
 # ----------------- Pipeline & Model Operations Endpoints -----------------
+@app.post("/api/v1/mlops/{name}/promote")
+@app.post("/api/v1/mlops/promote")
 @app.post("/api/v1/models/{name}/promote")
 @app.post("/api/v1/models/promote")
 def promote_model(
     name: Optional[str] = None,
     subset: str = Query(default="FD001"),
-    target_name: Optional[str] = Query(default=None)
+    target_name: Optional[str] = Query(default=None),
+    version: Optional[str] = Query(default=None)
 ):
     validate_subset(subset)
-    model_name = name or target_name or "challenger"
+    model_name = version or name or target_name or "challenger"
     mgr = get_mlops_manager(subset)
-    reg = mgr.get_registry()
-    models = reg.get("models", [])
-    
-    target_idx = None
-    for idx, m in enumerate(models):
-        if m.get("version") == model_name or m.get("alias") == model_name:
-            target_idx = idx
-            break
-            
-    if target_idx is None:
-        raise HTTPException(status_code=404, detail=f"Model '{model_name}' not found in registry for subset {subset}")
-        
-    for m in models:
-        if m.get("alias") == "champion":
-            m["alias"] = "previous"
-            
-    promoted = models[target_idx]
-    promoted["alias"] = "champion"
-    reg["active_champion"] = promoted.get("version")
-    
-    with open(mgr.registry_file, "w", encoding="utf-8") as f:
-        json.dump(reg, f, indent=2)
-        
-    if "model_path" in promoted and (ROOT_DIR / promoted["model_path"]).exists():
-        ms = get_model_service(subset)
-        bundle_file = ROOT_DIR / promoted["model_path"]
-        active_dest = ROOT_DIR / "artifacts" / "models" / f"model_bundle_{subset}.joblib"
-        shutil.copyfile(bundle_file, active_dest)
-        ms.load()
-        
-    return {
-        "status": "promoted",
-        "version": promoted.get("version"),
-        "alias": "champion",
-        "subset": subset
-    }
+    try:
+        res = mgr.promote_version(model_name)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=409, detail=f"Model bundle file missing on disk: {e}")
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
+    # Swap served bundle and reload the cached ModelService
+    if subset in model_services:
+        del model_services[subset]
+    reloaded_ms = get_model_service(subset)
+    if subset in streaming_pipelines:
+        streaming_pipelines[subset].model_service = reloaded_ms
+    clear_prediction_cache()
+
+    return res
+
+@app.post("/api/v1/mlops/{name}/rollback")
+@app.post("/api/v1/mlops/rollback")
 @app.post("/api/v1/models/{name}/rollback")
 @app.post("/api/v1/models/rollback")
 def rollback_model(
     name: Optional[str] = None,
     subset: str = Query(default="FD001"),
-    target_name: Optional[str] = Query(default=None)
+    target_name: Optional[str] = Query(default=None),
+    target_version: Optional[str] = Query(default=None)
 ):
     validate_subset(subset)
-    model_name = name or target_name
+    model_name = target_version or name or target_name
     mgr = get_mlops_manager(subset)
-    reg = mgr.get_registry()
-    models = reg.get("models", [])
-    
-    target_idx = None
-    if model_name and model_name not in ["rollback", "default"]:
-        for idx, m in enumerate(models):
-            if m.get("version") == model_name or m.get("alias") == model_name:
-                target_idx = idx
-                break
-    else:
-        for idx, m in enumerate(models):
-            if m.get("alias") == "previous":
-                target_idx = idx
-                break
-                
-    if target_idx is None:
-        if len(models) > 1:
-            target_idx = 0
-        else:
-            raise HTTPException(status_code=400, detail="No previous model available to rollback to.")
-            
-    for m in models:
-        if m.get("alias") == "champion":
-            m["alias"] = "rolled_back"
-            
-    target_model = models[target_idx]
-    target_model["alias"] = "champion"
-    reg["active_champion"] = target_model.get("version")
-    
-    with open(mgr.registry_file, "w", encoding="utf-8") as f:
-        json.dump(reg, f, indent=2)
-        
-    if "model_path" in target_model and (ROOT_DIR / target_model["model_path"]).exists():
-        ms = get_model_service(subset)
-        bundle_file = ROOT_DIR / target_model["model_path"]
-        active_dest = ROOT_DIR / "artifacts" / "models" / f"model_bundle_{subset}.joblib"
-        shutil.copyfile(bundle_file, active_dest)
-        ms.load()
-        
-    return {
-        "status": "rolled_back",
-        "version": target_model.get("version"),
-        "alias": "champion",
-        "subset": subset
-    }
+    try:
+        res = mgr.rollback(model_name)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=409, detail=f"Model bundle file missing on disk: {e}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Swap served bundle and reload the cached ModelService
+    if subset in model_services:
+        del model_services[subset]
+    reloaded_ms = get_model_service(subset)
+    if subset in streaming_pipelines:
+        streaming_pipelines[subset].model_service = reloaded_ms
+    clear_prediction_cache()
+
+    return res
 
 @app.post("/api/v1/models/reload")
 def reload_models(subset: Optional[str] = Query(default=None)):
@@ -714,6 +833,7 @@ def reload_models(subset: Optional[str] = Query(default=None)):
                 get_model_service(s)
                 reloaded.append(s)
     loaded_dfs.clear()
+    clear_prediction_cache()
     return {"status": "reloaded", "reloaded_subsets": reloaded}
 
 @app.post("/api/v1/pipeline/run")
@@ -735,30 +855,222 @@ def run_pipeline_endpoint(subset: str = Query(default="FD001")):
         "report": report
     }
 
+MAX_UPLOAD_SIZE = 25 * 1024 * 1024  # 25 MB limit
+ALLOWED_UPLOAD_EXTS = {".csv", ".txt", ".parquet"}
+
 @app.post("/api/v1/data/upload")
 async def upload_data(
     file: UploadFile = File(...),
     subset: str = Query(default="FD001"),
-    file_type: str = Query(default="raw_test")
+    file_type: str = Query(default="raw_test"),
+    trigger_pipeline: bool = Query(default=False),
+    trigger_retrain: bool = Query(default=False)
 ):
     validate_subset(subset)
+
+    # 1. Sanitize filename (prevent path traversal & special chars)
+    raw_name = Path(file.filename or "upload.csv").name
+    safe_name = re.sub(r"[^a-zA-Z0-9_.-]", "_", raw_name)
+    ext = Path(safe_name).suffix.lower()
+    if ext not in ALLOWED_UPLOAD_EXTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file extension '{ext}'. Allowed extensions: {sorted(list(ALLOWED_UPLOAD_EXTS))}"
+        )
+
     upload_dir = ROOT_DIR / "data" / "uploads" / subset
     upload_dir.mkdir(parents=True, exist_ok=True)
-    dest_path = upload_dir / file.filename
-    
+    dest_path = upload_dir / safe_name
+
+    # 2. Size validation
+    content = bytearray()
     total_bytes = 0
+    while chunk := await file.read(65536):
+        total_bytes += len(chunk)
+        if total_bytes > MAX_UPLOAD_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Uploaded file exceeds maximum allowed size of {MAX_UPLOAD_SIZE // (1024*1024)}MB."
+            )
+        content.extend(chunk)
+
+    if total_bytes == 0:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    # 3. Schema validation
+    try:
+        if ext == ".parquet":
+            df = pd.read_parquet(io.BytesIO(content))
+        else:
+            try:
+                df = pd.read_csv(io.BytesIO(content))
+                if len(df.columns) == 1 and " " in content[:1024].decode("utf-8", errors="ignore"):
+                    df = pd.read_csv(io.BytesIO(content), sep=r"\s+", header=None)
+            except Exception:
+                df = pd.read_csv(io.BytesIO(content), sep=r"\s+", header=None)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to parse uploaded data: {e}")
+
+    # Assign C-MAPSS standard columns if headerless 26-column text/csv
+    pipe_cfg = load_yaml("configs/pipeline.yaml")
+    std_cols = pipe_cfg.get("dataset", {}).get("columns", [])
+    if len(df.columns) == len(std_cols) and all(isinstance(c, int) for c in df.columns):
+        df.columns = std_cols
+
+    # Verify minimum required schema: must have unit and cycle
+    req_cols = {"unit", "cycle"}
+    if not req_cols.issubset(set(df.columns)):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Schema validation failed: Missing required columns {req_cols - set(df.columns)}. Provided: {list(df.columns)[:5]}"
+        )
+
+    # Persist validated file to disk
     with open(dest_path, "wb") as f_out:
-        while chunk := await file.read(65536):
-            f_out.write(chunk)
-            total_bytes += len(chunk)
-            
+        f_out.write(content)
+
+    pipeline_report = None
+    retrain_report = None
+
+    # 4. Wire into pipeline/retrain if requested
+    if trigger_pipeline:
+        from src.features.pipeline import DataPipeline
+        dp = DataPipeline(subset=subset)
+        _, _, _, pipeline_report = dp.run()
+
+    if trigger_retrain:
+        mgr = get_mlops_manager(subset)
+        retrain_report = mgr.run_retrain_demo(scenario="A", replay_window_df=df)
+
     return {
         "status": "uploaded",
-        "filename": file.filename,
+        "filename": safe_name,
         "size_bytes": total_bytes,
+        "rows": len(df),
+        "columns": list(df.columns),
         "subset": subset,
-        "saved_path": str(dest_path.relative_to(ROOT_DIR))
+        "saved_path": str(dest_path.relative_to(ROOT_DIR)),
+        "pipeline_triggered": trigger_pipeline,
+        "pipeline_report": pipeline_report,
+        "retrain_triggered": trigger_retrain,
+        "retrain_report": retrain_report
     }
+
+# ==============================================================================
+# MLOps & Drift Monitoring Endpoints
+# ==============================================================================
+@app.get("/api/v1/mlops/registry")
+def get_mlops_registry(subset: str = Query(default="FD001")):
+    validate_subset(subset)
+    if subset not in mlops_managers:
+        mlops_managers[subset] = MLOpsManager(subset)
+    return mlops_managers[subset].get_registry()
+
+@app.get("/api/v1/monitoring/drift")
+def get_monitoring_drift(subset: str = Query(default="FD001")):
+    validate_subset(subset)
+    if subset not in mlops_managers:
+        mlops_managers[subset] = MLOpsManager(subset)
+    mgr = mlops_managers[subset]
+    
+    if mgr.drift_history_file.exists():
+        try:
+            with open(mgr.drift_history_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+            
+    train_df = get_dataframe("train", subset)
+    test_df = get_dataframe("test", subset)
+    ref_sample = train_df.sample(min(1000, len(train_df)), random_state=42)
+    curr_sample = test_df.sample(min(500, len(test_df)), random_state=42)
+    return mgr.calculate_drift_report(ref_sample, curr_sample)
+
+@app.post("/api/v1/mlops/retrain")
+async def trigger_mlops_retrain(scenario: str = Query(default="B"), subset: str = Query(default="FD001")):
+    validate_subset(subset)
+    if subset not in mlops_managers:
+        mlops_managers[subset] = MLOpsManager(subset)
+    mgr = mlops_managers[subset]
+    
+    recent_df = None
+    if replay_state.recent_replay_window:
+        recent_df = pd.DataFrame(replay_state.recent_replay_window)
+        
+    result = mgr.run_retrain_demo(scenario=scenario, replay_window_df=recent_df)
+    
+    if result.get("gate_passed") and result.get("promoted_version"):
+        promoted_ver = result["promoted_version"]
+        svc = ModelService(subset)
+        svc.load(promoted_ver)
+        model_services[subset] = svc
+        await broadcast("model_promoted", {
+            "subset": subset,
+            "version": promoted_ver,
+            "metrics": result.get("challenger_metrics")
+        })
+        
+    return result
+
+# ==============================================================================
+# Autonomous Self-Healing Remediation Endpoints
+# ==============================================================================
+@app.get("/api/v1/self-healing/prescriptions/{engine_id}")
+def get_engine_prescriptions(engine_id: str, cycle: int = Query(default=30)):
+    order = triage_agent.open_orders.get(engine_id)
+    cons_rul = order["conservative_rul"] if order else 35.0
+    subsystem = order["suspected_subsystem"] if order else "HPC"
+    severity = order["severity"] if order else "MEDIUM"
+    
+    status_dict = {
+        "engine_id": engine_id,
+        "cycle": cycle,
+        "conservative_rul": cons_rul,
+        "suspected_subsystem": subsystem,
+        "severity": severity
+    }
+    return {
+        "engine_id": engine_id,
+        "prescriptions": self_healing_engine.generate_prescriptions(status_dict)
+    }
+
+@app.post("/api/v1/self-healing/execute")
+async def execute_self_healing_action(
+    engine_id: str = Query(...),
+    action_type: str = Query(default="DYNAMIC_DERATE"),
+    cycle: int = Query(default=30),
+    subset: str = Query(default="FD001")
+):
+    order = triage_agent.open_orders.get(engine_id)
+    cons_rul = order["conservative_rul"] if order else 35.0
+    subsystem = order["suspected_subsystem"] if order else "HPC"
+    
+    res = self_healing_engine.execute_action(
+        engine_id=engine_id,
+        action_type=action_type,
+        cycle=cycle,
+        cons_rul=cons_rul,
+        subsystem=subsystem
+    )
+    
+    if order:
+        order["status"] = "IN_PROGRESS"
+        order["events"].append({
+            "cycle": cycle,
+            "event": f"Action Executed: {res['title']} - {res['recommended_action']}",
+            "actor": "SelfHealingEngine"
+        })
+        triage_agent._persist_order(order)
+        
+    await broadcast("self_healing_executed", res)
+    return {"status": "success", "action": res}
+
+@app.get("/api/v1/self-healing/history")
+def get_self_healing_history_endpoint(engine_id: Optional[str] = Query(default=None), limit: int = Query(default=50)):
+    return {
+        "history": self_healing_engine.get_history(engine_id=engine_id, limit=limit)
+    }
+
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def get_favicon_ico():

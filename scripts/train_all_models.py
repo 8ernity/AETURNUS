@@ -1,6 +1,12 @@
+import sys
 import time
 import pandas as pd
 from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 from src.common.utils import get_root_dir
 from src.models.model_service import ModelService
 
@@ -23,7 +29,9 @@ def main():
         ms = ModelService(subset=sub)
         print(f"\n>>> Training {sub} on {len(train_df)} rows...")
         ms.train(train_df)
-        print(f">>> {sub} trained in {time.time() - t0:.2f}s")
+        ms.save("v1.0")
+        ms.promote("v1.0")
+        print(f">>> {sub} trained and promoted in {time.time() - t0:.2f}s")
 
     print("\n[DONE] All models successfully trained and persisted.")
 

@@ -8,7 +8,7 @@ import { ModelLabTab } from "./components/tabs/ModelLabTab";
 import { MLOpsTab } from "./components/tabs/MLOpsTab";
 import { DataPipelineTab } from "./components/tabs/DataPipelineTab";
 import { HowItWorksTab } from "./components/tabs/HowItWorksTab";
-import { GrokBotAssistant } from "./components/GrokBotAssistant";
+import { DiagnosticPanel } from "./components/DiagnosticPanel";
 
 export function App() {
   const [activeTab, setActiveTab] = useState<string>("fleet");
@@ -208,8 +208,8 @@ export function App() {
         </main>
       </div>
 
-      {/* Grok Bot Diagnostic Assistant Widget */}
-      <GrokBotAssistant
+      {/* Fleet Diagnostic Panel */}
+      <DiagnosticPanel
         currentSubset={currentSubset}
         currentCycle={currentCycle}
         isPlaying={isPlaying}

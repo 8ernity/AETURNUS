@@ -6,14 +6,15 @@
       "alias": "champion",
       "algorithm": "HistGradientBoosting Quantile (p10/p50/p90) + Isolation Forest",
       "metrics": {
-        "rmse": 13.4289,
-        "mae": 9.683,
-        "nasa_score": 244.48,
-        "late_rate": 0.55,
-        "early_rate": 0.45
+        "rmse": 13.6786,
+        "mae": 9.6546,
+        "nasa_score": 247.45,
+        "late_rate": 0.47,
+        "early_rate": 0.53
       },
-      "created_at": "2026-10-09 11:06:20",
-      "data_hash": "sha256:01582267c498e117"
+      "created_at": "2026-10-11 14:16:37",
+      "data_hash": "sha256:01582267c498e117",
+      "model_path": "artifacts/models/model_bundle_FD001.joblib"
     },
     {
       "version": "v2.0",
@@ -21,20 +22,20 @@
       "alias": "challenger (rejected)",
       "algorithm": "HistGradientBoosting Challenger",
       "metrics": {
-        "rmse": 12.9518,
-        "mae": 9.2158,
-        "nasa_score": 215.4,
-        "late_rate": 0.51,
-        "early_rate": 0.49
+        "rmse": 13.6786,
+        "mae": 9.6546,
+        "nasa_score": 247.45,
+        "late_rate": 0.47,
+        "early_rate": 0.53
       },
       "holdout_metrics": {
-        "rmse": 13.6298,
-        "mae": 9.3902,
-        "nasa_score": 11923.7,
-        "late_rate": 0.3214,
-        "early_rate": 0.6786
+        "rmse": 13.9709,
+        "mae": 10.0524,
+        "nasa_score": 8991.82,
+        "late_rate": 0.3303,
+        "early_rate": 0.6697
       },
-      "created_at": "2026-10-09 11:07:31",
+      "created_at": "2026-10-11 14:34:57",
       "data_hash": "sha256:a98564cd1712d86f",
       "model_path": "artifacts/models/model_bundle_FD001_v2.0.joblib"
     },
@@ -44,114 +45,22 @@
       "alias": "challenger (rejected)",
       "algorithm": "HistGradientBoosting Challenger",
       "metrics": {
-        "rmse": 12.9518,
-        "mae": 9.2158,
-        "nasa_score": 215.4,
-        "late_rate": 0.51,
-        "early_rate": 0.49
+        "rmse": 13.6786,
+        "mae": 9.6546,
+        "nasa_score": 247.45,
+        "late_rate": 0.47,
+        "early_rate": 0.53
       },
       "holdout_metrics": {
-        "rmse": 13.6298,
-        "mae": 9.3902,
-        "nasa_score": 11923.7,
-        "late_rate": 0.3214,
-        "early_rate": 0.6786
+        "rmse": 13.9709,
+        "mae": 10.0524,
+        "nasa_score": 8991.82,
+        "late_rate": 0.3303,
+        "early_rate": 0.6697
       },
-      "created_at": "2026-10-09 11:08:35",
+      "created_at": "2026-10-11 20:41:08",
       "data_hash": "sha256:a98564cd1712d86f",
       "model_path": "artifacts/models/model_bundle_FD001_v3.0.joblib"
-    },
-    {
-      "version": "v4.0",
-      "subset": "FD001",
-      "alias": "challenger (rejected)",
-      "algorithm": "HistGradientBoosting Challenger",
-      "metrics": {
-        "rmse": 12.9518,
-        "mae": 9.2158,
-        "nasa_score": 215.4,
-        "late_rate": 0.51,
-        "early_rate": 0.49
-      },
-      "holdout_metrics": {
-        "rmse": 13.6298,
-        "mae": 9.3902,
-        "nasa_score": 11923.7,
-        "late_rate": 0.3214,
-        "early_rate": 0.6786
-      },
-      "created_at": "2026-10-09 11:23:38",
-      "data_hash": "sha256:a98564cd1712d86f",
-      "model_path": "artifacts/models/model_bundle_FD001_v4.0.joblib"
-    },
-    {
-      "version": "v5.0",
-      "subset": "FD001",
-      "alias": "challenger (rejected)",
-      "algorithm": "HistGradientBoosting Challenger",
-      "metrics": {
-        "rmse": 14.1041,
-        "mae": 9.6922,
-        "nasa_score": 263.25,
-        "late_rate": 0.55,
-        "early_rate": 0.45
-      },
-      "holdout_metrics": {
-        "rmse": 15.0702,
-        "mae": 10.5714,
-        "nasa_score": 14504.76,
-        "late_rate": 0.3036,
-        "early_rate": 0.6964
-      },
-      "created_at": "2026-10-09 11:52:14",
-      "data_hash": "sha256:a98564cd1712d86f",
-      "model_path": "artifacts/models/model_bundle_FD001_v5.0.joblib"
-    },
-    {
-      "version": "v6.0",
-      "subset": "FD001",
-      "alias": "challenger (rejected)",
-      "algorithm": "HistGradientBoosting Challenger",
-      "metrics": {
-        "rmse": 14.1041,
-        "mae": 9.6922,
-        "nasa_score": 263.25,
-        "late_rate": 0.55,
-        "early_rate": 0.45
-      },
-      "holdout_metrics": {
-        "rmse": 15.0702,
-        "mae": 10.5714,
-        "nasa_score": 14504.76,
-        "late_rate": 0.3036,
-        "early_rate": 0.6964
-      },
-      "created_at": "2026-10-09 11:55:57",
-      "data_hash": "sha256:a98564cd1712d86f",
-      "model_path": "artifacts/models/model_bundle_FD001_v6.0.joblib"
-    },
-    {
-      "version": "v7.0",
-      "subset": "FD001",
-      "alias": "challenger (rejected)",
-      "algorithm": "HistGradientBoosting Challenger",
-      "metrics": {
-        "rmse": 14.1041,
-        "mae": 9.6922,
-        "nasa_score": 263.25,
-        "late_rate": 0.55,
-        "early_rate": 0.45
-      },
-      "holdout_metrics": {
-        "rmse": 15.0702,
-        "mae": 10.5714,
-        "nasa_score": 14504.76,
-        "late_rate": 0.3036,
-        "early_rate": 0.6964
-      },
-      "created_at": "2026-10-09 12:04:58",
-      "data_hash": "sha256:a98564cd1712d86f",
-      "model_path": "artifacts/models/model_bundle_FD001_v7.0.joblib"
     }
   ],
   "active_champion": "v1.0"

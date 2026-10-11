@@ -28,17 +28,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# Install Python dependencies with lightweight CPU torch wheel
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy backend, configs, data loaders, reports, and scripts
+# Copy backend, configs, data loaders, reports, scripts, and initial data
 COPY configs/ /app/configs/
 COPY scripts/ /app/scripts/
 COPY src/ /app/src/
-COPY artifacts/reports/ /app/artifacts/reports/
+COPY artifacts/ /app/artifacts/
+COPY data/ /app/data/
 COPY download_data.py run_app.py Procfile LICENSE README.md /app/
+
+# Build all processed data and feature pipelines during image build
+RUN python download_data.py && python -m scripts.build_all_data
 
 # Copy compiled frontend from Stage 1 into web/dist
 COPY --from=frontend-builder /app/web/dist /app/web/dist
@@ -49,8 +54,8 @@ RUN mkdir -p /app/artifacts/sqlite /app/data/uploads
 # Expose target application port
 EXPOSE 8000
 
-# Container healthcheck
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+# Container healthcheck (readiness-based /api/v1/health with 180s start period)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=180s --retries=3 \
     CMD curl -f http://127.0.0.1:8000/api/v1/health || exit 1
 
 # Launch application

@@ -3,78 +3,78 @@
   "condition": "Single",
   "faults": "2 (HPC + Fan)",
   "metrics": {
-    "rmse": 14.1655,
-    "mae": 10.3131,
-    "nasa_score": 349.36,
-    "late_rate": 0.56,
-    "early_rate": 0.44
+    "rmse": 15.1575,
+    "mae": 11.3179,
+    "nasa_score": 429.7,
+    "late_rate": 0.63,
+    "early_rate": 0.37
   },
-  "rmse": 14.1655,
-  "mae": 10.3131,
-  "nasa_score": 349.36,
-  "pr_auc": 0.982,
+  "rmse": 15.1575,
+  "mae": 11.3179,
+  "nasa_score": 429.7,
+  "pr_auc": 0.98,
   "target_rmse": 15.0,
-  "status": "Target Met",
-  "interval_coverage": 0.6,
-  "mean_interval_width": 24.05,
+  "status": "Target Missed",
+  "interval_coverage": 0.59,
+  "mean_interval_width": 23.98,
   "test_engines_count": 100,
-  "train_time_sec": 46.58,
-  "calibration_offset": 0.051,
+  "train_time_sec": 42.6,
+  "calibration_offset": 0.709,
   "bucket_errors": [
     {
       "bucket": "0 - 30 cycles (Critical)",
-      "rmse": 2.75,
-      "mae": 2.31,
+      "rmse": 3.44,
+      "mae": 2.79,
       "sample_count": 20
     },
     {
       "bucket": "30 - 60 cycles (High)",
-      "rmse": 10.59,
-      "mae": 7.87,
+      "rmse": 11.69,
+      "mae": 8.03,
       "sample_count": 21
     },
     {
       "bucket": "60 - 125 cycles (Healthy)",
-      "rmse": 17.25,
-      "mae": 13.9,
+      "rmse": 18.35,
+      "mae": 15.38,
       "sample_count": 59
     }
   ],
   "feature_importance": [
     {
-      "feat": "cycle_norm",
-      "weight": "24.0%",
-      "raw_weight": 24.0,
+      "feat": "s11_dev_base",
+      "weight": "23.4%",
+      "raw_weight": 23.4,
       "color": "from-indigo-500 to-purple-500"
     },
     {
-      "feat": "s3_roll_mean_10",
-      "weight": "20.7%",
-      "raw_weight": 20.7,
+      "feat": "cycle_norm",
+      "weight": "21.1%",
+      "raw_weight": 21.1,
       "color": "from-purple-500 to-pink-500"
     },
     {
-      "feat": "s12_roll_slope_30",
-      "weight": "10.6%",
-      "raw_weight": 10.6,
+      "feat": "health_index",
+      "weight": "8.6%",
+      "raw_weight": 8.6,
       "color": "from-cyan-500 to-indigo-500"
     },
     {
-      "feat": "s11_dev_base",
-      "weight": "8.7%",
-      "raw_weight": 8.7,
+      "feat": "s17_roll_mean_10",
+      "weight": "5.3%",
+      "raw_weight": 5.3,
       "color": "from-emerald-500 to-teal-500"
     },
     {
-      "feat": "health_index",
-      "weight": "4.2%",
-      "raw_weight": 4.2,
+      "feat": "s12_roll_slope_30",
+      "weight": "4.7%",
+      "raw_weight": 4.7,
       "color": "from-amber-500 to-orange-500"
     },
     {
-      "feat": "s17_ewma",
-      "weight": "3.9%",
-      "raw_weight": 3.9,
+      "feat": "s3_roll_mean_10",
+      "weight": "4.5%",
+      "raw_weight": 4.5,
       "color": "from-blue-500 to-cyan-500"
     }
   ],
@@ -84,15 +84,15 @@
       43,
       44
     ],
-    "rmse_mean": 15.21,
-    "rmse_std": 0.8,
-    "mae_mean": 11.31,
-    "mae_std": 0.72,
-    "nasa_mean": 406.04,
-    "nasa_std": 46.82,
-    "pr_auc_mean": 0.982,
-    "pr_auc_std": 0.003,
-    "coverage_mean": 0.5933,
-    "coverage_std": 0.0249
+    "rmse_mean": 16.23,
+    "rmse_std": 0.82,
+    "mae_mean": 11.95,
+    "mae_std": 0.52,
+    "nasa_mean": 547.97,
+    "nasa_std": 94.79,
+    "pr_auc_mean": 0.98,
+    "pr_auc_std": 0.004,
+    "coverage_mean": 0.5833,
+    "coverage_std": 0.0094
   }
 }

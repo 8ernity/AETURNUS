@@ -1,7 +1,7 @@
 # ⚡ AETURNUS
 
 > **Autonomous Equipment Tracking and Uptime Restoration through Networked Unified Systems**  
-> An industrial-grade, closed-loop predictive maintenance (PdM) ecosystem for commercial aircraft turbofans. Combines regime-aware signal processing, multi-head probabilistic machine learning, deep learning baselines, and a deterministic triage agent on the NASA C-MAPSS benchmark — with absolute zero hardcoded numbers.
+> An industrial-grade, closed-loop predictive maintenance (PdM) ecosystem for commercial aircraft turbofans. Combines regime-aware signal processing, multi-head probabilistic machine learning, deep learning baselines, and a deterministic triage agent on the NASA C-MAPSS benchmark — with empirical verification from artifact reports.
 
 <div align="center">
 
@@ -15,7 +15,7 @@
 [![MLflow](https://img.shields.io/badge/MLflow-3.0+-0194E2.svg?style=flat&logo=mlflow)](https://mlflow.org/)
 [![SQLite](https://img.shields.io/badge/SQLite-3-003B57.svg?style=flat&logo=sqlite)](https://sqlite.org/)
 [![Dataset](https://img.shields.io/badge/Dataset-NASA%20C--MAPSS-0B3D91.svg?style=flat&logo=nasa)](https://data.nasa.gov/)
-[![Tests](https://img.shields.io/badge/Tests-42%20Passed-brightgreen.svg?style=flat&logo=pytest)](https://docs.pytest.org/)
+[![Tests](https://img.shields.io/badge/Tests-69%20Passed-brightgreen.svg?style=flat&logo=pytest)](https://docs.pytest.org/)
 [![CI](https://img.shields.io/badge/CI-Smoke%20Passed-brightgreen.svg?style=flat&logo=githubactions)](https://github.com/features/actions)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat)](LICENSE)
 
@@ -28,12 +28,12 @@
 Modern aerospace maintenance incurs tens of billions of dollars annually in unexpected component groundings and premature engine overhauls. **AETURNUS** (**A**utonomous **E**quipment **T**racking and **U**ptime **R**estoration through **N**etworked **U**nified **S**ystems) is an industrial-grade, closed-loop predictive maintenance (PdM) ecosystem designed to monitor fleets of gas turbine turbofans continuously across operating regimes.
 
 Built on the benchmark **NASA C-MAPSS dataset** (subsets `FD001` through `FD004`), AETURNUS unifies:
-1. **Regime-Normalized Data Engineering**: Operational regime clustering ($k=6$), strictly causal missing value imputation, and Hampel outlier filtering with zero lookahead leakage.
+1. **Regime-Normalized Data Engineering**: Operational regime clustering ($k=6$), strictly causal missing value imputation, and robust outlier clipping with zero lookahead leakage.
 2. **Multi-Head Machine Learning**: Calibrated Remaining Useful Life (RUL) quantile regressors ($p_{10}, p_{50}, p_{90}$), calibrated binary classifier for critical failure probability ($\le 30$ cycles), and unsupervised Isolation Forest anomaly detection.
 3. **Deep Learning Benchmarks**: PyTorch 1D-CNN and Gated Recurrent Unit (GRU) baselines benchmarked against the gradient boosting champion across multiple random seeds.
 4. **Deterministic Triage Agent (No-LLM)**: Fully explainable, auditable 9-step decision pipeline that evaluates hysteresis, manages technician overrides, suppresses noise, and tracks work orders with SQLite persistence.
 5. **Self-Healing MLOps**: Streaming drift monitoring (Population Stability Index & Kolmogorov-Smirnov test), automated retrain triggers with WebSocket streaming, and a strict 3-criteria holdout gate.
-6. **Zero-Falsification Guarantee**: Every metric, badge, bucket breakdown, and curve displayed in the UI traces directly to real code-generated disk reports (`artifacts/reports/*.json`).
+6. **Empirically Verified Metrics**: Every metric, badge, bucket breakdown, and curve displayed in the UI traces directly to real code-generated disk reports (`artifacts/reports/*.json`).
 
 ---
 
@@ -71,7 +71,7 @@ Built on the benchmark **NASA C-MAPSS dataset** (subsets `FD001` through `FD004`
 | **Probabilistic RUL Regressors** | Quantile gradient boosting heads ($p_{10}, p_{50}, p_{90}$) with mathematical enforcement of $p_{10} \le p_{50} \le p_{90}$. | Conformalized prediction intervals provide bounded risk metrics for flight planners. |
 | **Calibrated Early Warning** | `HistGradientBoostingClassifier` with balanced class weights wrapped in `CalibratedClassifierCV` (sigmoid). | Well-calibrated probability of failure within 30 cycles eliminates overconfident false alerts. |
 | **Deep Learning Baselines** | PyTorch 1D-Convolutional Neural Network and GRU recurrent models trained on sequential sensor slices. | Allows direct empirical comparison between tabular gradient boosting and deep sequential architectures. |
-| **Deterministic Triage Agent** | 9-step decision engine reading rules from `agent_rules.yaml`. Hysteresis hold, REJECT suppression window, and UUID tracking. | 100% deterministic, explainable, and sub-millisecond execution without reliance on LLMs or hallucinations. |
+| **Deterministic Triage Agent** | 9-step decision engine reading rules from `agent_rules.yaml`. Hysteresis hold, REJECT suppression window, and UUID tracking. | Fully deterministic, explainable, and sub-millisecond execution without reliance on LLMs or hallucinations. |
 | **Continuous Drift Detection** | Multi-sensor Population Stability Index (PSI) and 2-sample Kolmogorov-Smirnov tests comparing reference training sets against recent streaming windows. | Detects subtle sensor degradation and environmental drift before catastrophic failure. |
 | **Self-Healing Retraining Loop** | Automated retraining pipeline with real SHA-256 data hashing and a 3-criteria validation holdout gate. | Automatically validates challengers against champions, rolling back degrading models seamlessly. |
 | **Glassmorphic Cockpit UI** | High-performance React 18 + Vite dashboard with 7 comprehensive tabs inspired by professional audio telemetry hardware. | Real-time fleet health, engine telemetry, model comparison, MLOps registry, and maintenance work orders. |
@@ -106,7 +106,7 @@ flowchart TB
 
         subgraph IngestionPipe["🧹 Data Engineering & Causal Cleaning"]
             RawData["Raw Telemetry<br/><i>(Sensors s1..s21)</i>"]:::cleanStyle
-            CausalCleaner["Causal Imputer & Hampel<br/><i>(No-Backfill · Norm Post-Regime)</i>"]:::cleanStyle
+            CausalCleaner["Causal Imputer & Outlier Clipper<br/><i>(No-Backfill · Norm Post-Regime)</i>"]:::cleanStyle
             RegimeClustering["K-Means Clusterer<br/><i>(k=6 Flight Regimes)</i>"]:::cleanStyle
             FeatureEngineering["Feature Builder<br/><i>(Rolling EWMA · Norm Deviations)</i>"]:::cleanStyle
         end
@@ -153,7 +153,7 @@ sequenceDiagram
     participant UI as 🖥️ AETURNUS Cockpit (UI)
 
     Engine->>Pipe: Stream raw cycle telemetry row (unit, cycle, setting_*, s1..s21)
-    Note over Pipe: 1. Isolate sensors via regex (^s\d+$)<br/>2. Causal forward-fill & train median fallback<br/>3. Compute regime cluster & normalize<br/>4. Post-norm Hampel clipping & rolling EWMA
+    Note over Pipe: 1. Isolate sensors via regex (^s\d+$)<br/>2. Causal forward-fill & train median fallback<br/>3. Compute regime cluster & normalize<br/>4. Post-norm outlier clipping & rolling EWMA
     Pipe->>Model: Formatted feature vector (128-dim)
     Model->>Model: Compute monotonic quantiles [p10 &le; p50 &le; p90]
     Model->>Model: Calibrated fail_prob_30 & Isolation Forest anomaly
@@ -173,10 +173,10 @@ All metrics below are computed directly on the standard NASA C-MAPSS holdout tes
 
 | Dataset Subset | Operating Conditions | Fault Modes | Test Engines | Champion RMSE | NASA Asymmetric Score | PR-AUC (Fail $\le 30$) | Conformal Coverage | Target Status |
 |:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **FD001** | Single (Sea Level) | HPC Degradation | 100 | **13.43** | **226.7** | **0.993** | 80.0% | <span style="color:#22c55e;font-weight:bold;">TARGET MET</span> |
-| **FD002** | Six Regimes (Multi) | HPC Degradation | 259 | **22.58** | **2,479.2** | **0.933** | 79.5% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
-| **FD003** | Single (Sea Level) | HPC + Fan Degradation | 100 | **14.88** | **315.4** | **0.990** | 81.0% | <span style="color:#22c55e;font-weight:bold;">TARGET MET</span> |
-| **FD004** | Six Regimes (Multi) | HPC + Fan Degradation | 248 | **23.18** | **2,735.6** | **0.916** | 79.8% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
+| **FD001** | Single (Sea Level) | HPC Degradation | 100 | **13.68** | **247.4** | **0.960** | 73.0% | <span style="color:#22c55e;font-weight:bold;">TARGET MET</span> |
+| **FD002** | Six Regimes (Multi) | HPC Degradation | 259 | **25.27** | **7,150.5** | **0.998** | 64.1% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
+| **FD003** | Single (Sea Level) | HPC + Fan Degradation | 100 | **15.16** | **429.7** | **0.980** | 59.0% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
+| **FD004** | Six Regimes (Multi) | HPC + Fan Degradation | 248 | **25.86** | **4,680.1** | **0.970** | 55.2% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
 
 > [!NOTE]
 > In accordance with strict engineering standards, the system reports **authentic benchmark metrics**. Multi-regime subsets (`FD002` and `FD004`) legitimately report "TARGET MISSED" against aggressive enterprise thresholds ($RMSE \le 18.0$), highlighting the genuine difficulty of turbofan degradation across varying altitudes and Mach numbers.
@@ -187,10 +187,10 @@ Evaluated across 3 distinct initialization seeds (42, 43, 44) to guarantee repro
 
 | Subset | RMSE ($mean \pm std$) | MAE ($mean \pm std$) | NASA Score ($mean \pm std$) | PR-AUC ($mean \pm std$) |
 |:---:|:---:|:---:|:---:|:---:|
-| **FD001** | $13.51 \pm 0.12$ | $9.32 \pm 0.15$ | $230.1 \pm 4.8$ | $0.992 \pm 0.002$ |
-| **FD002** | $22.65 \pm 0.10$ | $16.42 \pm 0.18$ | $2,512.4 \pm 45.2$ | $0.931 \pm 0.003$ |
-| **FD003** | $14.94 \pm 0.09$ | $10.15 \pm 0.12$ | $321.8 \pm 8.9$ | $0.989 \pm 0.002$ |
-| **FD004** | $23.25 \pm 0.11$ | $17.08 \pm 0.19$ | $2,780.2 \pm 62.1$ | $0.914 \pm 0.004$ |
+| **FD001** | $14.82 \pm 0.87$ | $10.37 \pm 0.51$ | $304.2 \pm 48.2$ | $0.964 \pm 0.006$ |
+| **FD002** | $25.39 \pm 0.09$ | $16.62 \pm 0.14$ | $6,816.4 \pm 237.0$ | $0.996 \pm 0.002$ |
+| **FD003** | $16.23 \pm 0.82$ | $11.95 \pm 0.52$ | $548.0 \pm 94.8$ | $0.980 \pm 0.004$ |
+| **FD004** | $26.32 \pm 0.36$ | $18.38 \pm 0.21$ | $5,005.6 \pm 381.5$ | $0.964 \pm 0.010$ |
 
 ### Deep Learning Architecture Comparison
 
@@ -198,12 +198,18 @@ Evaluated on held-out test splits in [src/models/neural_baseline.py](src/models/
 
 | Subset | Model Architecture | Test RMSE | Test MAE | Training Speed / Epoch |
 |:---:|:---|:---:|:---:|:---:|
-| **FD001** | **Champion GBDT (HistGradientBoosting)** | **13.43** | **9.28** | *< 1.0s (Fit)* |
-| FD001 | 1D-CNN Baseline (Conv1D + MaxPool + BatchNorm) | 16.74 | 11.89 | ~0.3s / epoch |
-| FD001 | GRU Recurrent Baseline (2-Layer BiGRU + Linear) | 15.62 | 10.95 | ~0.5s / epoch |
-| **FD002** | **Champion GBDT (HistGradientBoosting)** | **22.58** | **16.35** | *< 2.5s (Fit)* |
-| FD002 | 1D-CNN Baseline | 25.80 | 18.92 | ~0.8s / epoch |
-| FD002 | GRU Recurrent Baseline | 24.31 | 17.80 | ~1.2s / epoch |
+| **FD001** | **HistGradientBoosting Quantile (Champion)** | **13.68** | **9.65** | *~37.8s total* |
+| FD001 | 1D-CNN PyTorch (30-Cycle Window) | 15.67 | 11.85 | ~11.8s total |
+| FD001 | GRU PyTorch (30-Cycle Sequence) | 14.29 | 10.58 | ~18.5s total |
+| **FD002** | **HistGradientBoosting Quantile (Champion)** | **25.27** | **16.54** | *~74.2s total* |
+| FD002 | 1D-CNN PyTorch (30-Cycle Window) | 24.69 | 16.62 | ~11.1s total |
+| FD002 | GRU PyTorch (30-Cycle Sequence) | 25.22 | 17.01 | ~19.9s total |
+| **FD003** | **HistGradientBoosting Quantile (Champion)** | **15.16** | **11.32** | *~42.6s total* |
+| FD003 | 1D-CNN PyTorch (30-Cycle Window) | 17.05 | 12.18 | ~7.5s total |
+| FD003 | GRU PyTorch (30-Cycle Sequence) | 14.01 | 10.22 | ~18.1s total |
+| **FD004** | **HistGradientBoosting Quantile (Champion)** | **25.86** | **18.09** | *~79.4s total* |
+| FD004 | 1D-CNN PyTorch (30-Cycle Window) | 24.91 | 18.10 | ~11.6s total |
+| FD004 | GRU PyTorch (30-Cycle Sequence) | 26.11 | 18.09 | ~24.8s total |
 
 ---
 
@@ -236,7 +242,20 @@ flowchart TD
 ### Monotonic Quantiles & Conformal Coverage
 To eliminate quantile crossings caused by independently trained pinball regressors, predictions undergo post-hoc sorting and clipping:
 $$\hat{p}_{10} \le \hat{p}_{50} \le \hat{p}_{90}$$
-Residual conformal calibration adjustments are calculated on engine-split validation sets to ensure nominal $[p_{10}, p_{90}]$ prediction intervals consistently achieve their target coverage of $\approx 80\%$.
+
+Residual conformal calibration adjustments are calculated on engine-split validation sets with a nominal target coverage of 80% ($[p_{10}, p_{90}]$).
+
+#### 🎯 Empirical Coverage (55.2%–73.0%) vs 80% Nominal Target
+On standard held-out NASA C-MAPSS test engines, the empirical conformal coverage achieved across subsets is:
+- **FD001**: **73.0%** (Single condition, single fault — close to nominal 80% target)
+- **FD002**: **64.1%** (Six operational regimes, single fault — non-stationary flight conditions)
+- **FD003**: **59.0%** (Single condition, dual fault — compounding HPC + Fan wear)
+- **FD004**: **55.2%** (Six operational regimes, dual fault — maximum operating complexity)
+
+**Why empirical coverage is 55%–73% instead of 80%**:
+1. **Regime Distribution Shift**: In multi-regime subsets (`FD002`, `FD004`), flight conditions shift dynamically across 6 altitude/Mach regimes. Late-stage degradation induces severe covariate shift where residuals in extreme flight envelopes exhibit heavier tails than the stationary validation cohort.
+2. **Compound Degradation Modes**: Subsets with dual fault modes (`FD003`, `FD004`) exhibit coupled degradation between high-pressure compressors and fan modules. Wear accelerates non-linearly near end-of-life, causing wider residual dispersion.
+3. **Engineering Transparency**: Rather than artificially widening prediction bounds to claim inflated coverage, AETURNUS reports honest empirical coverage directly from code-generated test reports (`artifacts/reports/evaluation_*.json`).
 
 ### Engine-Level Group Splitting
 To prevent future cycle leakage and optimistic test bias, data splits are grouped strictly by engine unit (`GroupKFold` / `train_test_split(by="unit")`). Engines allocated to validation or holdout sets are never observed in training.
@@ -374,7 +393,7 @@ AETURNUS/
 │   ├── api/
 │   │   └── server.py                  # FastAPI application with REST & WebSocket endpoints
 │   ├── clean/
-│   │   └── cleaner.py                 # Causal imputer, regex filter, and Hampel clipping
+│   │   └── cleaner.py                 # Causal imputer, regex filter, and outlier clipping
 │   ├── common/
 │   │   └── utils.py                   # NASA scoring, PSI calculation, and YAML loaders
 │   ├── features/
@@ -385,7 +404,7 @@ AETURNUS/
 │   └── models/
 │       ├── model_service.py           # Multi-head quantile model inference & calibration
 │       └── neural_baseline.py         # PyTorch 1D-CNN and GRU deep learning architectures
-├── tests/                             # Comprehensive 42-test test suite
+├── tests/                             # Comprehensive 69-test test suite
 │   ├── test_benchmark_and_reports.py  # Report disk verification tests
 │   ├── test_cleaner.py                # Causal cleaning & regex sensor tests
 │   ├── test_metrics.py                # NASA score & metric verification tests
@@ -470,10 +489,10 @@ Open your browser to **http://127.0.0.1:8000** to interact with the fleet cockpi
 
 ## 🧪 Testing & CI Validation
 
-The platform includes a rigorous **42-test Pytest suite** and an autonomous **CI smoke test**:
+The platform includes a rigorous **69-test Pytest suite across 20 test modules** and an autonomous **CI smoke test**:
 
 ```bash
-# Run the complete test suite (cleaner, metrics, agent, mlops, api, ml-quality)
+# Run the complete test suite across all 20 modules
 make test
 # Or: pytest tests/ -v
 
@@ -488,7 +507,34 @@ Every commit and pull request triggers [.github/workflows/ci.yml](.github/workfl
 2. Dependency installation (`pip install -r requirements.txt`).
 3. Frontend bundle compilation (`npm run build`).
 4. Lightning CI smoke test verification (`scripts/ci_smoke_test.py`).
-5. Complete 42-test Pytest suite (`pytest tests/ -v`).
+5. Complete 69-test Pytest suite (`pytest tests/ -v`).
+
+### Test Suite Verification Matrix (20 Modules, 69 Passing Tests)
+
+The test suite rigorously verifies all system invariants across data engineering, ML quality, deterministic triage, MLOps, and API contracts:
+
+| Test File | Verified Functionality & Invariants | Test Count |
+|---|---|:---:|
+| `tests/test_agent_auto_close_and_x7.py` | Automatic work order resolution on recovery, idempotency of transitions, model version verification, and X7 unknown model exception handling. | 4 |
+| `tests/test_benchmark_and_reports.py` | Verifies existence, integrity, schema conformity, and metric bounds of all artifact disk reports (`evaluation_*.json`, `benchmark_summary.json`). | 5 |
+| `tests/test_cleaner.py` | Causal forward-fill without lookahead leakage, regex sensor isolation (`^s\d+$`), missing telemetry fallback, and post-norm outlier clipping. | 4 |
+| `tests/test_drift_matched_age.py` | Population Stability Index (PSI) and Kolmogorov-Smirnov drift scoring against age-matched baseline cohorts to isolate sensor drift from operating age. | 2 |
+| `tests/test_fleet_threading_and_caching.py` | Concurrency and thread safety of `/api/v1/fleet` endpoint, memory cache invalidation, and sub-100ms response latencies across 100+ engines. | 3 |
+| `tests/test_metrics.py` | Asymmetric penalty formulation of NASA scoring function ($s \ge 0$ late penalty vs $s < 0$ early penalty), MAE, RMSE, and PR-AUC precision. | 3 |
+| `tests/test_ml_quality.py` | Multi-head model quality: monotonic quantiles ($p_{10} \le p_{50} \le p_{90}$), Brier score calibration of failure classifier, and baseline shapes. | 6 |
+| `tests/test_mlops.py` | Statistical drift monitoring, retrain triggers, MLflow model registry aliases (`champion`, `challenger`, `previous`), and audit metadata tracking. | 4 |
+| `tests/test_model_service_promotion.py` | Zero-downtime model hot-reloading, cache flushing, and live serving bundle transitions in `ModelService`. | 1 |
+| `tests/test_persistent_engine_split.py` | Engine unit grouping in dataset splits (`train_test_split(by="unit")`), ensuring zero unit leakage between train, validation, and holdout. | 2 |
+| `tests/test_pipeline.py` | Full data pipeline execution: raw C-MAPSS ingestion, parquet feature generation, multi-regime K-Means clustering ($k=6$), and causal EWMA features. | 5 |
+| `tests/test_readme_tables.py` | Automated documentation validation: ensures README benchmark tables match disk reports with zero unverified claims. | 1 |
+| `tests/test_registry_promote_rollback.py` | Model registry promotion and rollback state machine, missing bundle file validation, and HTTP 409 conflict detection. | 2 |
+| `tests/test_replay_api.py` | Telemetry streaming replay endpoints, WebSocket lifecycle broadcasts, and HTTP 400 parameter validation for invalid engines/subsets. | 6 |
+| `tests/test_self_healing.py` | End-to-end autonomous self-healing loop: drift alarm triggers retraining, fixed holdout gate evaluation, and conditional champion promotion. | 2 |
+| `tests/test_stream_vs_batch.py` | Numerical equivalence between single-cycle streaming inference pipeline (`StreamingEnginePipeline`) and batch feature extraction. | 1 |
+| `tests/test_subsystem_and_live_model_version.py` | Sensor subsystem hierarchy mapping (HPC, HPT, LPT, Fan, Core) and live model version propagation in inference payloads. | 2 |
+| `tests/test_triage_agent.py` | Deterministic 9-step decision pipeline, severity bands (Critical/High/Medium/Low), 5-cycle hysteresis hold, technician overrides, and REJECT cooldown. | 10 |
+| `tests/test_upload_validation_and_wiring.py` | Multipart file upload security, CSV/TXT schema validation, malformed file rejection, and evaluation wiring. | 4 |
+| `tests/test_windowed_neural_baseline.py` | PyTorch 1D-CNN and GRU 30-cycle sliding window sequence generation, input shape validation, and sequence inference. | 2 |
 
 ---
 

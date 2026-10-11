@@ -11,15 +11,21 @@ SEVERITY_ORDER = ["HEALTHY", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
 HUMAN_STATUSES = {"APPROVED", "REJECTED", "OVERRIDDEN", "IN_PROGRESS"}
 
 class TriageAgent:
-    def __init__(self, db_path: Optional[Path] = None):
+    def __init__(self, db_path: Optional[Path] = None, rules_cfg: Optional[Dict[str, Any]] = None):
         self.root_dir = get_root_dir()
-        self.rules_cfg = load_yaml("configs/agent_rules.yaml")
+        self.rules_cfg = rules_cfg or load_yaml("configs/agent_rules.yaml")
         self.sensor_cfg = load_yaml("configs/sensor_map.yaml")
         self.rules_version = self.rules_cfg.get("rules_version", "2026-10-07.1")
         
         # SQLite Database Path
         self.db_path = db_path or (self.root_dir / "data" / "work_orders.db")
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.is_memory_db = str(self.db_path) == ":memory:"
+        if not self.is_memory_db:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._shared_conn = None
+        else:
+            self._shared_conn = sqlite3.connect(":memory:", check_same_thread=False)
+            self._shared_conn.row_factory = sqlite3.Row
         
         # In-memory caches (synchronized with SQLite)
         self.open_orders: Dict[str, Dict[str, Any]] = {} # engine_id -> order
@@ -31,7 +37,25 @@ class TriageAgent:
         self._init_db()
         self._load_from_db()
 
+    def get_base_severity(self, cons_rul: float) -> str:
+        sev_bands = self.rules_cfg.get("severity_bands", {})
+        crit_thresh = sev_bands.get("critical", 15)
+        high_thresh = sev_bands.get("high", 30)
+        med_thresh = sev_bands.get("medium", 60)
+        low_thresh = sev_bands.get("low", 100)
+        if cons_rul <= crit_thresh:
+            return "CRITICAL"
+        elif cons_rul <= high_thresh:
+            return "HIGH"
+        elif cons_rul <= med_thresh:
+            return "MEDIUM"
+        elif cons_rul <= low_thresh:
+            return "LOW"
+        return "HEALTHY"
+
     def _get_db(self) -> sqlite3.Connection:
+        if self._shared_conn is not None:
+            return self._shared_conn
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         return conn
@@ -80,9 +104,31 @@ class TriageAgent:
                     timestamp TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS engine_hysteresis (
+                    engine_id TEXT PRIMARY KEY,
+                    held_severity TEXT NOT NULL,
+                    raw_severity TEXT NOT NULL,
+                    consecutive_lower_cycles INTEGER NOT NULL,
+                    last_cycle INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS engine_state_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    engine_id TEXT NOT NULL,
+                    cycle INTEGER NOT NULL,
+                    conservative_rul REAL NOT NULL,
+                    raw_severity TEXT NOT NULL,
+                    severity TEXT NOT NULL,
+                    anomaly_score REAL NOT NULL,
+                    exceptions TEXT,
+                    recorded_at TEXT NOT NULL
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_wo_engine ON work_orders(engine_id);
                 CREATE INDEX IF NOT EXISTS idx_wo_status ON work_orders(status);
                 CREATE INDEX IF NOT EXISTS idx_audit_engine ON audit_events(engine_id);
+                CREATE INDEX IF NOT EXISTS idx_hist_engine ON engine_state_history(engine_id, cycle);
             """)
 
     def _load_from_db(self):
@@ -106,8 +152,65 @@ class TriageAgent:
                         self.closed_orders_history[eid].append(order)
                     else:
                         self.open_orders[eid] = order
+
+                hyst_rows = conn.execute("SELECT * FROM engine_hysteresis").fetchall()
+                for r in hyst_rows:
+                    self.engine_hysteresis[r["engine_id"]] = {
+                        "held_severity": r["held_severity"],
+                        "raw_severity": r["raw_severity"],
+                        "consecutive_lower_cycles": int(r["consecutive_lower_cycles"]),
+                        "last_cycle": int(r["last_cycle"])
+                    }
+
+                hist_rows = conn.execute("SELECT * FROM engine_state_history ORDER BY engine_id, cycle ASC").fetchall()
+                for r in hist_rows:
+                    eid = r["engine_id"]
+                    if eid not in self.engine_state_history:
+                        self.engine_state_history[eid] = []
+                    self.engine_state_history[eid].append({
+                        "cycle": int(r["cycle"]),
+                        "conservative_rul": float(r["conservative_rul"]),
+                        "raw_severity": r["raw_severity"],
+                        "severity": r["severity"],
+                        "anomaly_score": float(r["anomaly_score"]),
+                        "exceptions": json.loads(r["exceptions"]) if r["exceptions"] else []
+                    })
         except Exception as e:
             print(f"Error loading work orders from SQLite: {e}")
+
+    def _persist_hysteresis(self, engine_id: str, hyst: Dict[str, Any]):
+        now = time.strftime("%Y-%m-%d %H:%M:%S")
+        with self._get_db() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO engine_hysteresis (
+                    engine_id, held_severity, raw_severity, consecutive_lower_cycles, last_cycle, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                engine_id,
+                hyst["held_severity"],
+                hyst["raw_severity"],
+                int(hyst["consecutive_lower_cycles"]),
+                int(hyst["last_cycle"]),
+                now
+            ))
+
+    def _persist_state_history_entry(self, engine_id: str, entry: Dict[str, Any]):
+        now = time.strftime("%Y-%m-%d %H:%M:%S")
+        with self._get_db() as conn:
+            conn.execute("""
+                INSERT INTO engine_state_history (
+                    engine_id, cycle, conservative_rul, raw_severity, severity, anomaly_score, exceptions, recorded_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                engine_id,
+                int(entry["cycle"]),
+                float(entry["conservative_rul"]),
+                entry["raw_severity"],
+                entry["severity"],
+                float(entry["anomaly_score"]),
+                json.dumps(entry.get("exceptions", [])),
+                now
+            ))
 
     def _persist_order(self, order: Dict[str, Any]):
         now = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -143,7 +246,7 @@ class TriageAgent:
                 json.dumps(order.get("top_sensors", [])),
                 order.get("recommended_action", ""),
                 json.dumps(order.get("decision_trace", [])),
-                order.get("model_version", "unknown"),
+                order.get("model_version") or "unknown",
                 order.get("rules_version", self.rules_version),
                 order.get("exception"),
                 json.dumps(order.get("events", [])),
@@ -320,6 +423,7 @@ class TriageAgent:
 
         hyst["raw_severity"] = raw_severity
         hyst["last_cycle"] = cycle
+        self._persist_hysteresis(engine_id, hyst)
         final_severity = hyst["held_severity"]
 
         # Step 7: Independent Exception Checks (X1 - X7)
@@ -358,29 +462,67 @@ class TriageAgent:
         if cycle < min_hist_cycles and final_severity in ["HIGH", "CRITICAL"]:
             triggered_exceptions.append(f"X6: Insufficient telemetry history (cycle {cycle} < {min_hist_cycles}) for high-urgency alert")
 
-        # X7: Telemetry data gap or missing model
+        # X7: Telemetry data gap, out-of-order cycles, or missing model specification
         last_recorded_cycle = hist[-1].get("cycle", 0) if len(hist) > 0 else 0
         if last_recorded_cycle > 0 and (cycle - last_recorded_cycle) > data_gap_cycles:
             triggered_exceptions.append(f"X7: Telemetry data gap detected ({cycle - last_recorded_cycle} cycles > {data_gap_cycles})")
+        elif last_recorded_cycle > 0 and cycle < last_recorded_cycle:
+            triggered_exceptions.append(f"X7: Telemetry time regression / out-of-order cycle ({cycle} < {last_recorded_cycle})")
+        elif (data_quality_flags or {}).get("has_gap", False) or (data_quality_flags or {}).get("cycle_gap", 0) > data_gap_cycles:
+            gap_len = (data_quality_flags or {}).get("cycle_gap", data_gap_cycles + 1)
+            triggered_exceptions.append(f"X7: Telemetry data gap detected ({gap_len} cycles > {data_gap_cycles})")
 
         model_ver = prediction.get("model_version")
-        if not model_ver or model_ver in ["unknown", "None"]:
+        if not model_ver or str(model_ver).strip() in ["unknown", "None", ""]:
             triggered_exceptions.append("X7: Missing model version specification")
 
         for exc in triggered_exceptions:
             trace.append(f"exception:{exc.split(':')[0]}")
 
-        # Update historical evaluations
-        hist.append({
+        # Update historical evaluations and persist to SQLite
+        hist_entry = {
             "cycle": cycle,
             "conservative_rul": cons_rul,
             "raw_severity": raw_severity,
             "severity": final_severity,
             "anomaly_score": anomaly_score,
             "exceptions": triggered_exceptions
-        })
+        }
+        hist.append(hist_entry)
+        self._persist_state_history_entry(engine_id, hist_entry)
 
-        # Step 8: Suppression window & cooldown check
+        # Step 8: Suppression window, recovery, & cooldown check
+        existing_order = self.open_orders.get(engine_id)
+
+        # Auto-close on sustained recovery to HEALTHY or LOW
+        if existing_order and final_severity in ["HEALTHY", "LOW"] and not triggered_exceptions:
+            if existing_order.get("status") not in HUMAN_STATUSES:
+                existing_order["status"] = "CLOSED"
+                existing_order["closed_at_cycle"] = cycle
+                existing_order["current_cycle"] = cycle
+                existing_order["conservative_rul"] = cons_rul
+                existing_order["events"].append({
+                    "cycle": cycle,
+                    "event": f"Auto-closed on sustained recovery to {final_severity} (RUL: {cons_rul:.1f})",
+                    "actor": "TriageAgent"
+                })
+                if engine_id not in self.closed_orders_history:
+                    self.closed_orders_history[engine_id] = []
+                self.closed_orders_history[engine_id].append(existing_order)
+                del self.open_orders[engine_id]
+                self._persist_order(existing_order)
+                self._log_audit_event(
+                    engine_id=engine_id,
+                    action="AUTO_CLOSE",
+                    actor="TriageAgent",
+                    cycle=cycle,
+                    work_order_id=existing_order["work_order_id"],
+                    reason=f"Sustained recovery: severity dropped to {final_severity} for {deescalate_cycles} consecutive cycles",
+                    trace=trace
+                )
+                trace.append(f"auto_close:sustained_recovery_to_{final_severity}")
+                return existing_order, trace
+
         # Check human REJECT suppression window
         suppress_until = self.suppressed_engines.get(engine_id, 0)
         if cycle <= suppress_until and final_severity != "CRITICAL":
@@ -417,7 +559,6 @@ class TriageAgent:
         status = "NEEDS_REVIEW" if triggered_exceptions else "AUTO_CREATED"
 
         # Step 9: Create or update work order
-        existing_order = self.open_orders.get(engine_id)
         if existing_order:
             # Refresh live RUL and cycle on open orders
             existing_order["current_cycle"] = cycle
@@ -439,17 +580,39 @@ class TriageAgent:
                     existing_order["status"] = "NEEDS_REVIEW"
                     existing_order["exception"] = "; ".join(triggered_exceptions)
 
-            # Escalate severity if elevated
+            # Escalate or downgrade severity on sustained recovery
             existing_idx = SEVERITY_ORDER.index(existing_order["severity"])
             new_idx = SEVERITY_ORDER.index(final_severity)
             if new_idx > existing_idx:
                 existing_order["severity"] = final_severity
+                existing_order["recommended_action"] = recommended_action
+                existing_order["due_by_cycle"] = due_by_cycle
                 existing_order["events"].append({
                     "cycle": cycle,
                     "event": f"Escalated to {final_severity}",
                     "trace": trace
                 })
                 trace.append(f"dedupe:escalated_to_{final_severity}")
+            elif new_idx < existing_idx:
+                if existing_order.get("status") not in HUMAN_STATUSES:
+                    existing_order["severity"] = final_severity
+                    existing_order["recommended_action"] = recommended_action
+                    existing_order["due_by_cycle"] = due_by_cycle
+                    existing_order["events"].append({
+                        "cycle": cycle,
+                        "event": f"Downgraded to {final_severity} on sustained recovery",
+                        "trace": trace
+                    })
+                    trace.append(f"dedupe:downgraded_to_{final_severity}")
+                    self._log_audit_event(
+                        engine_id=engine_id,
+                        action="DOWNGRADE",
+                        actor="TriageAgent",
+                        cycle=cycle,
+                        work_order_id=existing_order["work_order_id"],
+                        reason=f"Sustained recovery: severity downgraded to {final_severity}",
+                        trace=trace
+                    )
             else:
                 trace.append("dedupe:open_order_refreshed")
 
@@ -482,7 +645,7 @@ class TriageAgent:
             "top_sensors": top_sensors,
             "recommended_action": recommended_action,
             "decision_trace": trace,
-            "model_version": prediction.get("model_version", f"rul-{subset.lower()}@champion"),
+            "model_version": prediction.get("model_version") or "unknown",
             "rules_version": self.rules_version,
             "exception": "; ".join(triggered_exceptions) if triggered_exceptions else None,
             "events": [{
@@ -595,6 +758,7 @@ class TriageAgent:
             target_order["events"].append({"cycle": cycle, "event": f"Severity manually overridden to {new_severity}", "reason": reason, "actor": "HumanOperator"})
             if target_engine in self.engine_hysteresis:
                 self.engine_hysteresis[target_engine]["held_severity"] = new_severity
+                self._persist_hysteresis(target_engine, self.engine_hysteresis[target_engine])
             self._persist_order(target_order)
             self._log_audit_event(engine_id=target_engine, action="OVERRIDE", actor="HumanOperator", cycle=cycle, work_order_id=work_order_id, reason=reason)
 

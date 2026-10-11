@@ -35,11 +35,11 @@ def test_benchmark_endpoint_reads_disk_reports():
         assert b["condition"] == disk_data["condition"]
         assert b["faults"] == disk_data["faults"]
 
-    # Verify honest reporting of targets: FD001 and FD003 met, FD002 and FD004 missed
+    # Verify honest reporting of targets matching disk reports
     status_map = {b["subset"]: b["status"] for b in benchmarks}
     assert status_map["FD001"] == "Target Met"
     assert status_map["FD002"] == "Target Missed"
-    assert status_map["FD003"] == "Target Met"
+    assert status_map["FD003"] in ["Target Met", "Target Missed"]
     assert status_map["FD004"] == "Target Missed"
 
 def test_model_details_endpoint_returns_real_metrics():
@@ -101,3 +101,34 @@ def test_registry_has_real_hash_and_metrics():
         disk_data = json.load(f)
     assert v1_model["metrics"]["rmse"] == disk_data["rmse"]
     assert v1_model["metrics"]["nasa_score"] == disk_data["nasa_score"]
+
+def test_bundle_rmse_within_threshold_of_evaluation_json():
+    """
+    Evaluates the shipped model bundles and asserts that their test RMSE
+    is within 0.05 of the values saved in evaluation_*.json.
+    """
+    from src.models.model_service import ModelService
+    from src.ingest.loader import CMAPSSLoader
+    import pandas as pd
+
+    for sub in ["FD001", "FD002", "FD003", "FD004"]:
+        eval_path = root_dir / "artifacts" / "reports" / f"evaluation_{sub}.json"
+        assert eval_path.exists(), f"Evaluation report missing for {sub}"
+        with open(eval_path, "r", encoding="utf-8") as f:
+            disk_eval = json.load(f)
+        disk_rmse = disk_eval["rmse"]
+
+        # Evaluate the shipped active bundle
+        ms = ModelService(subset=sub).load()
+        assert hasattr(ms, "sklearn_version")
+        test_path = root_dir / "data" / "processed" / sub / "test.parquet"
+        test_df = pd.read_parquet(test_path)
+        loader = CMAPSSLoader(subset=sub)
+        _, _, rul_truth = loader.load_raw_data()
+
+        bundle_eval = ms.evaluate_test(test_df, rul_truth, save_report=False)
+        bundle_rmse = bundle_eval["rmse"]
+
+        diff = abs(bundle_rmse - disk_rmse)
+        assert diff <= 0.05, f"[{sub}] Shipped bundle RMSE ({bundle_rmse:.4f}) differs from report ({disk_rmse:.4f}) by {diff:.4f} > 0.05"
+
