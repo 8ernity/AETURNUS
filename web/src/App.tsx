@@ -208,7 +208,7 @@ export function App() {
         </main>
       </div>
 
-      {/* Fleet Diagnostic Panel */}
+      {/* Fleet Diagnostic Panel & Grok Bot Copilot */}
       <DiagnosticPanel
         currentSubset={currentSubset}
         currentCycle={currentCycle}
@@ -217,6 +217,7 @@ export function App() {
         wsConnected={wsConnected}
         fleetData={fleetData}
         recentAlerts={recentAlerts}
+        onSelectEngine={handleSelectEngine}
       />
     </div>
   );

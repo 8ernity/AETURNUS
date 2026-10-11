@@ -319,7 +319,7 @@ flowchart TD
 ## 📈 MLOps & Autonomous Self-Healing
 
 ```mermaid
-flowchart TD
+flowchart LR
     %% Vibrant MLOps Styles
     classDef streamStyle fill:#0284C7,stroke:#38BDF8,stroke-width:2px,color:#FFFFFF,font-weight:bold
     classDef testStyle fill:#D97706,stroke:#FBBF24,stroke-width:2px,color:#FFFFFF,font-weight:bold
