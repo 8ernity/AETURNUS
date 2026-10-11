@@ -39,6 +39,7 @@ jobs:
           npm ci || npm install
           npm run build
 
+      - name: Build Processed Data
       - name: Build processed data
         run: |
           python -m scripts.build_all_data
