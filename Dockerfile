@@ -45,8 +45,8 @@ COPY artifacts/ /app/artifacts/
 COPY data/ /app/data/
 COPY download_data.py run_app.py Procfile LICENSE README.md /app/
 
-# Build primary FD001 dataset at image build so it starts immediately without runtime delay
-RUN python -c "from src.features.pipeline import DataPipeline; DataPipeline('FD001', inject_faults=False).run()"
+# Build all four subsets at image build so it starts immediately without runtime delay
+RUN python -m scripts.build_all_data
 
 # Copy compiled frontend from Stage 1 into web/dist
 COPY --from=frontend-builder /app/web/dist /app/web/dist

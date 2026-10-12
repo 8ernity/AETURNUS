@@ -124,59 +124,16 @@ export const EngineDetailTab: React.FC<EngineDetailTabProps> = ({
           </div>
 
           <a
-            href={`/api/v1/engines/${engineData.engine_id}/airworthiness-report.pdf?subset=${currentSubset}`}
+            href={`/api/v1/engines/${engineData.engine_id}/maintenance-report.pdf?subset=${currentSubset}`}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2 px-4 py-3 rounded-2xl bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 text-indigo-200 text-xs font-bold transition-all shadow-md group"
           >
             <FileDown className="w-4 h-4 text-indigo-300 group-hover:scale-110 transition-transform" />
-            <span className="hidden sm:inline">FAA Form 8130-3 PDF</span>
+            <span className="hidden sm:inline">Maintenance Report PDF</span>
           </a>
         </div>
       </div>
-
-      {/* Self-Healing Engine De-rating & Mission Re-planning ("True Self-Healing") Banner */}
-      {isCritical && (
-        <div className="bg-gradient-to-r from-rose-950/40 via-amber-950/30 to-indigo-950/40 border border-amber-500/30 p-5 rounded-3xl space-y-3 shadow-lg">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center flex-shrink-0">
-                <Plane className="w-5 h-5 text-amber-400" />
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-amber-300 uppercase tracking-wide flex items-center gap-2">
-                  <span>Critical Degradation Detected — Self-Healing Engine De-rate Recommended</span>
-                </h3>
-                <p className="text-xs text-slate-300 mt-0.5">
-                  Arrhenius creep &amp; thermal fatigue mitigation: Reduce max takeoff thrust by 4–7% to extend remaining useful life by +15–20 cycles, allowing the aircraft to safely reach scheduled maintenance hub.
-                </p>
-              </div>
-            </div>
-            <span className="text-xs font-mono font-bold px-3 py-1 bg-amber-500/20 text-amber-300 rounded-full border border-amber-500/30 self-start sm:self-center flex-shrink-0">
-              FADEC ADVISORY: ACTIVE
-            </span>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1 text-xs font-mono">
-            <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
-              <span className="text-slate-400 text-[10px] block uppercase">Recommended De-rate</span>
-              <span className="text-amber-400 font-bold text-sm">-5.5% Max Thrust</span>
-            </div>
-            <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
-              <span className="text-slate-400 text-[10px] block uppercase">Life Extension</span>
-              <span className="text-emerald-400 font-bold text-sm">+18 Cycles Extended</span>
-            </div>
-            <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
-              <span className="text-slate-400 text-[10px] block uppercase">Extended Safe RUL</span>
-              <span className="text-cyan-300 font-bold text-sm">{(pred.conservative_rul || 12) + 18} Cycles</span>
-            </div>
-            <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
-              <span className="text-slate-400 text-[10px] block uppercase">Designated MRO Hub</span>
-              <span className="text-white font-bold text-sm">JFK Base Hangar 4</span>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Main Charts: 1. RUL Prediction vs Ground Truth & 2. Health Index Degradation */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -401,15 +358,6 @@ export const EngineDetailTab: React.FC<EngineDetailTabProps> = ({
               <p className="text-xs text-slate-300 bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
                 {workOrder.recommended_action}
               </p>
-              {workOrder.parts_bom && (
-                <div className="flex items-center justify-between text-[11px] text-slate-400 bg-slate-950 p-2 rounded-lg border border-slate-800/80 font-mono">
-                  <span className="flex items-center gap-1.5 text-cyan-300">
-                    <PackageCheck className="w-3.5 h-3.5" />
-                    <span>{workOrder.parts_bom.total_items} BOM Line Items</span>
-                  </span>
-                  <span>${workOrder.parts_bom.total_cost_usd?.toLocaleString()}</span>
-                </div>
-              )}
             </div>
           )}
         </div>

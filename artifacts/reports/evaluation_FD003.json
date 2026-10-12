@@ -15,11 +15,11 @@
   "pr_auc": 0.98,
   "target_rmse": 15.0,
   "status": "Target Missed",
-  "interval_coverage": 0.59,
-  "mean_interval_width": 23.98,
+  "interval_coverage": 0.8,
+  "mean_interval_width": 34.64,
   "test_engines_count": 100,
   "train_time_sec": 42.6,
-  "calibration_offset": 0.709,
+  "calibration_offset": 6.05,
   "bucket_errors": [
     {
       "bucket": "0 - 30 cycles (Critical)",

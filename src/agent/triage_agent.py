@@ -7,19 +7,27 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple, Set
 from src.common.utils import get_root_dir, load_yaml
 
-from src.agent.aerospace_pdm import (
-    calculate_throttle_derating,
-    generate_parts_bom,
-    get_next_lifecycle_stage,
-    is_valid_lifecycle_transition,
-    LIFECYCLE_STAGES
-)
-
 SEVERITY_ORDER = ["HEALTHY", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
 HUMAN_STATUSES = {
     "APPROVED", "REJECTED", "OVERRIDDEN", "DISPATCHED",
-    "PARTS_ORDERED", "IN_PROGRESS", "POST_MAINTENANCE_RUNUP", "AIRWORTHY_CLOSED"
+    "PARTS_ORDERED", "IN_PROGRESS", "CLOSED"
 }
+
+MAINTENANCE_STAGES = [
+    "PROPOSED", "APPROVED", "DISPATCHED", "PARTS_ORDERED", "IN_PROGRESS", "CLOSED"
+]
+STAGE_PROGRESSION = {
+    "PROPOSED": "APPROVED",
+    "AUTO_CREATED": "APPROVED",
+    "NEEDS_REVIEW": "APPROVED",
+    "APPROVED": "DISPATCHED",
+    "DISPATCHED": "PARTS_ORDERED",
+    "PARTS_ORDERED": "IN_PROGRESS",
+    "IN_PROGRESS": "CLOSED"
+}
+
+def get_next_lifecycle_stage(current: str) -> Optional[str]:
+    return STAGE_PROGRESSION.get(current)
 
 class TriageAgent:
     def __init__(self, db_path: Optional[Path] = None, rules_cfg: Optional[Dict[str, Any]] = None):
@@ -100,9 +108,7 @@ class TriageAgent:
                     rules_version TEXT NOT NULL,
                     exception TEXT,
                     events TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    derate_plan TEXT,
-                    parts_bom TEXT
+                    updated_at TEXT NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS audit_events (
@@ -144,13 +150,6 @@ class TriageAgent:
                 CREATE INDEX IF NOT EXISTS idx_hist_engine ON engine_state_history(engine_id, cycle);
             """)
 
-            # Column migrations for existing databases
-            cols = [c[1] for c in conn.execute("PRAGMA table_info(work_orders)").fetchall()]
-            if "derate_plan" not in cols:
-                conn.execute("ALTER TABLE work_orders ADD COLUMN derate_plan TEXT")
-            if "parts_bom" not in cols:
-                conn.execute("ALTER TABLE work_orders ADD COLUMN parts_bom TEXT")
-
     def _load_from_db(self):
         try:
             with self._get_db() as conn:
@@ -165,24 +164,9 @@ class TriageAgent:
                         "p50": order["rul_p50"],
                         "p90": order["rul_p90"]
                     }
-                    if "derate_plan" in order and order["derate_plan"]:
-                        try:
-                            order["derate_plan"] = json.loads(order["derate_plan"]) if isinstance(order["derate_plan"], str) else order["derate_plan"]
-                        except Exception:
-                            order["derate_plan"] = {}
-                    else:
-                        order["derate_plan"] = {}
-
-                    if "parts_bom" in order and order["parts_bom"]:
-                        try:
-                            order["parts_bom"] = json.loads(order["parts_bom"]) if isinstance(order["parts_bom"], str) else order["parts_bom"]
-                        except Exception:
-                            order["parts_bom"] = {}
-                    else:
-                        order["parts_bom"] = {}
 
                     eid = order["engine_id"]
-                    if order["status"] in ["CLOSED", "AIRWORTHY_CLOSED", "REJECTED", "CANCELLED"]:
+                    if order["status"] in ["CLOSED", "REJECTED", "CANCELLED"]:
                         if eid not in self.closed_orders_history:
                             self.closed_orders_history[eid] = []
                         self.closed_orders_history[eid].append(order)
@@ -258,9 +242,8 @@ class TriageAgent:
                     closed_at_cycle, severity, raw_severity, status, conservative_rul,
                     rul_p10, rul_p50, rul_p90, fail_prob_30, anomaly_score,
                     due_by_cycle, suspected_subsystem, top_sensors, recommended_action,
-                    decision_trace, model_version, rules_version, exception, events, updated_at,
-                    derate_plan, parts_bom
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    decision_trace, model_version, rules_version, exception, events, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 order["work_order_id"],
                 order["engine_id"],
@@ -287,9 +270,7 @@ class TriageAgent:
                 order.get("rules_version", self.rules_version),
                 order.get("exception"),
                 json.dumps(order.get("events", [])),
-                now,
-                json.dumps(order.get("derate_plan") or {}),
-                json.dumps(order.get("parts_bom") or {})
+                now
             ))
 
     def _log_audit_event(self, engine_id: str, action: str, actor: str, cycle: int, work_order_id: Optional[str] = None, reason: str = "", trace: Optional[List[str]] = None):
@@ -610,9 +591,6 @@ class TriageAgent:
             existing_order["fail_prob_30"] = fail_prob
             existing_order["anomaly_score"] = anomaly_score
             existing_order["decision_trace"] = trace
-            existing_order["derate_plan"] = calculate_throttle_derating(cons_rul, final_severity, suspected_subsystem)
-            if not existing_order.get("parts_bom"):
-                existing_order["parts_bom"] = generate_parts_bom(existing_order["work_order_id"], top_sensors, suspected_subsystem)
 
             # NEVER overwrite human status
             if existing_order.get("status") in HUMAN_STATUSES:
@@ -663,8 +641,6 @@ class TriageAgent:
 
         # Generate new work order with UUID
         work_order_id = f"WO-{uuid.uuid4()}"
-        derate_plan = calculate_throttle_derating(cons_rul, final_severity, suspected_subsystem)
-        parts_bom = generate_parts_bom(work_order_id, top_sensors, suspected_subsystem)
         work_order = {
             "work_order_id": work_order_id,
             "engine_id": engine_id,
@@ -692,8 +668,6 @@ class TriageAgent:
             "model_version": prediction.get("model_version") or "unknown",
             "rules_version": self.rules_version,
             "exception": "; ".join(triggered_exceptions) if triggered_exceptions else None,
-            "derate_plan": derate_plan,
-            "parts_bom": parts_bom,
             "events": [{
                 "cycle": cycle,
                 "event": f"Work order created with severity {final_severity} ({status})",
@@ -776,10 +750,10 @@ class TriageAgent:
             target_order["events"].append({
                 "cycle": cycle,
                 "event": f"Advanced to lifecycle stage {next_stage}",
-                "reason": reason or "Standard flight line maintenance progression",
-                "actor": "FlightLineEngineer"
+                "reason": reason or "Standard maintenance progression",
+                "actor": "MaintenanceEngineer"
             })
-            if next_stage in ["AIRWORTHY_CLOSED", "CLOSED"]:
+            if next_stage == "CLOSED":
                 target_order["closed_at_cycle"] = cycle
                 if target_engine not in self.closed_orders_history:
                     self.closed_orders_history[target_engine] = []
@@ -789,14 +763,14 @@ class TriageAgent:
             self._log_audit_event(
                 engine_id=target_engine,
                 action=f"STAGE_{next_stage}",
-                actor="FlightLineEngineer",
+                actor="MaintenanceEngineer",
                 cycle=cycle,
                 work_order_id=work_order_id,
                 reason=reason or f"Advanced to {next_stage}"
             )
             return True
 
-        elif action in LIFECYCLE_STAGES or action in ["DISPATCHED", "PARTS_ORDERED", "IN_PROGRESS", "POST_MAINTENANCE_RUNUP", "AIRWORTHY_CLOSED"]:
+        elif action in MAINTENANCE_STAGES:
             target_order["status"] = action
             target_order["events"].append({
                 "cycle": cycle,
@@ -804,7 +778,7 @@ class TriageAgent:
                 "reason": reason or "Operator stage transition",
                 "actor": "HumanOperator"
             })
-            if action in ["AIRWORTHY_CLOSED", "CLOSED"]:
+            if action == "CLOSED":
                 target_order["closed_at_cycle"] = cycle
                 if target_engine not in self.closed_orders_history:
                     self.closed_orders_history[target_engine] = []
@@ -820,29 +794,6 @@ class TriageAgent:
                 reason=reason or f"Status set to {action}"
             )
             return True
-
-        elif action == "APPLY_DERATE":
-            if "derate_plan" in target_order and target_order["derate_plan"]:
-                target_order["derate_plan"]["derate_applied"] = True
-                pct = target_order["derate_plan"].get("derate_percentage", 5.5)
-                ext = target_order["derate_plan"].get("life_extension_cycles", 18)
-                target_order["events"].append({
-                    "cycle": cycle,
-                    "event": f"FADEC Takeoff Derate (-{pct}%) activated: +{ext} cycle life extension verified",
-                    "reason": reason or "Flight Operations de-rate signoff",
-                    "actor": "FlightOperations"
-                })
-                self._persist_order(target_order)
-                self._log_audit_event(
-                    engine_id=target_engine,
-                    action="APPLY_DERATE",
-                    actor="FlightOperations",
-                    cycle=cycle,
-                    work_order_id=work_order_id,
-                    reason=reason or f"Applied {pct}% throttle derate (+{ext} cycles)"
-                )
-                return True
-            return False
 
         elif action == "APPROVE":
             target_order["status"] = "APPROVED"
@@ -884,10 +835,10 @@ class TriageAgent:
             self._persist_order(target_order)
             self._log_audit_event(engine_id=target_engine, action="OVERRIDE", actor="HumanOperator", cycle=cycle, work_order_id=work_order_id, reason=reason)
 
-        elif action in ["CLOSE", "AIRWORTHY_CLOSED"]:
-            target_order["status"] = "AIRWORTHY_CLOSED"
+        elif action == "CLOSE":
+            target_order["status"] = "CLOSED"
             target_order["closed_at_cycle"] = cycle
-            target_order["events"].append({"cycle": cycle, "event": "Work order closed & certified airworthy", "reason": reason, "actor": "HumanOperator"})
+            target_order["events"].append({"cycle": cycle, "event": "Work order closed", "reason": reason, "actor": "HumanOperator"})
             
             if target_engine not in self.closed_orders_history:
                 self.closed_orders_history[target_engine] = []

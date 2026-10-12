@@ -107,6 +107,29 @@
       "created_at": "2026-10-12 00:04:32",
       "data_hash": "sha256:a98564cd1712d86f",
       "model_path": "artifacts/models/model_bundle_FD001_v5.0.joblib"
+    },
+    {
+      "version": "v6.0",
+      "subset": "FD001",
+      "alias": "challenger (rejected)",
+      "algorithm": "HistGradientBoosting Challenger",
+      "metrics": {
+        "rmse": 13.6786,
+        "mae": 9.6546,
+        "nasa_score": 247.45,
+        "late_rate": 0.47,
+        "early_rate": 0.53
+      },
+      "holdout_metrics": {
+        "rmse": 13.9709,
+        "mae": 10.0524,
+        "nasa_score": 8991.82,
+        "late_rate": 0.3303,
+        "early_rate": 0.6697
+      },
+      "created_at": "2026-10-12 13:46:53",
+      "data_hash": "sha256:a98564cd1712d86f",
+      "model_path": "artifacts/models/model_bundle_FD001_v6.0.joblib"
     }
   ],
   "active_champion": "v1.0"

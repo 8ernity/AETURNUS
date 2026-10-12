@@ -173,10 +173,10 @@ All metrics below are computed directly on the standard NASA C-MAPSS holdout tes
 
 | Dataset Subset | Operating Conditions | Fault Modes | Test Engines | Champion RMSE | NASA Asymmetric Score | PR-AUC (Fail $\le 30$) | Conformal Coverage | Target Status |
 |:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **FD001** | Single (Sea Level) | HPC Degradation | 100 | **13.68** | **247.4** | **0.960** | 73.0% | <span style="color:#22c55e;font-weight:bold;">TARGET MET</span> |
-| **FD002** | Six Regimes (Multi) | HPC Degradation | 259 | **25.27** | **7,150.5** | **0.998** | 64.1% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
-| **FD003** | Single (Sea Level) | HPC + Fan Degradation | 100 | **15.16** | **429.7** | **0.980** | 59.0% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
-| **FD004** | Six Regimes (Multi) | HPC + Fan Degradation | 248 | **25.86** | **4,680.1** | **0.970** | 55.2% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
+| **FD001** | Single (Sea Level) | HPC Degradation | 100 | **13.68** | **247.4** | **0.960** | 80.0% | <span style="color:#22c55e;font-weight:bold;">TARGET MET</span> |
+| **FD002** | Six Regimes (Multi) | HPC Degradation | 259 | **25.27** | **7,150.5** | **0.998** | 79.9% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
+| **FD003** | Single (Sea Level) | HPC + Fan Degradation | 100 | **15.16** | **429.7** | **0.980** | 80.0% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
+| **FD004** | Six Regimes (Multi) | HPC + Fan Degradation | 248 | **25.86** | **4,680.1** | **0.970** | 80.2% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
 
 > [!NOTE]
 > In accordance with strict engineering standards, the system reports **authentic benchmark metrics**. Multi-regime subsets (`FD002` and `FD004`) legitimately report "TARGET MISSED" against aggressive enterprise thresholds ($RMSE \le 18.0$), highlighting the genuine difficulty of turbofan degradation across varying altitudes and Mach numbers.

@@ -30,11 +30,11 @@ interface WorkOrdersTabProps {
 
 const LIFECYCLE_STAGES = [
   "PROPOSED",
+  "APPROVED",
   "DISPATCHED",
   "PARTS_ORDERED",
   "IN_PROGRESS",
-  "POST_MAINTENANCE_RUNUP",
-  "AIRWORTHY_CLOSED"
+  "CLOSED"
 ];
 
 export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) => {
@@ -124,30 +124,6 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
     }
   };
 
-  const handleDerate = async () => {
-    if (!selectedOrder) return;
-    setActionLoading(true);
-    try {
-      const res = await fetch(`/api/v1/work-orders/${selectedOrder.work_order_id}/derate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          thrust_derate_pct: 5.5,
-          maintenance_hub: "JFK Intl (Base Hangar 4)"
-        })
-      });
-      const data = await res.json();
-      if (data.work_order) {
-        setSelectedOrder(data.work_order);
-      }
-      fetchOrders();
-    } catch (err) {
-      console.error("Error applying derate:", err);
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
   const runWhatIf = async () => {
     try {
       const res = await fetch(`/api/v1/rules/simulate?subset=${currentSubset}`, {
@@ -175,18 +151,17 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
     (o) => o.status === "DISPATCHED" || o.status === "PARTS_ORDERED"
   );
   const maintenanceOrders = workOrders.filter(
-    (o) => o.status === "IN_PROGRESS" || o.status === "POST_MAINTENANCE_RUNUP" || o.status === "APPROVED" || o.status === "OVERRIDDEN"
+    (o) => o.status === "IN_PROGRESS" || o.status === "APPROVED" || o.status === "OVERRIDDEN"
   );
   const closedOrders = workOrders.filter(
-    (o) => o.status === "AIRWORTHY_CLOSED" || o.status === "CLOSED" || o.status === "REJECTED"
+    (o) => o.status === "CLOSED" || o.status === "REJECTED"
   );
 
   const getStageIndex = (status: string) => {
     const idx = LIFECYCLE_STAGES.indexOf(status);
     if (idx !== -1) return idx;
-    if (status === "AUTO_CREATED") return 0;
-    if (status === "APPROVED" || status === "OVERRIDDEN") return 3; // IN_PROGRESS
-    if (status === "CLOSED") return 5; // AIRWORTHY_CLOSED
+    if (status === "AUTO_CREATED" || status === "NEEDS_REVIEW") return 0;
+    if (status === "OVERRIDDEN") return 4;
     return -1;
   };
 
@@ -213,9 +188,9 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
         </div>
 
         <div className="glass-panel p-4 rounded-2xl border-emerald-500/25">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-emerald-300">Airworthy Releases</div>
-          <div className="text-2xl font-bold font-mono text-emerald-400 mt-1">{closedOrders.filter(o => o.status === "AIRWORTHY_CLOSED" || o.status === "CLOSED").length}</div>
-          <div className="text-[10px] text-emerald-400 mt-0.5">Form 8130-3 Certified</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-emerald-300">Closed &amp; Resolved</div>
+          <div className="text-2xl font-bold font-mono text-emerald-400 mt-1">{closedOrders.length}</div>
+          <div className="text-[10px] text-emerald-400 mt-0.5">Maintenance Signoff Completed</div>
         </div>
       </div>
 
@@ -253,11 +228,6 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
                 <p className="text-[11px] text-slate-300 line-clamp-2">
                   {order.recommended_action}
                 </p>
-                {order.derate_plan && (
-                  <div className="text-[9px] bg-indigo-950/60 text-indigo-300 px-2 py-0.5 rounded border border-indigo-800/40 font-mono">
-                    ✈️ De-rate: +{order.derate_plan.life_extension_cycles} cyc
-                  </div>
-                )}
                 <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono pt-1 border-t border-slate-800">
                   <span>Cycle #{order.created_at_cycle}</span>
                   <span className="text-indigo-400 font-medium">Due: #{order.due_by_cycle}</span>
@@ -336,14 +306,9 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
                 <p className="text-[11px] text-slate-300 line-clamp-2">
                   {order.recommended_action}
                 </p>
-                {order.parts_bom && (
-                  <div className="text-[9px] bg-slate-900 text-cyan-300 px-2 py-0.5 rounded border border-slate-700 font-mono">
-                    📦 {order.parts_bom.total_items} Parts · Est ${order.parts_bom.total_cost_usd?.toLocaleString()}
-                  </div>
-                )}
                 <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono pt-1 border-t border-slate-800">
                   <span>Cycle #{order.created_at_cycle}</span>
-                  <span className="text-cyan-400 font-medium">BOM Dispatched</span>
+                  <span className="text-cyan-400 font-medium">Logistics Dispatched</span>
                 </div>
               </div>
             ))}
@@ -389,12 +354,12 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
           </div>
         </div>
 
-        {/* Column 5: Airworthy Release / Closed */}
+        {/* Column 5: Closed & Resolved */}
         <div className="space-y-3">
           <div className="flex items-center justify-between pb-2 border-b border-emerald-500/30">
             <div className="flex items-center gap-2">
               <FileCheck className="w-3.5 h-3.5 text-emerald-400" />
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">4. Airworthy</h3>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">4. Closed</h3>
             </div>
             <span className="text-xs font-mono font-bold text-emerald-400 bg-slate-900 px-2 py-0.5 rounded-full border border-emerald-500/30">
               {closedOrders.length}
@@ -413,14 +378,14 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
                     {order.engine_id}
                   </span>
                   <span className="text-[9px] px-2 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                    {order.status === "AIRWORTHY_CLOSED" ? "CERTIFIED" : order.status}
+                    {order.status}
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-400 line-clamp-2">
                   {order.recommended_action}
                 </p>
                 <div className="text-[10px] text-emerald-400 font-mono pt-1 border-t border-slate-800 flex items-center justify-between">
-                  <span>FAA 8130-3</span>
+                  <span>Resolved</span>
                   <span>Closed #{order.closed_at_cycle || order.created_at_cycle}</span>
                 </div>
               </div>
@@ -502,12 +467,12 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
 
           <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800 font-mono text-xs text-slate-300 max-h-56 overflow-y-auto space-y-1">
             <div className="text-indigo-400 font-semibold"># Severity Bands</div>
-            <div>critical: &lt;= 15 cycles (Triggers Throttle De-rate &amp; Parts BOM)</div>
+            <div>critical: &lt;= 15 cycles (Emergency Maintenance Dispatch)</div>
             <div>high: 16 - 30 cycles</div>
             <div>medium: 31 - 60 cycles</div>
             <div>low: 61 - 100 cycles (Watchlist)</div>
             <div className="text-purple-400 font-semibold mt-2"># Multi-Stage Industrial Lifecycle</div>
-            <div>PROPOSED → DISPATCHED → PARTS_ORDERED → IN_PROGRESS → POST_MAINTENANCE_RUNUP → AIRWORTHY_CLOSED</div>
+            <div>PROPOSED → APPROVED → DISPATCHED → PARTS_ORDERED → IN_PROGRESS → CLOSED</div>
             <div className="text-amber-400 font-semibold mt-2"># Exceptions (HITL Route)</div>
             <div>X1: Interval width &gt; 40 cycles</div>
             <div>X2: Anomaly &gt;= 0.80 but RUL &gt; 100</div>
@@ -538,13 +503,13 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
               <div className="flex items-center gap-3">
                 {/* One-click PDF download */}
                 <a
-                  href={`/api/v1/work-orders/${selectedOrder.work_order_id}/airworthiness-report.pdf`}
+                  href={`/api/v1/work-orders/${selectedOrder.work_order_id}/maintenance-report.pdf`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 text-indigo-200 text-xs font-semibold transition-all shadow-md"
                 >
                   <FileDown className="w-4 h-4 text-indigo-300" />
-                  <span>Certified PDF Report</span>
+                  <span>Maintenance Report PDF</span>
                 </a>
                 <button 
                   onClick={() => setSelectedOrder(null)}
@@ -602,106 +567,10 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
                 <span className="font-bold text-purple-300">{selectedOrder.suspected_subsystem || "HPC"}</span>
               </div>
               <div>
-                <span className="text-slate-400 block text-[10px] uppercase">Target Hub</span>
-                <span className="font-bold text-cyan-300">{selectedOrder.derate_plan?.maintenance_hub || "JFK Hangar 4"}</span>
+                <span className="text-slate-400 block text-[10px] uppercase">Due By</span>
+                <span className="font-bold text-cyan-300">Cycle #{selectedOrder.due_by_cycle || "—"}</span>
               </div>
             </div>
-
-            {/* Self-Healing Flight Throttle De-Rating Recommendation */}
-            {selectedOrder.derate_plan ? (
-              <div className="bg-gradient-to-r from-indigo-950/60 to-purple-950/60 p-5 rounded-2xl border border-indigo-500/30 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Plane className="w-5 h-5 text-indigo-400" />
-                    <h4 className="text-sm font-bold text-white uppercase tracking-wider">
-                      Self-Healing Mission Re-planning: FADEC Engine De-rate
-                    </h4>
-                  </div>
-                  <span className="text-xs px-2.5 py-0.5 rounded-full font-mono font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
-                    {selectedOrder.derate_plan.fadec_status}
-                  </span>
-                </div>
-                <p className="text-xs text-slate-300">
-                  {selectedOrder.derate_plan.operational_recommendation}
-                </p>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-2 text-xs font-mono">
-                  <div className="bg-slate-900/80 p-2.5 rounded-xl border border-indigo-500/20">
-                    <span className="text-slate-400 text-[10px] block">Thrust De-rate</span>
-                    <span className="text-amber-300 font-bold text-sm">-{selectedOrder.derate_plan.thrust_derate_pct}% Max Takeoff</span>
-                  </div>
-                  <div className="bg-slate-900/80 p-2.5 rounded-xl border border-indigo-500/20">
-                    <span className="text-slate-400 text-[10px] block">RUL Extended By</span>
-                    <span className="text-emerald-400 font-bold text-sm">+{selectedOrder.derate_plan.life_extension_cycles} cycles</span>
-                  </div>
-                  <div className="bg-slate-900/80 p-2.5 rounded-xl border border-indigo-500/20">
-                    <span className="text-slate-400 text-[10px] block">Effective RUL</span>
-                    <span className="text-cyan-300 font-bold text-sm">{selectedOrder.derate_plan.effective_rul_cycles} cycles</span>
-                  </div>
-                  <div className="bg-slate-900/80 p-2.5 rounded-xl border border-indigo-500/20">
-                    <span className="text-slate-400 text-[10px] block">Routing Destination</span>
-                    <span className="text-white font-bold text-sm">{selectedOrder.derate_plan.maintenance_hub}</span>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="p-4 rounded-2xl border border-slate-800 bg-slate-900/40 flex items-center justify-between">
-                <div>
-                  <h4 className="text-xs font-bold text-slate-200 uppercase">Self-Healing Throttle De-Rating Available</h4>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Calculate Arrhenius creep life extension (+15–20 cycles) and dispatch FADEC advisory.
-                  </p>
-                </div>
-                <button
-                  onClick={handleDerate}
-                  disabled={actionLoading}
-                  className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-md"
-                >
-                  Apply FADEC De-rate
-                </button>
-              </div>
-            )}
-
-            {/* Parts Bill of Materials (BOM) & Inventory Dispatch */}
-            {selectedOrder.parts_bom && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-                    <PackageCheck className="w-4 h-4 text-cyan-400" />
-                    <span>Parts Requisition &amp; Spares Inventory Dispatch (BOM)</span>
-                  </h4>
-                  <span className="text-xs text-slate-400 font-mono">
-                    Total: <b className="text-cyan-300">${selectedOrder.parts_bom.total_cost_usd?.toLocaleString()}</b> · Lead: <b className="text-slate-200">{selectedOrder.parts_bom.max_lead_time_days} days</b>
-                  </span>
-                </div>
-                
-                <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-950/60">
-                  <table className="w-full text-left text-xs font-mono">
-                    <thead className="bg-slate-900/80 text-slate-400 text-[10px] uppercase border-b border-slate-800">
-                      <tr>
-                        <th className="p-2.5">Component / LRU</th>
-                        <th className="p-2.5">Part Number</th>
-                        <th className="p-2.5">Bin Loc</th>
-                        <th className="p-2.5">Qty</th>
-                        <th className="p-2.5">Unit Cost</th>
-                        <th className="p-2.5">Lead Time</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800/60 text-slate-300">
-                      {selectedOrder.parts_bom.line_items?.map((item: any, i: number) => (
-                        <tr key={i} className="hover:bg-slate-900/40">
-                          <td className="p-2.5 font-semibold text-white">{item.component_name}</td>
-                          <td className="p-2.5 text-cyan-300">{item.part_number}</td>
-                          <td className="p-2.5 text-slate-400">{item.bin_location}</td>
-                          <td className="p-2.5">{item.quantity}</td>
-                          <td className="p-2.5">${item.unit_cost_usd?.toLocaleString()}</td>
-                          <td className="p-2.5 text-amber-300">{item.lead_time_days} d</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
 
             {/* Explainable Decision Trace */}
             <div className="space-y-2">
@@ -725,7 +594,7 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300">
                   Industrial Lifecycle Controls &amp; Sign-off
                 </h4>
-                {selectedOrder.status !== "AIRWORTHY_CLOSED" && (
+                {selectedOrder.status !== "CLOSED" && (
                   <button
                     onClick={handleAdvance}
                     disabled={actionLoading}
@@ -739,7 +608,7 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
 
               <input 
                 type="text" 
-                placeholder="Operator signoff comments or FAA maintenance log notes..."
+                placeholder="Operator signoff comments or maintenance log notes..."
                 value={actionReason}
                 onChange={(e) => setActionReason(e.target.value)}
                 className="w-full text-xs p-2.5 bg-slate-900 rounded-xl border border-slate-700 text-white"
@@ -765,7 +634,7 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
                   disabled={actionLoading}
                   className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 py-2 rounded-xl text-xs font-bold transition-all"
                 >
-                  Certify &amp; Close Out
+                  Close Out Order
                 </button>
               </div>
             </div>
