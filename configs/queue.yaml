@@ -1,0 +1,16 @@
+# configs/queue.yaml
+# Maintenance Queue Prioritization Configuration
+# Weights are starting heuristic defaults for decision support, not learned physical parameters.
+
+weights:
+  w_rul: 0.40       # Weight on urgency from conservative RUL (p10 <= 60 cycles)
+  w_fail: 0.30      # Weight on calibrated P(fail <= 30 cycles)
+  w_anom: 0.15      # Weight on Isolation Forest anomaly score
+  w_trend: 0.15     # Weight on rapid RUL drop trend
+
+normalization:
+  max_urgency_rul: 60.0    # Normalization ceiling for conservative RUL
+  max_rul_drop: 30.0       # Normalization ceiling for RUL drop
+
+daily_service_capacity: 5  # Default maximum engines scheduled per maintenance shift
+disclaimer: "Configured starting weights for decision support, not empirical physical claims."

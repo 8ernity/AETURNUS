@@ -432,14 +432,14 @@ def get_engine_detail(engine_id: str, subset: str = Query(default="FD001")):
         raise HTTPException(status_code=404, detail=f"Engine {engine_id} not found in subset {subset}")
 
     last_row = unit_df.iloc[-1].to_dict()
-    pred = ms.predict_point(last_row)
+    pred = ms.predict_point(last_row, compute_shap=True)
     order = triage_agent.open_orders.get(pred["engine_id"])
 
     # Build cycle-by-cycle series for charts
     trajectory = []
     for _, row in unit_df.iterrows():
         r_dict = row.to_dict()
-        p = ms.predict_point(r_dict)
+        p = ms.predict_point(r_dict, compute_shap=False)
         trajectory.append({
             "cycle": int(r_dict["cycle"]),
             "rul_p10": p["rul_p10"],
@@ -459,18 +459,79 @@ def get_engine_detail(engine_id: str, subset: str = Query(default="FD001")):
         })
 
     # Sensor attributions computed via sensor_map.yaml
-    sensor_map = load_yaml("configs/sensor_map.yaml").get("sensors", {})
-    sensor_attributions = []
-    for s in pred.get("top_sensors", []):
-        info = sensor_map.get(s, {})
-        subsystem = info.get("subsystem", "HPC")
-        dev = abs(float(last_row.get(f"{s}_dev_base", 1.0)))
-        sensor_attributions.append({
-            "sensor": s,
-            "name": info.get("name", s),
-            "subsystem": subsystem,
-            "contribution": round(min(1.0, dev / 10.0), 3),
-            "deviation_score": round(dev, 3)
+    sensor_map_cfg = load_yaml("configs/sensor_map.yaml")
+    sensor_map = sensor_map_cfg.get("sensors", {})
+    subsystem_disclaimer = sensor_map_cfg.get("disclaimer", "indicative association, not a diagnosis")
+    
+    top_contribs = pred.get("top_contributors", [])
+    if not top_contribs:
+        sensor_attributions = []
+        for s in pred.get("top_sensors", []):
+            info = sensor_map.get(s, {})
+            subsystem = info.get("subsystem", "HPC")
+            dev = abs(float(last_row.get(f"{s}_dev_base", 1.0)))
+            sensor_attributions.append({
+                "sensor": s,
+                "name": info.get("name", s),
+                "subsystem": subsystem,
+                "contribution": round(min(1.0, dev / 10.0), 3),
+                "shap_value": round(float(last_row.get(f"{s}_dev_base", 1.0)), 3),
+                "direction": "shortens_life",
+                "impact": "shortens remaining life"
+            })
+    else:
+        sensor_attributions = top_contribs
+
+    # 360° Turbofan Subsystem Health Radar (5 core gas-path stations)
+    subsystem_sensor_groups = {
+        "Fan / LPC": ["s1", "s2", "s5", "s6", "s8", "s13", "s15"],
+        "HPC": ["s3", "s7", "s11"],
+        "Combustor": ["s10", "s12", "s16"],
+        "HPT": ["s9", "s14", "s20"],
+        "LPT / Exhaust": ["s4", "s17", "s21"]
+    }
+
+    hi = float(pred.get("health_index", 1.0))
+    anomaly = float(pred.get("anomaly_score", 0.0))
+    base_degradation = max(5.0, min(95.0, (1.0 - hi) * 85.0 + anomaly * 15.0))
+
+    shap_by_sub = {}
+    for item in sensor_attributions:
+        sub = item.get("subsystem", "")
+        target_group = "HPC" if "HPC" in sub else (
+            "Fan / LPC" if ("Fan" in sub or "LPC" in sub) else (
+                "Combustor" if "Combustor" in sub else (
+                    "HPT" if "HPT" in sub or "Core" in sub else (
+                        "LPT / Exhaust" if "LPT" in sub or "Bleed" in sub else "HPC"
+                    )
+                )
+            )
+        )
+        val = abs(float(item.get("shap_value", item.get("contribution", 0.0))))
+        shap_by_sub[target_group] = max(shap_by_sub.get(target_group, 0.0), val)
+
+    subsystem_health = []
+    for group_name, sensors in subsystem_sensor_groups.items():
+        devs = []
+        for s in sensors:
+            if f"{s}_dev_base" in last_row:
+                devs.append(abs(float(last_row[f"{s}_dev_base"])))
+            elif f"{s}_norm" in last_row:
+                devs.append(abs(float(last_row[f"{s}_norm"])))
+        avg_dev = (sum(devs) / len(devs)) if devs else 0.5
+        shap_weight = shap_by_sub.get(group_name, 0.0)
+
+        group_deg = base_degradation * 0.45 + min(40.0, avg_dev * 16.0) + min(35.0, shap_weight * 25.0)
+        group_deg = round(max(8.0, min(98.0, group_deg)), 1)
+        group_health = round(100.0 - group_deg, 1)
+
+        status = "CRITICAL" if group_deg >= 70.0 else ("WARNING" if group_deg >= 45.0 else ("ADVISORY" if group_deg >= 25.0 else "NOMINAL"))
+        subsystem_health.append({
+            "subsystem": group_name,
+            "health": group_health,
+            "degradation": group_deg,
+            "baseline": 15.0,
+            "status": status
         })
 
     return {
@@ -483,8 +544,11 @@ def get_engine_detail(engine_id: str, subset: str = Query(default="FD001")):
         "trajectory": trajectory,
         "sensor_attributions": sensor_attributions,
         "shap_bars": sensor_attributions,
+        "subsystem_health": subsystem_health,
+        "subsystem_disclaimer": subsystem_disclaimer,
         "regime": int(last_row.get("regime", 0))
     }
+
 
 # ----------------- Replay Controls -----------------
 @app.post("/api/v1/replay/start")
@@ -538,7 +602,70 @@ def get_work_order_detail(work_order_id: str):
         for o in h_list:
             if o["work_order_id"] == work_order_id:
                 return o
-    raise HTTPException(status_code=404, detail=f"Work order {work_order_id} not found")
+@app.get("/api/v1/maintenance-queue")
+def get_maintenance_queue(subset: str = Query(default="FD001"), capacity: int = Query(default=5)):
+    validate_subset(subset)
+    from src.agent.maintenance_queue import MaintenanceQueue
+    mq = MaintenanceQueue()
+    
+    # 1. Collect open work orders for this subset
+    open_items = []
+    for eng_id, wo in triage_agent.open_orders.items():
+        if wo.get("subset") == subset:
+            open_items.append({
+                "work_order_id": wo.get("work_order_id"),
+                "engine_id": eng_id,
+                "unit": int(wo.get("unit", 1)),
+                "conservative_rul": float(wo.get("conservative_rul", 50.0)),
+                "rul_p10": float(wo.get("rul_p10", 50.0)),
+                "fail_prob_30": float(wo.get("fail_prob_30", 0.5)),
+                "anomaly_score": float(wo.get("anomaly_score", 0.2)),
+                "rul_drop": float(wo.get("rul_drop", 5.0)),
+                "suspected_subsystem": wo.get("suspected_subsystem", "HPC"),
+                "severity": wo.get("severity", "HIGH"),
+                "status": wo.get("status", "OPEN"),
+            })
+            
+    # 2. If open work orders is empty, populate from test engines needing service
+    if not open_items:
+        df = get_test_df(subset)
+        ms = get_model_service(subset)
+        last_indices = df.groupby("unit")["cycle"].idxmax()
+        last_rows = df.loc[last_indices].sort_values("unit")
+        
+        for _, row in last_rows.iterrows():
+            r_dict = row.to_dict()
+            pred = ms.predict_point(r_dict)
+            c_rul = pred.get("conservative_rul", 999.0)
+            fp30 = pred.get("fail_prob_30", 0.0)
+            if c_rul <= 60.0 or fp30 >= 0.30:
+                subsys = "HPC"
+                if pred.get("top_contributors"):
+                    subsys = pred["top_contributors"][0].get("subsystem", "HPC")
+                open_items.append({
+                    "work_order_id": f"PENDING-WO-{pred['engine_id']}",
+                    "engine_id": pred["engine_id"],
+                    "unit": int(pred["unit"]),
+                    "conservative_rul": c_rul,
+                    "rul_p10": pred.get("rul_p10", c_rul),
+                    "fail_prob_30": fp30,
+                    "anomaly_score": pred.get("anomaly_score", 0.1),
+                    "rul_drop": 5.0,
+                    "suspected_subsystem": subsys,
+                    "severity": "CRITICAL" if c_rul <= 15 else ("HIGH" if c_rul <= 30 else "MEDIUM"),
+                    "status": "QUEUED"
+                })
+
+    queue = mq.rank_items(open_items, capacity=capacity)
+    return {
+        "subset": subset,
+        "capacity": capacity,
+        "total_open": len(queue),
+        "actionable_count": min(len(queue), capacity),
+        "backlog_count": max(0, len(queue) - capacity),
+        "queue": queue,
+        "disclaimer": mq.disclaimer
+    }
 
 class HumanActionRequest(BaseModel):
     action: str # APPROVE, REJECT, OVERRIDE, CLOSE
@@ -741,25 +868,42 @@ def get_model_benchmark():
 def get_model_details(subset: str):
     validate_subset(subset)
     eval_file = ROOT_DIR / "artifacts" / "reports" / f"evaluation_{subset}.json"
-    if not eval_file.exists():
+    data = {}
+    if eval_file.exists():
+        with open(eval_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    else:
         test_df = get_test_df(subset)
         loader = CMAPSSLoader(subset=subset)
         _, _, rul_truth = loader.load_raw_data()
         ms = get_model_service(subset)
-        res = ms.evaluate_test(test_df, rul_truth)
-        return {
-            "subset": subset,
-            "bucket_errors": res.get("bucket_errors", []),
-            "feature_importance": res.get("feature_importance", []),
-            "status": res.get("status", "Evaluated")
-        }
-    with open(eval_file, "r", encoding="utf-8") as f:
-        data = json.load(f)
+        data = ms.evaluate_test(test_df, rul_truth)
+
+    cv_file = ROOT_DIR / "artifacts" / "reports" / f"cv_{subset}.json"
+    cv_data = None
+    if cv_file.exists():
+        with open(cv_file, "r", encoding="utf-8") as f:
+            cv_data = json.load(f)
+
+    tuning_file = ROOT_DIR / "artifacts" / "reports" / f"tuning_{subset}.json"
+    tuning_data = None
+    if tuning_file.exists():
+        with open(tuning_file, "r", encoding="utf-8") as f:
+            tuning_data = json.load(f)
+
     return {
         "subset": subset,
         "bucket_errors": data.get("bucket_errors", []),
         "feature_importance": data.get("feature_importance", []),
-        "status": data.get("status", "Evaluated")
+        "status": data.get("status", "Evaluated"),
+        "interval_coverage": data.get("interval_coverage", 0.8),
+        "mean_interval_width": data.get("mean_interval_width", 0.0),
+        "coverage_wilson_ci_95": data.get("coverage_wilson_ci_95", []),
+        "coverage_ci_excludes_80": data.get("coverage_ci_excludes_80", False),
+        "test_rmse_bootstrap_ci_95": data.get("test_rmse_bootstrap_ci_95", []),
+        "multi_horizon_metrics": data.get("multi_horizon_metrics", {}),
+        "cv_metrics": cv_data,
+        "tuning": tuning_data
     }
 
 @app.get("/api/v1/models/{subset}/comparison")
@@ -1065,6 +1209,125 @@ async def upload_data(
         "retrain_report": retrain_report
     }
 
+@app.post("/api/v1/predict/batch")
+async def predict_batch(
+    file: UploadFile = File(...),
+    subset: str = Query(default="FD001")
+):
+    validate_subset(subset)
+    raw_name = Path(file.filename or "batch.csv").name
+    safe_name = re.sub(r"[^a-zA-Z0-9_.-]", "_", raw_name)
+    ext = Path(safe_name).suffix.lower()
+    if ext not in ALLOWED_UPLOAD_EXTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file extension '{ext}'. Allowed: {sorted(list(ALLOWED_UPLOAD_EXTS))}"
+        )
+
+    content = await file.read()
+    if len(content) == 0:
+        raise HTTPException(status_code=400, detail="Uploaded batch file is empty.")
+
+    try:
+        if ext == ".parquet":
+            df = pd.read_parquet(io.BytesIO(content))
+        else:
+            try:
+                df = pd.read_csv(io.BytesIO(content))
+                if len(df.columns) == 1 and (" " in content[:1024].decode("utf-8", errors="ignore") or "\t" in content[:1024].decode("utf-8", errors="ignore")):
+                    df = pd.read_csv(io.BytesIO(content), sep=r"\s+", header=None)
+            except Exception:
+                df = pd.read_csv(io.BytesIO(content), sep=r"\s+", header=None)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to parse uploaded batch data: {e}")
+
+    pipe_cfg = load_yaml("configs/pipeline.yaml")
+    std_cols = pipe_cfg.get("dataset", {}).get("columns", [])
+    if len(df.columns) == len(std_cols) and all(isinstance(c, int) for c in df.columns):
+        df.columns = std_cols
+
+    if not {"unit", "cycle"}.issubset(set(df.columns)):
+        raise HTTPException(status_code=400, detail="Schema validation failed: Missing required 'unit' and 'cycle' columns.")
+
+    ms = get_model_service(subset)
+    has_features = any(c.endswith("_norm") or c.endswith("_ewma") for c in df.columns)
+    predictions = []
+    
+    if has_features:
+        last_indices = df.groupby("unit")["cycle"].idxmax()
+        last_rows = df.loc[last_indices].sort_values("unit")
+        for _, row in last_rows.iterrows():
+            pred = ms.predict_point(row.to_dict())
+            c_rul = pred.get("conservative_rul", 999.0)
+            subsys = "HPC"
+            if pred.get("top_contributors"):
+                subsys = pred["top_contributors"][0].get("subsystem", "HPC")
+            predictions.append({
+                "unit": int(pred["unit"]),
+                "cycle": int(pred["cycle"]),
+                "conservative_rul": c_rul,
+                "rul_p10": pred.get("rul_p10", c_rul),
+                "rul_p50": pred.get("rul_p50", c_rul),
+                "rul_p90": pred.get("rul_p90", c_rul),
+                "fail_prob_10": pred.get("fail_prob_10", 0.0),
+                "fail_prob_30": pred.get("fail_prob_30", 0.0),
+                "fail_prob_60": pred.get("fail_prob_60", 0.0),
+                "health_index": pred.get("health_index", 1.0),
+                "anomaly_score": pred.get("anomaly_score", 0.0),
+                "top_sensors": pred.get("top_sensors", []),
+                "suspected_subsystem": subsys,
+                "severity": "CRITICAL" if c_rul <= 15 else ("HIGH" if c_rul <= 30 else ("MEDIUM" if c_rul <= 60 else "HEALTHY"))
+            })
+    else:
+        from src.features.streaming import StreamingEnginePipeline
+        streaming_pipe = StreamingEnginePipeline(subset=subset, model_service=ms)
+        for unit_id, u_df in df.groupby("unit"):
+            u_df = u_df.sort_values("cycle")
+            streaming_pipe.reset_engine(int(unit_id))
+            last_pred = None
+            for _, row in u_df.iterrows():
+                out = streaming_pipe.stream_cycle(row.to_dict())
+                last_pred = out["prediction"]
+            if last_pred:
+                c_rul = last_pred.get("conservative_rul", 999.0)
+                subsys = "HPC"
+                if last_pred.get("top_contributors"):
+                    subsys = last_pred["top_contributors"][0].get("subsystem", "HPC")
+                predictions.append({
+                    "unit": int(unit_id),
+                    "cycle": int(last_pred.get("cycle", 1)),
+                    "conservative_rul": c_rul,
+                    "rul_p10": last_pred.get("rul_p10", c_rul),
+                    "rul_p50": last_pred.get("rul_p50", c_rul),
+                    "rul_p90": last_pred.get("rul_p90", c_rul),
+                    "fail_prob_10": last_pred.get("fail_prob_10", 0.0),
+                    "fail_prob_30": last_pred.get("fail_prob_30", 0.0),
+                    "fail_prob_60": last_pred.get("fail_prob_60", 0.0),
+                    "health_index": last_pred.get("health_index", 1.0),
+                    "anomaly_score": last_pred.get("anomaly_score", 0.0),
+                    "top_sensors": last_pred.get("top_sensors", []),
+                    "suspected_subsystem": subsys,
+                    "severity": "CRITICAL" if c_rul <= 15 else ("HIGH" if c_rul <= 30 else ("MEDIUM" if c_rul <= 60 else "HEALTHY"))
+                })
+
+    crit_count = sum(1 for p in predictions if p["severity"] == "CRITICAL")
+    high_count = sum(1 for p in predictions if p["severity"] == "HIGH")
+    med_count = sum(1 for p in predictions if p["severity"] == "MEDIUM")
+    healthy_count = sum(1 for p in predictions if p["severity"] == "HEALTHY")
+
+    return {
+        "subset": subset,
+        "filename": safe_name,
+        "engines_scored": len(predictions),
+        "predictions": predictions,
+        "summary": {
+            "critical_count": crit_count,
+            "high_count": high_count,
+            "medium_count": med_count,
+            "healthy_count": healthy_count
+        }
+    }
+
 # ==============================================================================
 # MLOps & Drift Monitoring Endpoints
 # ==============================================================================
@@ -1094,6 +1357,75 @@ def get_monitoring_drift(subset: str = Query(default="FD001")):
     ref_sample = train_df.sample(min(1000, len(train_df)), random_state=42)
     curr_sample = test_df.sample(min(500, len(test_df)), random_state=42)
     return mgr.calculate_drift_report(ref_sample, curr_sample)
+
+# ----------------- Observability & Metrics -----------------
+from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
+
+PDM_PREDICTIONS = Counter(
+    "pdm_predictions_total",
+    "Total engine cycle predictions scored",
+    ["subset", "severity"]
+)
+PDM_PREDICTION_LATENCY = Histogram(
+    "pdm_prediction_latency_seconds",
+    "Prediction inference latency",
+    ["subset"]
+)
+PDM_WORK_ORDERS = Counter(
+    "pdm_work_orders_total",
+    "Total work orders generated",
+    ["subset", "severity"]
+)
+PDM_ACTIVE_ALERTS = Gauge(
+    "pdm_active_alerts",
+    "Current status of operational health alerts (1=firing, 0=nominal)",
+    ["rule_name", "severity"]
+)
+PDM_TEST_RMSE = Gauge(
+    "pdm_model_test_rmse",
+    "Model test RMSE on held-out evaluation set",
+    ["subset"]
+)
+PDM_CONFORMAL_COVERAGE = Gauge(
+    "pdm_conformal_coverage",
+    "Empirical conformal interval coverage",
+    ["subset"]
+)
+
+@app.get("/metrics")
+def get_metrics():
+    # Update gauges with live evaluation reports and active alerts
+    for sub in ["FD001", "FD002", "FD003", "FD004"]:
+        eval_f = ROOT_DIR / "artifacts" / "reports" / f"evaluation_{sub}.json"
+        if eval_f.exists():
+            try:
+                with open(eval_f, "r", encoding="utf-8") as f:
+                    ev = json.load(f)
+                PDM_TEST_RMSE.labels(subset=sub).set(float(ev.get("rmse", 0.0)))
+                PDM_CONFORMAL_COVERAGE.labels(subset=sub).set(float(ev.get("interval_coverage", 0.0)))
+            except Exception:
+                pass
+
+    from src.mlops.alerts import AlertManager
+    alert_mgr = AlertManager()
+    alerts = alert_mgr.evaluate_alerts(triage_agent=triage_agent)
+    for a in alerts:
+        PDM_ACTIVE_ALERTS.labels(rule_name=a["rule_name"], severity=a["severity"]).set(1 if a["firing"] else 0)
+
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+@app.get("/api/v1/monitoring/alerts")
+def get_monitoring_alerts():
+    from src.mlops.alerts import AlertManager
+    alert_mgr = AlertManager()
+    alerts = alert_mgr.evaluate_alerts(triage_agent=triage_agent)
+    firing_count = sum(1 for a in alerts if a["firing"])
+    return {
+        "active_alerts_count": firing_count,
+        "total_rules_evaluated": len(alerts),
+        "status": "CRITICAL" if any(a["firing"] and a["severity"] == "CRITICAL" for a in alerts) else ("WARNING" if firing_count > 0 else "HEALTHY"),
+        "alerts": alerts
+    }
 
 @app.post("/api/v1/mlops/retrain")
 async def trigger_mlops_retrain(scenario: str = Query(default="B"), subset: str = Query(default="FD001")):

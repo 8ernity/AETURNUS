@@ -82,8 +82,8 @@ def generate_multi_seed_table(reports_dir: Path) -> str:
 
 def generate_model_comparison_table(reports_dir: Path) -> str:
     headers = [
-        "| Subset | Model Architecture | Test RMSE | Test MAE | Training Speed / Epoch |",
-        "|:---:|:---|:---:|:---:|:---:|"
+        "| Subset | Architecture | Model Name | 5-Fold CV RMSE (Train) | Test RMSE | Test MAE | Training Speed |",
+        "|:---:|:---:|:---|:---:|:---:|:---:|:---:|"
     ]
     rows = []
 
@@ -95,14 +95,15 @@ def generate_model_comparison_table(reports_dir: Path) -> str:
             for m in d.get("models", []):
                 name = m.get("model_name", "Model")
                 arch = m.get("architecture", "")
+                cv_rmse = f"{m.get('cv_mean_rmse', 0.0):.2f}" if "cv_mean_rmse" in m else "N/A"
                 rmse = f"{m.get('rmse', 0.0):.2f}"
                 mae = f"{m.get('mae', 0.0):.2f}"
                 time_s = m.get("train_time_sec", 0.0)
-                speed = f"~{time_s:.1f}s total" if time_s > 0 else "N/A"
-                if "Champion" in name or "GBDT" in arch:
-                    rows.append(f"| **{sub}** | **{name}** | **{rmse}** | **{mae}** | *{speed}* |")
+                speed = f"~{time_s:.1f}s" if time_s > 0 else "N/A"
+                if "Champion" in name:
+                    rows.append(f"| **{sub}** | **{arch}** | **{name}** | **{cv_rmse}** | **{rmse}** | **{mae}** | *{speed}* |")
                 else:
-                    rows.append(f"| {sub} | {name} | {rmse} | {mae} | {speed} |")
+                    rows.append(f"| {sub} | {arch} | {name} | {cv_rmse} | {rmse} | {mae} | {speed} |")
 
     if not rows:
         return ""

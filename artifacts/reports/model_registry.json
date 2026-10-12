@@ -4,13 +4,13 @@
       "version": "v1.0",
       "subset": "FD001",
       "alias": "champion",
-      "algorithm": "HistGradientBoosting Quantile (p10/p50/p90) + Isolation Forest",
+      "algorithm": "LightGBM Quantile (p10/p50/p90) + Isolation Forest",
       "metrics": {
-        "rmse": 13.6786,
-        "mae": 9.6546,
-        "nasa_score": 247.45,
-        "late_rate": 0.47,
-        "early_rate": 0.53
+        "rmse": 13.2955,
+        "mae": 9.5124,
+        "nasa_score": 234.56,
+        "late_rate": 0.49,
+        "early_rate": 0.51
       },
       "created_at": "2026-10-11 14:16:37",
       "data_hash": "sha256:01582267c498e117",
@@ -130,6 +130,121 @@
       "created_at": "2026-10-12 13:46:53",
       "data_hash": "sha256:a98564cd1712d86f",
       "model_path": "artifacts/models/model_bundle_FD001_v6.0.joblib"
+    },
+    {
+      "version": "v7.0",
+      "subset": "FD001",
+      "alias": "challenger (rejected)",
+      "algorithm": "HistGradientBoosting Challenger",
+      "metrics": {
+        "rmse": 13.6786,
+        "mae": 9.6546,
+        "nasa_score": 247.45,
+        "late_rate": 0.47,
+        "early_rate": 0.53
+      },
+      "holdout_metrics": {
+        "rmse": 13.9709,
+        "mae": 10.0524,
+        "nasa_score": 8991.82,
+        "late_rate": 0.3303,
+        "early_rate": 0.6697
+      },
+      "created_at": "2026-10-12 14:10:45",
+      "data_hash": "sha256:a98564cd1712d86f",
+      "model_path": "artifacts/models/model_bundle_FD001_v7.0.joblib"
+    },
+    {
+      "version": "v8.0",
+      "subset": "FD001",
+      "alias": "challenger (rejected)",
+      "algorithm": "HistGradientBoosting Challenger",
+      "metrics": {
+        "rmse": 13.2955,
+        "mae": 9.5124,
+        "nasa_score": 234.56,
+        "late_rate": 0.49,
+        "early_rate": 0.51
+      },
+      "holdout_metrics": {
+        "rmse": 13.6681,
+        "mae": 9.6851,
+        "nasa_score": 8900.47,
+        "late_rate": 0.3409,
+        "early_rate": 0.6585
+      },
+      "created_at": "2026-10-12 22:41:20",
+      "data_hash": "sha256:044adf5e886e2907",
+      "model_path": "artifacts/models/model_bundle_FD001_v8.0.joblib"
+    },
+    {
+      "version": "v9.0",
+      "subset": "FD001",
+      "alias": "challenger (rejected)",
+      "algorithm": "HistGradientBoosting Challenger",
+      "metrics": {
+        "rmse": 13.2955,
+        "mae": 9.5124,
+        "nasa_score": 234.56,
+        "late_rate": 0.49,
+        "early_rate": 0.51
+      },
+      "holdout_metrics": {
+        "rmse": 13.6681,
+        "mae": 9.6851,
+        "nasa_score": 8900.47,
+        "late_rate": 0.3409,
+        "early_rate": 0.6585
+      },
+      "created_at": "2026-10-12 22:55:26",
+      "data_hash": "sha256:044adf5e886e2907",
+      "model_path": "artifacts/models/model_bundle_FD001_v9.0.joblib"
+    },
+    {
+      "version": "v10.0",
+      "subset": "FD001",
+      "alias": "challenger (rejected)",
+      "algorithm": "HistGradientBoosting Challenger",
+      "metrics": {
+        "rmse": 13.2955,
+        "mae": 9.5124,
+        "nasa_score": 234.56,
+        "late_rate": 0.49,
+        "early_rate": 0.51
+      },
+      "holdout_metrics": {
+        "rmse": 13.6681,
+        "mae": 9.6851,
+        "nasa_score": 8900.47,
+        "late_rate": 0.3409,
+        "early_rate": 0.6585
+      },
+      "created_at": "2026-10-12 23:01:40",
+      "data_hash": "sha256:044adf5e886e2907",
+      "model_path": "artifacts/models/model_bundle_FD001_v10.0.joblib"
+    },
+    {
+      "version": "v11.0",
+      "subset": "FD001",
+      "alias": "challenger (rejected)",
+      "algorithm": "HistGradientBoosting Challenger",
+      "metrics": {
+        "rmse": 13.2955,
+        "mae": 9.5124,
+        "nasa_score": 234.56,
+        "late_rate": 0.49,
+        "early_rate": 0.51
+      },
+      "holdout_metrics": {
+        "rmse": 13.6681,
+        "mae": 9.6851,
+        "nasa_score": 8900.47,
+        "late_rate": 0.3409,
+        "early_rate": 0.6585
+      },
+      "created_at": "2026-10-12 23:22:26",
+      "data_hash": "sha256:044adf5e886e2907",
+      "model_path": "artifacts/models/model_bundle_FD001_v11.0.joblib"
     }
   ],
   "active_champion": "v1.0"

@@ -9,6 +9,7 @@ import { MLOpsTab } from "./components/tabs/MLOpsTab";
 import { DataPipelineTab } from "./components/tabs/DataPipelineTab";
 import { HowItWorksTab } from "./components/tabs/HowItWorksTab";
 import { DiagnosticPanel } from "./components/DiagnosticPanel";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 export function App() {
   const [activeTab, setActiveTab] = useState<string>("fleet");
@@ -179,11 +180,13 @@ export function App() {
           )}
 
           {activeTab === "engine" && (
-            <EngineDetailTab
-              selectedEngineId={selectedEngineId}
-              currentSubset={currentSubset}
-              onBackToFleet={() => setActiveTab("fleet")}
-            />
+            <ErrorBoundary fallbackTitle="Engine Telemetry View">
+              <EngineDetailTab
+                selectedEngineId={selectedEngineId}
+                currentSubset={currentSubset}
+                onBackToFleet={() => setActiveTab("fleet")}
+              />
+            </ErrorBoundary>
           )}
 
           {activeTab === "work_orders" && (

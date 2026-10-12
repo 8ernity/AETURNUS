@@ -72,13 +72,26 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
       });
   };
 
+  // Maintenance Queue state
+  const [maintenanceQueue, setMaintenanceQueue] = useState<any[]>([]);
+  const [dailyCapacity, setDailyCapacity] = useState<number>(5);
+  const [showQueue, setShowQueue] = useState<boolean>(true);
+
+  const fetchQueue = () => {
+    fetch(`/api/v1/maintenance-queue?subset=${currentSubset}&capacity=${dailyCapacity}`)
+      .then((res) => res.json())
+      .then((data) => setMaintenanceQueue(data.queue || []))
+      .catch((err) => console.error(err));
+  };
+
   useEffect(() => {
     fetchOrders();
+    fetchQueue();
     fetch("/api/v1/rules")
       .then((res) => res.json())
       .then((data) => setRulesConfig(data))
       .catch((err) => console.error(err));
-  }, []);
+  }, [currentSubset, dailyCapacity]);
 
   const handleAction = async (action: string) => {
     if (!selectedOrder) return;
@@ -191,6 +204,109 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
           <div className="text-[11px] font-semibold uppercase tracking-wider text-emerald-300">Closed &amp; Resolved</div>
           <div className="text-2xl font-bold font-mono text-emerald-400 mt-1">{closedOrders.length}</div>
           <div className="text-[10px] text-emerald-400 mt-0.5">Maintenance Signoff Completed</div>
+        </div>
+      </div>
+
+      {/* Ranked Maintenance Priority Queue (Capacity-Constrained) */}
+      <div className="glass-panel p-6 rounded-3xl space-y-4 border-indigo-500/30">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Wrench className="w-5 h-5 text-indigo-400" />
+            <div>
+              <h3 className="font-bold text-sm text-white">Ranked Maintenance Priority Queue</h3>
+              <p className="text-[11px] text-slate-400">
+                Composite urgency score $S_i$ ranked descending. Top {dailyCapacity} engines flagged as actionable today.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 bg-slate-900/90 px-3 py-1.5 rounded-xl border border-slate-800 text-xs">
+              <span className="text-slate-400">Daily Service Capacity:</span>
+              <select
+                value={dailyCapacity}
+                onChange={(e) => setDailyCapacity(Number(e.target.value))}
+                className="bg-slate-800 text-indigo-300 font-bold px-2 py-0.5 rounded border border-indigo-500/30 font-mono text-xs focus:outline-none"
+              >
+                <option value={3}>3 engines/shift</option>
+                <option value={5}>5 engines/shift</option>
+                <option value={8}>8 engines/shift</option>
+                <option value={10}>10 engines/shift</option>
+              </select>
+            </div>
+            <button
+              onClick={() => setShowQueue(!showQueue)}
+              className="text-xs px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition-colors"
+            >
+              {showQueue ? "Collapse" : "Expand"}
+            </button>
+          </div>
+        </div>
+
+        {showQueue && maintenanceQueue.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-slate-900/80 text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-800">
+                <tr>
+                  <th className="p-3">Rank</th>
+                  <th className="p-3">Engine ID</th>
+                  <th className="p-3">Subsystem</th>
+                  <th className="p-3 font-mono">Priority Score</th>
+                  <th className="p-3 font-mono">RUL (p10)</th>
+                  <th className="p-3 font-mono">P(Fail ≤ 30)</th>
+                  <th className="p-3 font-mono">Anomaly Score</th>
+                  <th className="p-3 text-center">Shift Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60 font-mono">
+                {maintenanceQueue.map((item: any) => (
+                  <tr 
+                    key={item.rank}
+                    className={`transition-colors ${
+                      item.actionable_today ? "bg-emerald-950/15 hover:bg-emerald-950/25" : "hover:bg-slate-800/20 text-slate-400"
+                    }`}
+                  >
+                    <td className="p-3 font-bold text-white">#{item.rank}</td>
+                    <td className="p-3 font-bold text-cyan-300 font-mono">{item.engine_id}</td>
+                    <td className="p-3 font-sans text-slate-300">
+                      <span className="px-2 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/30 text-[10px]">
+                        {item.suspected_subsystem}
+                      </span>
+                    </td>
+                    <td className="p-3 font-bold text-white">
+                      <div className="flex items-center gap-2">
+                        <span>{item.priority_score.toFixed(3)}</span>
+                        <div className="w-16 h-1.5 bg-slate-800 rounded-full overflow-hidden hidden sm:block">
+                          <div 
+                            className="h-full bg-indigo-500 rounded-full" 
+                            style={{ width: `${Math.min(100, item.priority_score * 100)}%` }}
+                          />
+                        </div>
+                      </div>
+                    </td>
+                    <td className="p-3 text-amber-300">{item.conservative_rul.toFixed(1)} cyc</td>
+                    <td className="p-3 text-rose-300">{(item.fail_prob_30 * 100).toFixed(0)}%</td>
+                    <td className="p-3 text-slate-300">{item.anomaly_score.toFixed(2)}</td>
+                    <td className="p-3 text-center">
+                      {item.actionable_today ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 uppercase tracking-wider">
+                          <CheckCircle2 className="w-3 h-3" /> Actionable Today
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700 uppercase tracking-wider">
+                          Backlog
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="text-[10px] text-slate-500 italic">
+          * Configured starting weights (w_rul=0.40, w_fail=0.30, w_anom=0.15, w_trend=0.15) for decision support, not empirical physical claims.
         </div>
       </div>
 

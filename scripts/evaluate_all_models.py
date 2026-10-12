@@ -32,6 +32,10 @@ def main():
         ms = ModelService(subset=sub).load()
         res = ms.evaluate_test(test_df, rul_truth)
 
+        # 5-fold GroupKFold Cross-Validation on persistent train engines
+        print(f">>> Running 5-fold CV evaluation for {sub}...")
+        cv_res = ms.evaluate_cv(k=5, train_df=train_df)
+
         # Multi-seed evaluation over 3 seeds
         print(f">>> Running 3-seed evaluation for {sub}...")
         multi_seed = ms.evaluate_multi_seed(train_df, test_df, rul_truth, seeds=[42, 43, 44])

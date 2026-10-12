@@ -1,80 +1,116 @@
 {
   "subset": "FD001",
+  "algorithm": "lightgbm",
   "condition": "Single (Sea Level)",
   "faults": "1 (HPC Degradation)",
   "metrics": {
-    "rmse": 13.6786,
-    "mae": 9.6546,
-    "nasa_score": 247.45,
-    "late_rate": 0.47,
-    "early_rate": 0.53
+    "rmse": 13.2955,
+    "mae": 9.5124,
+    "nasa_score": 234.56,
+    "late_rate": 0.49,
+    "early_rate": 0.51
   },
-  "rmse": 13.6786,
-  "mae": 9.6546,
-  "nasa_score": 247.45,
-  "pr_auc": 0.96,
+  "rmse": 13.2955,
+  "mae": 9.5124,
+  "nasa_score": 234.56,
+  "pr_auc": 0.966,
   "target_rmse": 14.0,
   "status": "Target Met",
-  "interval_coverage": 0.8,
-  "mean_interval_width": 33.82,
+  "interval_coverage": 0.86,
+  "mean_interval_width": 72.19,
+  "coverage_wilson_ci_95": [
+    0.7786,
+    0.9147
+  ],
+  "coverage_ci_excludes_80": false,
+  "test_rmse_bootstrap_ci_95": [
+    11.23,
+    15.39
+  ],
+  "multi_horizon_metrics": {
+    "10": {
+      "horizon": 10,
+      "pr_auc": 0.948,
+      "threshold": 0.51,
+      "precision": 0.833,
+      "recall": 0.714,
+      "positive_count": 7
+    },
+    "30": {
+      "horizon": 30,
+      "pr_auc": 0.966,
+      "threshold": 0.68,
+      "precision": 0.9,
+      "recall": 0.72,
+      "positive_count": 25
+    },
+    "60": {
+      "horizon": 60,
+      "pr_auc": 0.991,
+      "threshold": 0.62,
+      "precision": 0.946,
+      "recall": 0.897,
+      "positive_count": 39
+    }
+  },
   "test_engines_count": 100,
-  "train_time_sec": 37.8,
-  "calibration_offset": 4.89,
+  "train_time_sec": 40.23,
+  "calibration_offset": 4.9,
   "bucket_errors": [
     {
       "bucket": "0 - 30 cycles (Critical)",
-      "rmse": 3.19,
-      "mae": 2.53,
+      "rmse": 3.43,
+      "mae": 2.67,
       "sample_count": 25
     },
     {
       "bucket": "30 - 60 cycles (High)",
-      "rmse": 5.21,
-      "mae": 4.3,
+      "rmse": 6.23,
+      "mae": 4.62,
       "sample_count": 14
     },
     {
       "bucket": "60 - 125 cycles (Healthy)",
-      "rmse": 17.21,
-      "mae": 13.8,
+      "rmse": 16.61,
+      "mae": 13.44,
       "sample_count": 61
     }
   ],
   "feature_importance": [
     {
       "feat": "cycle_norm",
-      "weight": "63.0%",
-      "raw_weight": 63.0,
+      "weight": "58.1%",
+      "raw_weight": 58.1,
       "color": "from-indigo-500 to-purple-500"
     },
     {
       "feat": "s11_dev_base",
-      "weight": "7.1%",
-      "raw_weight": 7.1,
+      "weight": "6.3%",
+      "raw_weight": 6.3,
       "color": "from-purple-500 to-pink-500"
     },
     {
       "feat": "s14_roll_slope_30",
-      "weight": "3.8%",
-      "raw_weight": 3.8,
+      "weight": "4.2%",
+      "raw_weight": 4.2,
       "color": "from-cyan-500 to-indigo-500"
     },
     {
       "feat": "s11_roll_slope_30",
-      "weight": "3.3%",
-      "raw_weight": 3.3,
+      "weight": "3.2%",
+      "raw_weight": 3.2,
       "color": "from-emerald-500 to-teal-500"
     },
     {
       "feat": "s9_roll_slope_30",
-      "weight": "2.0%",
-      "raw_weight": 2.0,
+      "weight": "2.7%",
+      "raw_weight": 2.7,
       "color": "from-amber-500 to-orange-500"
     },
     {
-      "feat": "s12_roll_slope_30",
-      "weight": "1.5%",
-      "raw_weight": 1.5,
+      "feat": "health_index",
+      "weight": "1.6%",
+      "raw_weight": 1.6,
       "color": "from-blue-500 to-cyan-500"
     }
   ],
@@ -84,15 +120,15 @@
       43,
       44
     ],
-    "rmse_mean": 14.82,
-    "rmse_std": 0.87,
-    "mae_mean": 10.37,
-    "mae_std": 0.51,
-    "nasa_mean": 304.2,
-    "nasa_std": 48.19,
-    "pr_auc_mean": 0.964,
-    "pr_auc_std": 0.006,
+    "rmse_mean": 13.3,
+    "rmse_std": 0.0,
+    "mae_mean": 9.51,
+    "mae_std": 0.0,
+    "nasa_mean": 234.56,
+    "nasa_std": 0.0,
+    "pr_auc_mean": 0.966,
+    "pr_auc_std": 0.0,
     "coverage_mean": 0.76,
-    "coverage_std": 0.0245
+    "coverage_std": 0.0707
   }
 }

@@ -1,0 +1,46 @@
+{
+  "subset": "FD002",
+  "k_folds": 5,
+  "algorithm": "lightgbm",
+  "folds": [
+    {
+      "fold": 1,
+      "rmse": 12.77,
+      "mae": 8.12,
+      "nasa_score": 28803.5,
+      "val_engines": 36
+    },
+    {
+      "fold": 2,
+      "rmse": 13.77,
+      "mae": 8.71,
+      "nasa_score": 32413.4,
+      "val_engines": 37
+    },
+    {
+      "fold": 3,
+      "rmse": 13.32,
+      "mae": 8.4,
+      "nasa_score": 25782.7,
+      "val_engines": 37
+    },
+    {
+      "fold": 4,
+      "rmse": 12.69,
+      "mae": 8.09,
+      "nasa_score": 24095.4,
+      "val_engines": 36
+    },
+    {
+      "fold": 5,
+      "rmse": 13.11,
+      "mae": 8.45,
+      "nasa_score": 23314.9,
+      "val_engines": 36
+    }
+  ],
+  "mean_rmse": 13.13,
+  "std_rmse": 0.39,
+  "mean_nasa": 26882.0,
+  "std_nasa": 3346.3
+}

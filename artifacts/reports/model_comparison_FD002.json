@@ -1,31 +1,65 @@
 {
   "subset": "FD002",
+  "champion_selection_rule": "Lowest mean CV RMSE on TRAIN engines (GroupKFold-5), ties broken by validation NASA score. Test set metrics are reported for evaluation only, never used for selection.",
+  "champion": "LightGBM Quantile (Tuned Champion)",
   "models": [
     {
-      "model_name": "HistGradientBoosting Quantile (Champion)",
+      "model_name": "Ridge Regression",
+      "architecture": "Linear",
+      "cv_mean_rmse": 15.19,
+      "cv_mean_nasa": 30011.0,
+      "rmse": 27.0452,
+      "mae": 19.4932,
+      "nasa_score": 6986.96,
+      "train_time_sec": 2.28
+    },
+    {
+      "model_name": "HistGradientBoosting Quantile",
       "architecture": "GBDT",
-      "rmse": 25.2748,
-      "mae": 16.5372,
-      "nasa_score": 7150.49,
-      "train_time_sec": 74.25
+      "cv_mean_rmse": 13.14,
+      "cv_mean_nasa": 27090.0,
+      "rmse": 24.6797,
+      "mae": 16.1865,
+      "nasa_score": 5797.16,
+      "train_time_sec": 94.53
+    },
+    {
+      "model_name": "LightGBM Quantile (Default)",
+      "architecture": "LightGBM",
+      "cv_mean_rmse": 13.13,
+      "cv_mean_nasa": 26882.0,
+      "rmse": 24.7585,
+      "mae": 16.1563,
+      "nasa_score": 6150.8,
+      "train_time_sec": 65.7
+    },
+    {
+      "model_name": "LightGBM Quantile (Tuned Champion)",
+      "architecture": "LightGBM",
+      "cv_mean_rmse": 13.13,
+      "cv_mean_nasa": 26882.0,
+      "rmse": 24.7585,
+      "mae": 16.1563,
+      "nasa_score": 6150.8,
+      "train_time_sec": 65.48
     },
     {
       "model_name": "1D-CNN PyTorch (30-Cycle Window)",
       "architecture": "CNN",
       "window_size": 30,
-      "rmse": 24.69,
-      "mae": 16.62,
-      "nasa_score": 5705.12,
-      "train_time_sec": 11.14
+      "rmse": 23.65,
+      "mae": 16.03,
+      "nasa_score": 3866.58,
+      "train_time_sec": 19.12
     },
     {
       "model_name": "GRU PyTorch (30-Cycle Sequence)",
       "architecture": "GRU",
       "window_size": 30,
-      "rmse": 25.22,
-      "mae": 17.01,
-      "nasa_score": 5180.32,
-      "train_time_sec": 19.87
+      "rmse": 24.82,
+      "mae": 16.56,
+      "nasa_score": 4867.71,
+      "train_time_sec": 30.58
     }
   ]
 }

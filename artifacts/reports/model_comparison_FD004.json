@@ -1,31 +1,47 @@
 {
   "subset": "FD004",
+  "champion_selection_rule": "Lowest mean CV RMSE on TRAIN engines (GroupKFold-5), ties broken by validation NASA score. Test set metrics are reported for evaluation only, never used for selection.",
+  "champion": "LightGBM Quantile (Tuned Champion)",
   "models": [
     {
-      "model_name": "HistGradientBoosting Quantile (Champion)",
+      "model_name": "Ridge Regression",
+      "architecture": "Linear",
+      "cv_mean_rmse": 15.94,
+      "cv_mean_nasa": 1109294878.9,
+      "rmse": 27.9583,
+      "mae": 21.2451,
+      "nasa_score": 5269.44,
+      "train_time_sec": 2.58
+    },
+    {
+      "model_name": "HistGradientBoosting Quantile",
       "architecture": "GBDT",
-      "rmse": 25.8579,
-      "mae": 18.0853,
-      "nasa_score": 4680.06,
-      "train_time_sec": 79.39
+      "cv_mean_rmse": 13.24,
+      "cv_mean_nasa": 67833.1,
+      "rmse": 25.5813,
+      "mae": 17.6794,
+      "nasa_score": 4448.03,
+      "train_time_sec": 121.41
     },
     {
-      "model_name": "1D-CNN PyTorch (30-Cycle Window)",
-      "architecture": "CNN",
-      "window_size": 30,
-      "rmse": 24.91,
-      "mae": 18.1,
-      "nasa_score": 4067.04,
-      "train_time_sec": 11.57
+      "model_name": "LightGBM Quantile (Default)",
+      "architecture": "LightGBM",
+      "cv_mean_rmse": 13.27,
+      "cv_mean_nasa": 65969.1,
+      "rmse": 25.8014,
+      "mae": 17.9332,
+      "nasa_score": 4415.84,
+      "train_time_sec": 68.2
     },
     {
-      "model_name": "GRU PyTorch (30-Cycle Sequence)",
-      "architecture": "GRU",
-      "window_size": 30,
-      "rmse": 26.11,
-      "mae": 18.09,
-      "nasa_score": 4684.59,
-      "train_time_sec": 24.81
+      "model_name": "LightGBM Quantile (Tuned Champion)",
+      "architecture": "LightGBM",
+      "cv_mean_rmse": 13.27,
+      "cv_mean_nasa": 65969.1,
+      "rmse": 25.8014,
+      "mae": 17.9332,
+      "nasa_score": 4415.84,
+      "train_time_sec": 78.56
     }
   ]
 }

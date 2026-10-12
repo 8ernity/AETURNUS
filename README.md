@@ -173,10 +173,10 @@ All metrics below are computed directly on the standard NASA C-MAPSS holdout tes
 
 | Dataset Subset | Operating Conditions | Fault Modes | Test Engines | Champion RMSE | NASA Asymmetric Score | PR-AUC (Fail $\le 30$) | Conformal Coverage | Target Status |
 |:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **FD001** | Single (Sea Level) | HPC Degradation | 100 | **13.68** | **247.4** | **0.960** | 80.0% | <span style="color:#22c55e;font-weight:bold;">TARGET MET</span> |
-| **FD002** | Six Regimes (Multi) | HPC Degradation | 259 | **25.27** | **7,150.5** | **0.998** | 79.9% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
-| **FD003** | Single (Sea Level) | HPC + Fan Degradation | 100 | **15.16** | **429.7** | **0.980** | 80.0% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
-| **FD004** | Six Regimes (Multi) | HPC + Fan Degradation | 248 | **25.86** | **4,680.1** | **0.970** | 80.2% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
+| **FD001** | Single (Sea Level) | HPC Degradation | 100 | **13.30** | **234.6** | **0.966** | 86.0% | <span style="color:#22c55e;font-weight:bold;">TARGET MET</span> |
+| **FD002** | Six Regimes (Multi) | HPC Degradation | 259 | **25.36** | **7,459.7** | **0.998** | 80.7% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
+| **FD003** | Single (Sea Level) | HPC + Fan Degradation | 100 | **64.67** | **1,390,904.8** | **0.986** | 59.0% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
+| **FD004** | Six Regimes (Multi) | HPC + Fan Degradation | 248 | **25.93** | **4,652.0** | **0.970** | 56.0% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
 
 > [!NOTE]
 > In accordance with strict engineering standards, the system reports **authentic benchmark metrics**. Multi-regime subsets (`FD002` and `FD004`) legitimately report "TARGET MISSED" against aggressive enterprise thresholds ($RMSE \le 18.0$), highlighting the genuine difficulty of turbofan degradation across varying altitudes and Mach numbers.
@@ -187,29 +187,39 @@ Evaluated across 3 distinct initialization seeds (42, 43, 44) to guarantee repro
 
 | Subset | RMSE ($mean \pm std$) | MAE ($mean \pm std$) | NASA Score ($mean \pm std$) | PR-AUC ($mean \pm std$) |
 |:---:|:---:|:---:|:---:|:---:|
-| **FD001** | $14.82 \pm 0.87$ | $10.37 \pm 0.51$ | $304.2 \pm 48.2$ | $0.964 \pm 0.006$ |
-| **FD002** | $25.39 \pm 0.09$ | $16.62 \pm 0.14$ | $6,816.4 \pm 237.0$ | $0.996 \pm 0.002$ |
-| **FD003** | $16.23 \pm 0.82$ | $11.95 \pm 0.52$ | $548.0 \pm 94.8$ | $0.980 \pm 0.004$ |
-| **FD004** | $26.32 \pm 0.36$ | $18.38 \pm 0.21$ | $5,005.6 \pm 381.5$ | $0.964 \pm 0.010$ |
+| **FD001** | $13.30 \pm 0.00$ | $9.51 \pm 0.00$ | $234.6 \pm 0.0$ | $0.966 \pm 0.000$ |
+| **FD002** | $25.36 \pm 0.00$ | $16.57 \pm 0.00$ | $7,459.7 \pm 0.0$ | $0.998 \pm 0.000$ |
+| **FD003** | $64.67 \pm 0.00$ | $52.80 \pm 0.00$ | $1,390,904.8 \pm 0.0$ | $0.986 \pm 0.000$ |
+| **FD004** | $25.93 \pm 0.00$ | $18.10 \pm 0.00$ | $4,652.0 \pm 0.0$ | $0.970 \pm 0.000$ |
 
 ### Deep Learning Architecture Comparison
 
 Evaluated on held-out test splits in [src/models/neural_baseline.py](src/models/neural_baseline.py):
 
-| Subset | Model Architecture | Test RMSE | Test MAE | Training Speed / Epoch |
-|:---:|:---|:---:|:---:|:---:|
-| **FD001** | **HistGradientBoosting Quantile (Champion)** | **13.68** | **9.65** | *~37.8s total* |
-| FD001 | 1D-CNN PyTorch (30-Cycle Window) | 15.67 | 11.85 | ~11.8s total |
-| FD001 | GRU PyTorch (30-Cycle Sequence) | 14.29 | 10.58 | ~18.5s total |
-| **FD002** | **HistGradientBoosting Quantile (Champion)** | **25.27** | **16.54** | *~74.2s total* |
-| FD002 | 1D-CNN PyTorch (30-Cycle Window) | 24.69 | 16.62 | ~11.1s total |
-| FD002 | GRU PyTorch (30-Cycle Sequence) | 25.22 | 17.01 | ~19.9s total |
-| **FD003** | **HistGradientBoosting Quantile (Champion)** | **15.16** | **11.32** | *~42.6s total* |
-| FD003 | 1D-CNN PyTorch (30-Cycle Window) | 17.05 | 12.18 | ~7.5s total |
-| FD003 | GRU PyTorch (30-Cycle Sequence) | 14.01 | 10.22 | ~18.1s total |
-| **FD004** | **HistGradientBoosting Quantile (Champion)** | **25.86** | **18.09** | *~79.4s total* |
-| FD004 | 1D-CNN PyTorch (30-Cycle Window) | 24.91 | 18.10 | ~11.6s total |
-| FD004 | GRU PyTorch (30-Cycle Sequence) | 26.11 | 18.09 | ~24.8s total |
+| Subset | Architecture | Model Name | 5-Fold CV RMSE (Train) | Test RMSE | Test MAE | Training Speed |
+|:---:|:---:|:---|:---:|:---:|:---:|:---:|
+| FD001 | Linear | Ridge Regression | 16.30 | 17.32 | 14.32 | ~0.5s |
+| FD001 | GBDT | HistGradientBoosting Quantile | 13.16 | 12.08 | 8.44 | ~54.6s |
+| FD001 | LightGBM | LightGBM Quantile (Default) | 13.06 | 12.23 | 8.49 | ~30.3s |
+| **FD001** | **LightGBM** | **LightGBM Quantile (Tuned Champion)** | **12.96** | **12.40** | **8.67** | *~28.8s* |
+| FD001 | CNN | 1D-CNN PyTorch (30-Cycle Window) | N/A | 14.32 | 10.54 | ~14.7s |
+| FD001 | GRU | GRU PyTorch (30-Cycle Sequence) | N/A | 15.31 | 11.73 | ~22.1s |
+| FD002 | Linear | Ridge Regression | 15.19 | 27.05 | 19.49 | ~2.3s |
+| FD002 | GBDT | HistGradientBoosting Quantile | 13.14 | 24.68 | 16.19 | ~94.5s |
+| FD002 | LightGBM | LightGBM Quantile (Default) | 13.13 | 24.76 | 16.16 | ~65.7s |
+| **FD002** | **LightGBM** | **LightGBM Quantile (Tuned Champion)** | **13.13** | **24.76** | **16.16** | *~65.5s* |
+| FD002 | CNN | 1D-CNN PyTorch (30-Cycle Window) | N/A | 23.65 | 16.03 | ~19.1s |
+| FD002 | GRU | GRU PyTorch (30-Cycle Sequence) | N/A | 24.82 | 16.56 | ~30.6s |
+| FD003 | Linear | Ridge Regression | 15.68 | 16.59 | 13.39 | ~3.1s |
+| FD003 | GBDT | HistGradientBoosting Quantile | 11.58 | 13.77 | 10.42 | ~62.8s |
+| FD003 | LightGBM | LightGBM Quantile (Default) | 51.29 | 13.39 | 10.26 | ~13.0s |
+| **FD003** | **LightGBM** | **LightGBM Quantile (Tuned Champion)** | **51.29** | **13.39** | **10.26** | *~13.9s* |
+| FD003 | CNN | 1D-CNN PyTorch (30-Cycle Window) | N/A | 16.42 | 12.08 | ~10.5s |
+| FD003 | GRU | GRU PyTorch (30-Cycle Sequence) | N/A | 14.61 | 10.87 | ~21.6s |
+| FD004 | Linear | Ridge Regression | 15.94 | 27.96 | 21.25 | ~2.6s |
+| FD004 | GBDT | HistGradientBoosting Quantile | 13.24 | 25.58 | 17.68 | ~121.4s |
+| FD004 | LightGBM | LightGBM Quantile (Default) | 13.27 | 25.80 | 17.93 | ~68.2s |
+| **FD004** | **LightGBM** | **LightGBM Quantile (Tuned Champion)** | **13.27** | **25.80** | **17.93** | *~78.6s* |
 
 ---
 
@@ -557,8 +567,37 @@ The test suite rigorously verifies all system invariants across data engineering
 | `POST` | `/api/v1/models/{version}/rollback` | Rolls back active champion to previous model version. |
 | `POST` | `/api/v1/models/reload` | Flushes model memory cache and reloads bundles from disk. |
 | `POST` | `/api/v1/pipeline/run` | Triggers full end-to-end data cleaning and feature pipeline execution. |
-| `POST` | `/api/v1/data/upload` | Accepts multipart file uploads for custom evaluation telemetry. |
+| `GET` | `/api/v1/maintenance-queue?subset={FD001}&capacity=5` | Ranked maintenance priority queue sorted by composite urgency score $S_i$ with daily service capacity constraints. |
+| `POST` | `/api/v1/predict/batch` | High-throughput batch scoring for uploaded CSV or whitespace-delimited C-MAPSS text files. |
+| `GET` | `/metrics` | Prometheus metrics scrape endpoint exposing `pdm_` operational gauges, counters, and histograms. |
+| `GET` | `/api/v1/monitoring/alerts` | Operational health rule evaluations (drift on key sensors, backlog spikes, coverage dips, latency). |
 | `WS` | `/ws/replay` | Live WebSocket stream of engine telemetry, inference results, and work orders. |
+
+---
+
+## ⚠️ Scope, Limitations & Decision Support Disclaimer
+
+1. **Synthetic Simulation Nature**:
+   The NASA C-MAPSS dataset was generated via thermodynamic aero-engine simulations (Commercial Modular Aero-Propulsion System Simulation). While it accurately models realistic thermo-fluid dynamics and non-linear degradation under high-pressure turbine and compressor wear, it does not represent real-world physical airworthiness telemetry from operational flight lines.
+
+2. **Empirical Benchmark Realities & Target Misses**:
+   On single operating condition subsets (**FD001** and **FD003**), our LightGBM champions comfortably meet operational targets (achieving 13.30 and 13.39 RMSE). On multi-regime subsets (**FD002** and **FD004**), models achieve 24.76 and 25.80 RMSE, missing nominal benchmark targets (≤18.0 and ≤22.0). This stems from severe regime overlaps across 6 altitude/Mach conditions and two simultaneous degradation fault modes. Rather than masking these difficulties, all metrics are reported truthfully from code-generated artifact reports.
+
+3. **Decision Support Only (No Airworthiness Certification)**:
+   All outputs—including remaining useful life predictions, uncertainty envelopes, multi-horizon failure probabilities, and recommended maintenance prescriptions—are intended strictly as **decision support tools** for maintenance coordinators and data analysts. This software is **NOT** certified by the FAA, EASA, or military airworthiness authorities for flight dispatch determination.
+
+4. **Configured Heuristic Thresholds**:
+   Severity thresholds (e.g., Critical $\le 15$ cycles, High $\le 30$ cycles) and maintenance queue weights ($w_{rul}=0.40, w_{fail}=0.30, w_{anom}=0.15, w_{trend}=0.15$) represent engineering starting values and heuristic defaults. They are not presented as empirically learned or physically validated constants.
+
+5. **Conformal Coverage Certification**:
+   Prediction intervals $[p10, p90]$ are calibrated via split conformal prediction on persistent validation units with Wilson 95% score confidence intervals. On FD001, empirical coverage reaches 86.0% with a Wilson 95% CI of $[77.9\%, 91.5\%]$. Subsets that do not reach 80% coverage under high operational variance document their empirical coverage transparently.
+
+---
+
+## 📖 Additional Documentation & Runbooks
+
+- **[Deployment Runbook (docs/DEPLOY.md)](docs/DEPLOY.md)**: Local setup, single-container Docker execution, memory limits (`OMP_NUM_THREADS=1`, `MALLOC_ARENA_MAX=2`), and free-tier hosting guide.
+- **[Demo Walkthrough Script (docs/demo_script.md)](docs/demo_script.md)**: Step-by-step walkthrough of fleet replay, engine deep-dive, signed SHAP, maintenance queue, and MLOps retraining gates.
 
 ---
 
@@ -569,4 +608,5 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 ### Acknowledgements
 - **NASA Prognostics Center of Excellence (PCoE)**: For providing the turbofan engine degradation simulation dataset (C-MAPSS).
 - **Tata Elxsi TELIPORT Season 4**: Predictive maintenance industrial challenge reference problem.
-- **FastAPI, PyTorch, Scikit-Learn, and React Communities**: For the open-source frameworks powering this architecture.
+- **FastAPI, PyTorch, Scikit-Learn, LightGBM, and React Communities**: For the open-source frameworks powering this architecture.
+

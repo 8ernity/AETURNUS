@@ -14,3 +14,10 @@ promotion_gate:
   rmse_min_improvement_pct: 2.0
   nasa_score_max_degradation_pct: 5.0
   late_prediction_max_increase_pp: 3.0
+
+alerts:
+  drift_psi_threshold: 0.25
+  key_drift_sensors: ["s3", "s7", "s11"]
+  backlog_critical_high_threshold: 10
+  coverage_min_threshold: 0.75
+  latency_p95_ms_threshold: 100.0

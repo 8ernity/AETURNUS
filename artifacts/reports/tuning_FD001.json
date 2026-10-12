@@ -1,0 +1,18 @@
+{
+  "subset": "FD001",
+  "n_trials": 5,
+  "default_cv_rmse": 13.06,
+  "default_cv_nasa": 9733.7,
+  "tuned_cv_rmse": 12.961,
+  "tuned_cv_nasa": 10122.0,
+  "best_params": {
+    "n_estimators": 140,
+    "learning_rate": 0.08166118011791393,
+    "num_leaves": 24,
+    "min_child_samples": 31,
+    "reg_alpha": 0.15535445807588452,
+    "reg_lambda": 0.0014853153980421612,
+    "random_state": 42
+  },
+  "train_time_sec": 144.5
+}

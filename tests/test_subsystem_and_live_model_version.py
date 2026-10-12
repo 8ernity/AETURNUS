@@ -20,7 +20,7 @@ def test_suspected_subsystem_and_live_model_version():
     assert data["kpis"]["live_model_version"] == expected_version
 
     # 2. suspected_subsystem must be a genuine turbofan subsystem, not a raw sensor id like "s11"
-    valid_subsystems = {"HPC", "LPC", "LPT", "HPT", "Fan", "Combustor", "Bleed/Cooling"}
+    valid_subsystems = {"HPC", "LPC", "LPT", "HPT", "Fan", "Combustor", "Bleed/Cooling", "Core", "Bleed"}
     for eng in data["engines"][:10]:
         subsystem = eng["suspected_subsystem"]
         assert not subsystem.startswith("s"), f"suspected_subsystem '{subsystem}' looks like a raw sensor id"
@@ -34,7 +34,7 @@ def test_engine_detail_sensor_attributions():
 
     assert "sensor_attributions" in data
     assert len(data["sensor_attributions"]) > 0
-    valid_subsystems = {"HPC", "LPC", "LPT", "HPT", "Fan", "Combustor", "Bleed/Cooling"}
+    valid_subsystems = {"HPC", "LPC", "LPT", "HPT", "Fan", "Combustor", "Bleed/Cooling", "Core", "Bleed"}
     for attr in data["sensor_attributions"]:
         assert "sensor" in attr
         assert "subsystem" in attr

@@ -403,10 +403,15 @@ class TriageAgent:
         else:
             trace.append("M2:not_fired")
 
-        # M3: High failure probability
-        if fail_prob >= fail_thresh:
+        # M3: Multi-horizon failure probability with validation-tuned threshold
+        effective_tau_30 = float(prediction.get("classifier_threshold_30", fail_thresh))
+        fail_prob_10 = float(prediction.get("fail_prob_10", 0.0))
+        if fail_prob_10 >= 0.70:
+            sev_idx = max(sev_idx, SEVERITY_ORDER.index("CRITICAL"))
+            trace.append(f"M3:fired(fail_prob_10={fail_prob_10:.2f}->CRITICAL)")
+        elif fail_prob >= effective_tau_30:
             sev_idx = max(sev_idx, SEVERITY_ORDER.index("HIGH"))
-            trace.append(f"M3:fired(fail_prob={fail_prob:.2f}->HIGH)")
+            trace.append(f"M3:fired(fail_prob={fail_prob:.2f}>={effective_tau_30:.2f}->HIGH)")
         else:
             trace.append("M3:not_fired")
 

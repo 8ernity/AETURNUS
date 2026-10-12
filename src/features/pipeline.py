@@ -109,7 +109,8 @@ class DataPipeline:
             lambda r: rul_dict[r["unit"]] + (max_test_cycles[r["unit"]] - r["cycle"]), axis=1
         )
         test_final["rul_capped"] = np.minimum(test_final["rul_raw"], self.builder.rul_cap)
-        test_final["fails_within_30"] = (test_final["rul_raw"] <= 30).astype(int)
+        for h in [10, 30, 60]:
+            test_final[f"fails_within_{h}"] = (test_final["rul_raw"] <= h).astype(int)
 
         # Save Processed Parquets
         train_parquet = self.processed_dir / "train.parquet"

@@ -127,13 +127,15 @@ class FeatureBuilder:
 
         return smoothed_hi
 
-    def create_targets(self, train_df: pd.DataFrame) -> pd.DataFrame:
+    def create_targets(self, train_df: pd.DataFrame, horizons: Optional[List[int]] = None) -> pd.DataFrame:
         df = train_df.copy()
         max_cycles = df.groupby("unit")["cycle"].transform("max")
         raw_rul = max_cycles - df["cycle"]
         df["rul_raw"] = raw_rul
         df["rul_capped"] = np.minimum(raw_rul, self.rul_cap)
-        df["fails_within_30"] = (raw_rul <= 30).astype(int)
+        hrs = horizons if horizons is not None else [10, 30, 60]
+        for h in hrs:
+            df[f"fails_within_{h}"] = (raw_rul <= h).astype(int)
         return df
 
     def save(self, file_path: Path):

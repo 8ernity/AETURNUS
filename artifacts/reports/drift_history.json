@@ -1,93 +1,93 @@
 {
-  "timestamp": "2026-10-12 13:45:51",
+  "timestamp": "2026-10-12 23:37:50",
   "subset": "FD001",
   "monitored_features_count": 14,
-  "drifting_features_count": 0,
-  "share_drifting_features": 0.0,
+  "drifting_features_count": 2,
+  "share_drifting_features": 0.143,
   "drift_alert": false,
   "sensor_metrics": {
     "s2_dev_base": {
-      "psi": 0.0125,
-      "ks_stat": 0.0347,
-      "ks_pvalue": 0.2455,
-      "is_drifting": false
-    },
-    "s3_dev_base": {
-      "psi": 0.0109,
-      "ks_stat": 0.0295,
-      "ks_pvalue": 0.4349,
-      "is_drifting": false
-    },
-    "s4_dev_base": {
-      "psi": 0.0145,
-      "ks_stat": 0.0313,
-      "ks_pvalue": 0.3618,
-      "is_drifting": false
-    },
-    "s7_dev_base": {
-      "psi": 0.0076,
-      "ks_stat": 0.0347,
-      "ks_pvalue": 0.2449,
-      "is_drifting": false
-    },
-    "s8_dev_base": {
-      "psi": 0.0201,
-      "ks_stat": 0.0615,
-      "ks_pvalue": 0.0029,
-      "is_drifting": false
-    },
-    "s9_dev_base": {
-      "psi": 0.0746,
-      "ks_stat": 0.1104,
-      "ks_pvalue": 0.0,
-      "is_drifting": false
-    },
-    "s11_dev_base": {
-      "psi": 0.0091,
-      "ks_stat": 0.0313,
-      "ks_pvalue": 0.3612,
-      "is_drifting": false
-    },
-    "s12_dev_base": {
-      "psi": 0.0144,
-      "ks_stat": 0.0539,
-      "ks_pvalue": 0.0131,
+      "psi": 0.1387,
+      "ks_stat": 0.06,
+      "ks_pvalue": 0.967,
       "is_drifting": false
     },
     "s13_dev_base": {
-      "psi": 0.0225,
-      "ks_stat": 0.0645,
-      "ks_pvalue": 0.0015,
+      "psi": 0.1271,
+      "ks_stat": 0.085,
+      "ks_pvalue": 0.7119,
       "is_drifting": false
     },
-    "s14_dev_base": {
-      "psi": 0.0982,
-      "ks_stat": 0.1365,
-      "ks_pvalue": 0.0,
+    "s7_dev_base": {
+      "psi": 0.1707,
+      "ks_stat": 0.105,
+      "ks_pvalue": 0.4455,
       "is_drifting": false
     },
-    "s15_dev_base": {
-      "psi": 0.0034,
-      "ks_stat": 0.0214,
-      "ks_pvalue": 0.8173,
+    "s8_dev_base": {
+      "psi": 0.1137,
+      "ks_stat": 0.12,
+      "ks_pvalue": 0.2854,
       "is_drifting": false
     },
-    "s17_dev_base": {
-      "psi": 0.163,
-      "ks_stat": 0.0815,
-      "ks_pvalue": 0.0,
+    "s12_dev_base": {
+      "psi": 0.1329,
+      "ks_stat": 0.07,
+      "ks_pvalue": 0.8933,
       "is_drifting": false
     },
     "s20_dev_base": {
-      "psi": 0.0088,
-      "ks_stat": 0.0269,
-      "ks_pvalue": 0.5546,
+      "psi": 0.1923,
+      "ks_stat": 0.095,
+      "ks_pvalue": 0.5747,
+      "is_drifting": false
+    },
+    "s17_dev_base": {
+      "psi": 0.0646,
+      "ks_stat": 0.065,
+      "ks_pvalue": 0.9362,
+      "is_drifting": false
+    },
+    "s3_dev_base": {
+      "psi": 0.2038,
+      "ks_stat": 0.18,
+      "ks_pvalue": 0.0253,
+      "is_drifting": true
+    },
+    "s14_dev_base": {
+      "psi": 0.1433,
+      "ks_stat": 0.095,
+      "ks_pvalue": 0.5747,
       "is_drifting": false
     },
     "s21_dev_base": {
-      "psi": 0.0041,
-      "ks_stat": 0.0234,
-      "ks_pvalue": 0.7245,
+      "psi": 0.2679,
+      "ks_stat": 0.125,
+      "ks_pvalue": 0.2423,
+      "is_drifting": true
+    },
+    "s4_dev_base": {
+      "psi": 0.1148,
+      "ks_stat": 0.115,
+      "ks_pvalue": 0.3336,
+      "is_drifting": false
+    },
+    "s15_dev_base": {
+      "psi": 0.1663,
+      "ks_stat": 0.11,
+      "ks_pvalue": 0.3871,
+      "is_drifting": false
+    },
+    "s9_dev_base": {
+      "psi": 0.1909,
+      "ks_stat": 0.105,
+      "ks_pvalue": 0.4455,
+      "is_drifting": false
+    },
+    "s11_dev_base": {
+      "psi": 0.1081,
+      "ks_stat": 0.055,
+      "ks_pvalue": 0.9861,
       "is_drifting": false
     }
   }

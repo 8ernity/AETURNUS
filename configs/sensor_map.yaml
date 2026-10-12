@@ -1,4 +1,6 @@
 # configs/sensor_map.yaml
+disclaimer: "indicative association, not a diagnosis"
+
 sensors:
   s1:
     name: "T2"
@@ -44,7 +46,7 @@ sensors:
     name: "Nc"
     description: "Physical core speed"
     units: "rpm"
-    subsystem: "HPC"
+    subsystem: "Core"
   s10:
     name: "epr"
     description: "Engine pressure ratio (P50/P2)"
@@ -69,7 +71,7 @@ sensors:
     name: "NRc"
     description: "Corrected core speed"
     units: "rpm"
-    subsystem: "HPC"
+    subsystem: "Core"
   s15:
     name: "BPR"
     description: "Bypass Ratio"
@@ -84,7 +86,7 @@ sensors:
     name: "htBleed"
     description: "Bleed Enthalpy"
     units: "--"
-    subsystem: "Bleed/Cooling"
+    subsystem: "Bleed"
   s18:
     name: "Nf_dmd"
     description: "Demanded fan speed"
