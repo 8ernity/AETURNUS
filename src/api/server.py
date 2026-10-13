@@ -403,6 +403,65 @@ def get_fleet(subset: str = Query(default="FD001")):
     reg = mgr.get_registry()
     champ_ver = reg.get("active_champion", "v1.0")
 
+    # Fleet Survival Curve (Kaplan-Meier Reliability S(t) = P(RUL > t))
+    n_engines = max(1, len(engines))
+    all_p50 = [e["rul_p50"] for e in engines]
+    all_p10 = [e["conservative_rul"] for e in engines]
+    max_horizon = int(max(all_p50)) if all_p50 else 125
+    max_horizon = max(30, min(160, max_horizon))
+
+    survival_curve = []
+    for t in range(0, max_horizon + 5, 5):
+        s_p50 = sum(1 for r in all_p50 if r > t) / n_engines * 100.0
+        s_p10 = sum(1 for r in all_p10 if r > t) / n_engines * 100.0
+        surviving_count = sum(1 for r in all_p50 if r > t)
+        survival_curve.append({
+            "cycle": t,
+            "survival_rate": round(float(s_p50), 1),
+            "conservative_rate": round(float(s_p10), 1),
+            "surviving_count": surviving_count,
+            "at_risk_count": n_engines - surviving_count
+        })
+
+    # Risk Distribution Donut Tiers
+    risk_tiers = [
+        {
+            "name": "CRITICAL",
+            "label": "Critical (≤15 cyc)",
+            "count": int(severity_counts.get("CRITICAL", 0)),
+            "color": "#f43f5e",
+            "action": "Immediate grounding & borescope inspection"
+        },
+        {
+            "name": "HIGH",
+            "label": "High Risk (16-30 cyc)",
+            "count": int(severity_counts.get("HIGH", 0)),
+            "color": "#f97316",
+            "action": "Schedule depot maintenance within 3 days"
+        },
+        {
+            "name": "MEDIUM",
+            "label": "Medium Risk (31-60 cyc)",
+            "count": int(severity_counts.get("MEDIUM", 0)),
+            "color": "#eab308",
+            "action": "Elevated telemetry frequency & sensor review"
+        },
+        {
+            "name": "LOW",
+            "label": "Low Risk (61-100 cyc)",
+            "count": int(severity_counts.get("LOW", 0)),
+            "color": "#06b6d4",
+            "action": "Standard flight monitoring with regular checks"
+        },
+        {
+            "name": "HEALTHY",
+            "label": "Healthy (>100 cyc)",
+            "count": int(severity_counts.get("HEALTHY", 0)),
+            "color": "#10b981",
+            "action": "Optimal flight readiness, full mission endurance"
+        }
+    ]
+
     return {
         "subset": str(subset),
         "kpis": {
@@ -414,6 +473,8 @@ def get_fleet(subset: str = Query(default="FD001")):
             "live_model_version": f"rul-{subset.lower()}@{champ_ver}"
         },
         "severity_distribution": {str(k): int(v) for k, v in severity_counts.items()},
+        "survival_curve": survival_curve,
+        "risk_distribution": risk_tiers,
         "engines": engines
     }
 
@@ -448,6 +509,9 @@ def get_engine_detail(engine_id: str, subset: str = Query(default="FD001")):
             "true_rul": round(float(r_dict.get("rul_raw", 0.0)), 1),
             "health_index": p["health_index"],
             "anomaly_score": p["anomaly_score"],
+            "fail_prob_10": round(float(p.get("fail_prob_10", 0.0)), 3),
+            "fail_prob_30": round(float(p.get("fail_prob_30", 0.0)), 3),
+            "fail_prob_60": round(float(p.get("fail_prob_60", 0.0)), 3),
             "s2_raw": round(float(r_dict.get("s2", 0.0)), 2),
             "s2_ewma": round(float(r_dict.get("s2_ewma", 0.0)), 2),
             "s3_raw": round(float(r_dict.get("s3", 0.0)), 2),
@@ -891,10 +955,27 @@ def get_model_details(subset: str):
         with open(tuning_file, "r", encoding="utf-8") as f:
             tuning_data = json.load(f)
 
+    parity_scatter = data.get("parity_scatter", [])
+    if not parity_scatter:
+        try:
+            test_df = get_test_df(subset)
+            loader = CMAPSSLoader(subset=subset)
+            _, _, rul_truth = loader.load_raw_data()
+            ms = get_model_service(subset)
+            eval_res = ms.evaluate_test(test_df, rul_truth, save_report=True)
+            parity_scatter = eval_res.get("parity_scatter", [])
+        except Exception:
+            pass
+
     return {
         "subset": subset,
         "bucket_errors": data.get("bucket_errors", []),
         "feature_importance": data.get("feature_importance", []),
+        "parity_scatter": parity_scatter,
+        "nasa_score": data.get("nasa_score", 0.0),
+        "early_rate": data.get("early_rate", 0.51),
+        "late_rate": data.get("late_rate", 0.49),
+        "nasa_phm08": data.get("nasa_phm08", {}),
         "status": data.get("status", "Evaluated"),
         "interval_coverage": data.get("interval_coverage", 0.8),
         "mean_interval_width": data.get("mean_interval_width", 0.0),

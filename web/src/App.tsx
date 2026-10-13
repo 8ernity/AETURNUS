@@ -172,11 +172,13 @@ export function App() {
         {/* Dynamic Tab Body */}
         <main className="flex-1 p-8 overflow-y-auto">
           {activeTab === "fleet" && (
-            <FleetOverviewTab
-              fleetData={fleetData}
-              onSelectEngine={handleSelectEngine}
-              recentAlerts={recentAlerts}
-            />
+            <ErrorBoundary fallbackTitle="Fleet Overview">
+              <FleetOverviewTab
+                fleetData={fleetData}
+                onSelectEngine={handleSelectEngine}
+                recentAlerts={recentAlerts}
+              />
+            </ErrorBoundary>
           )}
 
           {activeTab === "engine" && (

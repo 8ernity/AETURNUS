@@ -20,7 +20,7 @@ classifiers = [
 ]
 dependencies = [
     "fastapi[standard]>=0.115.0",
-    "python-multipart>=0.0.12",
+    "python-multipart>=0.0.32",
     "httpx>=0.28.0",
     "pydantic>=2.10.0",
     "pandas>=2.2.0",

@@ -7,6 +7,16 @@
       "rmse": 13.2955,
       "mae": 9.5124,
       "nasa_score": 234.56,
+      "early_rate": 0.51,
+      "late_rate": 0.49,
+      "nasa_phm08": {
+        "score": 234.56,
+        "early_rate": 0.51,
+        "late_rate": 0.49,
+        "early_count": 51,
+        "late_count": 49,
+        "formula": "S = sum(exp(-d/13)-1 if d<0 else exp(d/10)-1)"
+      },
       "pr_auc": 0.966,
       "train_time_sec": 40.23,
       "target_rmse": 14.0,
@@ -39,7 +49,7 @@
           "rmse": 17.3219,
           "mae": 14.3212,
           "nasa_score": 425.13,
-          "train_time_sec": 0.48
+          "train_time_sec": 0.43
         },
         {
           "model_name": "HistGradientBoosting Quantile",
@@ -49,7 +59,7 @@
           "rmse": 12.0819,
           "mae": 8.4407,
           "nasa_score": 219.27,
-          "train_time_sec": 54.64
+          "train_time_sec": 48.8
         },
         {
           "model_name": "LightGBM Quantile (Default)",
@@ -59,7 +69,7 @@
           "rmse": 12.2279,
           "mae": 8.4941,
           "nasa_score": 213.56,
-          "train_time_sec": 30.29
+          "train_time_sec": 29.82
         },
         {
           "model_name": "LightGBM Quantile (Tuned Champion)",
@@ -69,7 +79,7 @@
           "rmse": 12.4028,
           "mae": 8.674,
           "nasa_score": 231.98,
-          "train_time_sec": 28.84
+          "train_time_sec": 26.32
         },
         {
           "model_name": "1D-CNN PyTorch (30-Cycle Window)",
@@ -78,7 +88,7 @@
           "rmse": 14.32,
           "mae": 10.54,
           "nasa_score": 288.1,
-          "train_time_sec": 14.72
+          "train_time_sec": 12.68
         },
         {
           "model_name": "GRU PyTorch (30-Cycle Sequence)",
@@ -87,7 +97,7 @@
           "rmse": 15.31,
           "mae": 11.73,
           "nasa_score": 391.41,
-          "train_time_sec": 22.07
+          "train_time_sec": 19.53
         }
       ]
     },
@@ -98,6 +108,16 @@
       "rmse": 25.3589,
       "mae": 16.5717,
       "nasa_score": 7459.68,
+      "early_rate": 0.5714,
+      "late_rate": 0.4286,
+      "nasa_phm08": {
+        "score": 7459.68,
+        "early_rate": 0.5714,
+        "late_rate": 0.4286,
+        "early_count": 148,
+        "late_count": 111,
+        "formula": "S = sum(exp(-d/13)-1 if d<0 else exp(d/10)-1)"
+      },
       "pr_auc": 0.998,
       "train_time_sec": 86.24,
       "target_rmse": 22.0,
@@ -130,7 +150,7 @@
           "rmse": 27.0452,
           "mae": 19.4932,
           "nasa_score": 6986.96,
-          "train_time_sec": 2.28
+          "train_time_sec": 1.7
         },
         {
           "model_name": "HistGradientBoosting Quantile",
@@ -140,7 +160,7 @@
           "rmse": 24.6797,
           "mae": 16.1865,
           "nasa_score": 5797.16,
-          "train_time_sec": 94.53
+          "train_time_sec": 89.12
         },
         {
           "model_name": "LightGBM Quantile (Default)",
@@ -150,7 +170,7 @@
           "rmse": 24.7585,
           "mae": 16.1563,
           "nasa_score": 6150.8,
-          "train_time_sec": 65.7
+          "train_time_sec": 62.06
         },
         {
           "model_name": "LightGBM Quantile (Tuned Champion)",
@@ -160,7 +180,7 @@
           "rmse": 24.7585,
           "mae": 16.1563,
           "nasa_score": 6150.8,
-          "train_time_sec": 65.48
+          "train_time_sec": 62.52
         },
         {
           "model_name": "1D-CNN PyTorch (30-Cycle Window)",
@@ -169,7 +189,7 @@
           "rmse": 23.65,
           "mae": 16.03,
           "nasa_score": 3866.58,
-          "train_time_sec": 19.12
+          "train_time_sec": 17.78
         },
         {
           "model_name": "GRU PyTorch (30-Cycle Sequence)",
@@ -178,7 +198,7 @@
           "rmse": 24.82,
           "mae": 16.56,
           "nasa_score": 4867.71,
-          "train_time_sec": 30.58
+          "train_time_sec": 24.05
         }
       ]
     },
@@ -189,6 +209,16 @@
       "rmse": 64.6661,
       "mae": 52.8,
       "nasa_score": 1390904.75,
+      "early_rate": 0.15,
+      "late_rate": 0.85,
+      "nasa_phm08": {
+        "score": 1390904.75,
+        "early_rate": 0.15,
+        "late_rate": 0.85,
+        "early_count": 15,
+        "late_count": 85,
+        "formula": "S = sum(exp(-d/13)-1 if d<0 else exp(d/10)-1)"
+      },
       "pr_auc": 0.986,
       "train_time_sec": 42.87,
       "target_rmse": 15.0,
@@ -221,7 +251,7 @@
           "rmse": 16.5919,
           "mae": 13.3896,
           "nasa_score": 418.41,
-          "train_time_sec": 3.08
+          "train_time_sec": 0.86
         },
         {
           "model_name": "HistGradientBoosting Quantile",
@@ -231,7 +261,7 @@
           "rmse": 13.7717,
           "mae": 10.4243,
           "nasa_score": 305.47,
-          "train_time_sec": 62.76
+          "train_time_sec": 58.93
         },
         {
           "model_name": "LightGBM Quantile (Default)",
@@ -241,7 +271,7 @@
           "rmse": 13.3928,
           "mae": 10.2643,
           "nasa_score": 272.05,
-          "train_time_sec": 13.02
+          "train_time_sec": 17.82
         },
         {
           "model_name": "LightGBM Quantile (Tuned Champion)",
@@ -251,7 +281,7 @@
           "rmse": 13.3928,
           "mae": 10.2643,
           "nasa_score": 272.05,
-          "train_time_sec": 13.87
+          "train_time_sec": 15.53
         },
         {
           "model_name": "1D-CNN PyTorch (30-Cycle Window)",
@@ -260,7 +290,7 @@
           "rmse": 16.42,
           "mae": 12.08,
           "nasa_score": 613.2,
-          "train_time_sec": 10.48
+          "train_time_sec": 8.24
         },
         {
           "model_name": "GRU PyTorch (30-Cycle Sequence)",
@@ -269,7 +299,7 @@
           "rmse": 14.61,
           "mae": 10.87,
           "nasa_score": 399.41,
-          "train_time_sec": 21.6
+          "train_time_sec": 28.65
         }
       ]
     },
@@ -280,6 +310,16 @@
       "rmse": 25.9286,
       "mae": 18.0961,
       "nasa_score": 4651.99,
+      "early_rate": 0.5685,
+      "late_rate": 0.4315,
+      "nasa_phm08": {
+        "score": 4651.99,
+        "early_rate": 0.5685,
+        "late_rate": 0.4315,
+        "early_count": 141,
+        "late_count": 107,
+        "formula": "S = sum(exp(-d/13)-1 if d<0 else exp(d/10)-1)"
+      },
       "pr_auc": 0.97,
       "train_time_sec": 91.26,
       "target_rmse": 22.0,
@@ -312,7 +352,7 @@
           "rmse": 27.9583,
           "mae": 21.2451,
           "nasa_score": 5269.44,
-          "train_time_sec": 2.58
+          "train_time_sec": 4.54
         },
         {
           "model_name": "HistGradientBoosting Quantile",
@@ -322,7 +362,7 @@
           "rmse": 25.5813,
           "mae": 17.6794,
           "nasa_score": 4448.03,
-          "train_time_sec": 121.41
+          "train_time_sec": 104.01
         },
         {
           "model_name": "LightGBM Quantile (Default)",
@@ -332,7 +372,7 @@
           "rmse": 25.8014,
           "mae": 17.9332,
           "nasa_score": 4415.84,
-          "train_time_sec": 68.2
+          "train_time_sec": 76.0
         },
         {
           "model_name": "LightGBM Quantile (Tuned Champion)",
@@ -342,7 +382,25 @@
           "rmse": 25.8014,
           "mae": 17.9332,
           "nasa_score": 4415.84,
-          "train_time_sec": 78.56
+          "train_time_sec": 70.46
+        },
+        {
+          "model_name": "1D-CNN PyTorch (30-Cycle Window)",
+          "architecture": "CNN",
+          "window_size": 30,
+          "rmse": 24.17,
+          "mae": 17.33,
+          "nasa_score": 3698.55,
+          "train_time_sec": 18.53
+        },
+        {
+          "model_name": "GRU PyTorch (30-Cycle Sequence)",
+          "architecture": "GRU",
+          "window_size": 30,
+          "rmse": 27.23,
+          "mae": 20.18,
+          "nasa_score": 4947.4,
+          "train_time_sec": 68.15
         }
       ]
     }

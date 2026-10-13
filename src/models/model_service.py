@@ -542,6 +542,31 @@ class ModelService:
         cond, faults = CONDITIONS_MAP.get(self.subset, ("Standard", "1 Fault"))
         status = "Target Met" if metrics["rmse"] <= target_rmse else "Target Missed"
 
+        # Parity Scatter points for held-out test engines
+        parity_scatter = []
+        for i in range(len(y_true)):
+            act = round(float(y_true[i]), 1)
+            pr = round(float(pred_p50[i]), 1)
+            diff = round(pr - act, 1)
+            if diff < 0:
+                pen = round(float(np.exp(-diff / 13.0) - 1.0), 2)
+                cat = "early_safe"
+            else:
+                pen = round(float(np.exp(diff / 10.0) - 1.0), 2)
+                cat = "late_penalty"
+            
+            unit_val = int(eval_rows.iloc[i]["unit"]) if "unit" in eval_rows.columns else (i + 1)
+            parity_scatter.append({
+                "unit": unit_val,
+                "actual": act,
+                "predicted": pr,
+                "p10": round(float(pred_p10[i]), 1),
+                "p90": round(float(pred_p90[i]), 1),
+                "diff": diff,
+                "penalty": pen,
+                "category": cat
+            })
+
         results = {
             "subset": self.subset,
             "algorithm": self.algorithm,
@@ -551,6 +576,16 @@ class ModelService:
             "rmse": metrics["rmse"],
             "mae": metrics["mae"],
             "nasa_score": metrics["nasa_score"],
+            "early_rate": metrics["early_rate"],
+            "late_rate": metrics["late_rate"],
+            "nasa_phm08": {
+                "score": metrics["nasa_score"],
+                "early_rate": metrics["early_rate"],
+                "late_rate": metrics["late_rate"],
+                "early_count": int(sum(1 for p in parity_scatter if p["category"] == "early_safe")),
+                "late_count": int(sum(1 for p in parity_scatter if p["category"] == "late_penalty")),
+                "formula": "S = sum(exp(-d/13)-1 if d<0 else exp(d/10)-1)"
+            },
             "pr_auc": round(pr_auc_30, 3),
             "target_rmse": target_rmse,
             "status": status,
@@ -564,7 +599,8 @@ class ModelService:
             "train_time_sec": self.training_time_sec,
             "calibration_offset": round(cal_offset, 3),
             "bucket_errors": bucket_errors,
-            "feature_importance": feature_importance_list
+            "feature_importance": feature_importance_list,
+            "parity_scatter": parity_scatter
         }
 
         # Save evaluation report if requested

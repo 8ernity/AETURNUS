@@ -198,24 +198,24 @@ Evaluated on held-out test splits in [src/models/neural_baseline.py](src/models/
 
 | Subset | Architecture | Model Name | 5-Fold CV RMSE (Train) | Test RMSE | Test MAE | Training Speed |
 |:---:|:---:|:---|:---:|:---:|:---:|:---:|
-| FD001 | Linear | Ridge Regression | 16.30 | 17.32 | 14.32 | ~0.5s |
-| FD001 | GBDT | HistGradientBoosting Quantile | 13.16 | 12.08 | 8.44 | ~54.6s |
-| FD001 | LightGBM | LightGBM Quantile (Default) | 13.06 | 12.23 | 8.49 | ~30.3s |
-| **FD001** | **LightGBM** | **LightGBM Quantile (Tuned Champion)** | **12.96** | **12.40** | **8.67** | *~28.8s* |
-| FD001 | CNN | 1D-CNN PyTorch (30-Cycle Window) | N/A | 14.32 | 10.54 | ~14.7s |
-| FD001 | GRU | GRU PyTorch (30-Cycle Sequence) | N/A | 15.31 | 11.73 | ~22.1s |
-| FD002 | Linear | Ridge Regression | 15.19 | 27.05 | 19.49 | ~2.3s |
-| FD002 | GBDT | HistGradientBoosting Quantile | 13.14 | 24.68 | 16.19 | ~94.5s |
-| FD002 | LightGBM | LightGBM Quantile (Default) | 13.13 | 24.76 | 16.16 | ~65.7s |
-| **FD002** | **LightGBM** | **LightGBM Quantile (Tuned Champion)** | **13.13** | **24.76** | **16.16** | *~65.5s* |
-| FD002 | CNN | 1D-CNN PyTorch (30-Cycle Window) | N/A | 23.65 | 16.03 | ~19.1s |
-| FD002 | GRU | GRU PyTorch (30-Cycle Sequence) | N/A | 24.82 | 16.56 | ~30.6s |
-| FD003 | Linear | Ridge Regression | 15.68 | 16.59 | 13.39 | ~3.1s |
-| FD003 | GBDT | HistGradientBoosting Quantile | 11.58 | 13.77 | 10.42 | ~62.8s |
-| FD003 | LightGBM | LightGBM Quantile (Default) | 51.29 | 13.39 | 10.26 | ~13.0s |
-| **FD003** | **LightGBM** | **LightGBM Quantile (Tuned Champion)** | **51.29** | **13.39** | **10.26** | *~13.9s* |
-| FD003 | CNN | 1D-CNN PyTorch (30-Cycle Window) | N/A | 16.42 | 12.08 | ~10.5s |
-| FD003 | GRU | GRU PyTorch (30-Cycle Sequence) | N/A | 14.61 | 10.87 | ~21.6s |
+| FD001 | Linear | Ridge Regression | 16.30 | 17.32 | 14.32 | ~0.4s |
+| FD001 | GBDT | HistGradientBoosting Quantile | 13.16 | 12.08 | 8.44 | ~48.8s |
+| FD001 | LightGBM | LightGBM Quantile (Default) | 13.06 | 12.23 | 8.49 | ~29.8s |
+| **FD001** | **LightGBM** | **LightGBM Quantile (Tuned Champion)** | **12.96** | **12.40** | **8.67** | *~26.3s* |
+| FD001 | CNN | 1D-CNN PyTorch (30-Cycle Window) | N/A | 14.32 | 10.54 | ~12.7s |
+| FD001 | GRU | GRU PyTorch (30-Cycle Sequence) | N/A | 15.31 | 11.73 | ~19.5s |
+| FD002 | Linear | Ridge Regression | 15.19 | 27.05 | 19.49 | ~1.7s |
+| FD002 | GBDT | HistGradientBoosting Quantile | 13.14 | 24.68 | 16.19 | ~89.1s |
+| FD002 | LightGBM | LightGBM Quantile (Default) | 13.13 | 24.76 | 16.16 | ~62.1s |
+| **FD002** | **LightGBM** | **LightGBM Quantile (Tuned Champion)** | **13.13** | **24.76** | **16.16** | *~62.5s* |
+| FD002 | CNN | 1D-CNN PyTorch (30-Cycle Window) | N/A | 23.65 | 16.03 | ~17.8s |
+| FD002 | GRU | GRU PyTorch (30-Cycle Sequence) | N/A | 24.82 | 16.56 | ~24.1s |
+| FD003 | Linear | Ridge Regression | 15.68 | 16.59 | 13.39 | ~0.9s |
+| FD003 | GBDT | HistGradientBoosting Quantile | 11.58 | 13.77 | 10.42 | ~58.9s |
+| FD003 | LightGBM | LightGBM Quantile (Default) | 51.29 | 13.39 | 10.26 | ~17.8s |
+| **FD003** | **LightGBM** | **LightGBM Quantile (Tuned Champion)** | **51.29** | **13.39** | **10.26** | *~15.5s* |
+| FD003 | CNN | 1D-CNN PyTorch (30-Cycle Window) | N/A | 16.42 | 12.08 | ~8.2s |
+| FD003 | GRU | GRU PyTorch (30-Cycle Sequence) | N/A | 14.61 | 10.87 | ~28.6s |
 | FD004 | Linear | Ridge Regression | 15.94 | 27.96 | 21.25 | ~2.6s |
 | FD004 | GBDT | HistGradientBoosting Quantile | 13.24 | 25.58 | 17.68 | ~121.4s |
 | FD004 | LightGBM | LightGBM Quantile (Default) | 13.27 | 25.80 | 17.93 | ~68.2s |

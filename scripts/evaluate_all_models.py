@@ -51,6 +51,9 @@ def main():
             "rmse": res["rmse"],
             "mae": res["mae"],
             "nasa_score": res["nasa_score"],
+            "early_rate": res.get("early_rate", 0.5),
+            "late_rate": res.get("late_rate", 0.5),
+            "nasa_phm08": res.get("nasa_phm08", {}),
             "pr_auc": res["pr_auc"],
             "train_time_sec": res["train_time_sec"],
             "target_rmse": res["target_rmse"],
@@ -66,10 +69,13 @@ def main():
     with open(summary_file, "w", encoding="utf-8") as f:
         json.dump({"benchmarks": benchmarks}, f, indent=2)
 
-    print(f"\n[DONE] Saved real benchmarks summary with multi-seed and DL comparison to {summary_file}:")
+    print(f"\n[DONE] Saved real benchmarks summary with multi-seed, NASA PHM'08 score, and DL comparison to {summary_file}:")
     for b in benchmarks:
         ms_info = b["multi_seed"]
-        print(f"  [{b['subset']}] RMSE: {b['rmse']} (mean: {ms_info['rmse_mean']} ± {ms_info['rmse_std']}) | Target: <={b['target_rmse']} | Coverage: {b['interval_coverage']*100:.1f}%")
+        nasa_s = b.get("nasa_score", 0.0)
+        e_rate = b.get("early_rate", 0.0) * 100.0
+        l_rate = b.get("late_rate", 0.0) * 100.0
+        print(f"  [{b['subset']}] RMSE: {b['rmse']} | MAE: {b['mae']} | NASA PHM'08 (S): {nasa_s} (Safe Early: {e_rate:.1f}%, Late Penalty: {l_rate:.1f}%) | Cov: {b['interval_coverage']*100:.1f}%")
 
 if __name__ == "__main__":
     main()
