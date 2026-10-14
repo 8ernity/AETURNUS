@@ -402,20 +402,26 @@ class AlertManager:
                     max_psi = psi
                     drift_sensor = s
         else:
-            drift_file = self.root_dir / "artifacts" / "reports" / "drift_history.json"
-            if drift_file.exists():
-                try:
-                    with open(drift_file, "r", encoding="utf-8") as f:
-                        drift_data = json.load(f)
-                    records = drift_data.get("history", [])
-                    if records:
-                        last_rec = records[-1]
-                        for feat, psi_val in last_rec.get("feature_psi", {}).items():
-                            if any(k in feat for k in self.key_sensors) and psi_val > max_psi:
-                                max_psi = psi_val
-                                drift_sensor = feat
-                except Exception:
-                    pass
+            # Compute alerts from LIVE drift, not drift_history.json
+            try:
+                from src.mlops.drift_and_retrain import MLOpsManager
+                sub = ctx.get("subset", "FD001")
+                mgr = MLOpsManager(subset=sub)
+                train_p = self.root_dir / "data" / "processed" / sub / "train.parquet"
+                test_p = self.root_dir / "data" / "processed" / sub / "test.parquet"
+                if train_p.exists() and test_p.exists():
+                    import pandas as pd
+                    tr_df = pd.read_parquet(train_p)
+                    te_df = pd.read_parquet(test_p)
+                    ref_sample = tr_df.sample(min(400, len(tr_df)), random_state=42)
+                    curr_sample = te_df.sample(min(200, len(te_df)), random_state=42)
+                    live_report = mgr.calculate_drift_report(ref_sample, curr_sample)
+                    for feat, psi_val in live_report.get("feature_psi", {}).items():
+                        if any(k in feat for k in self.key_sensors) and psi_val > max_psi:
+                            max_psi = psi_val
+                            drift_sensor = feat
+            except Exception:
+                pass
 
         if max_psi >= self.psi_thresh:
             drift_firing = True

@@ -5,42 +5,48 @@
   "folds": [
     {
       "fold": 1,
-      "rmse": 12.77,
-      "mae": 8.12,
-      "nasa_score": 28803.5,
+      "train_rmse": 7.33,
+      "rmse": 12.51,
+      "mae": 8.43,
+      "nasa_score": 22899.1,
       "val_engines": 36
     },
     {
       "fold": 2,
-      "rmse": 13.77,
-      "mae": 8.71,
-      "nasa_score": 32413.4,
+      "train_rmse": 7.11,
+      "rmse": 12.86,
+      "mae": 8.78,
+      "nasa_score": 23868.0,
       "val_engines": 37
     },
     {
       "fold": 3,
-      "rmse": 13.32,
-      "mae": 8.4,
-      "nasa_score": 25782.7,
+      "train_rmse": 7.22,
+      "rmse": 12.92,
+      "mae": 8.65,
+      "nasa_score": 23156.7,
       "val_engines": 37
     },
     {
       "fold": 4,
-      "rmse": 12.69,
-      "mae": 8.09,
-      "nasa_score": 24095.4,
+      "train_rmse": 7.04,
+      "rmse": 12.54,
+      "mae": 8.52,
+      "nasa_score": 21431.2,
       "val_engines": 36
     },
     {
       "fold": 5,
-      "rmse": 13.11,
-      "mae": 8.45,
-      "nasa_score": 23314.9,
+      "train_rmse": 7.04,
+      "rmse": 12.78,
+      "mae": 8.71,
+      "nasa_score": 21395.2,
       "val_engines": 36
     }
   ],
-  "mean_rmse": 13.13,
-  "std_rmse": 0.39,
-  "mean_nasa": 26882.0,
-  "std_nasa": 3346.3
+  "mean_train_rmse": 7.15,
+  "mean_rmse": 12.72,
+  "std_rmse": 0.17,
+  "mean_nasa": 22550.0,
+  "std_nasa": 981.1
 }

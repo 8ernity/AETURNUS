@@ -41,6 +41,7 @@ Thumbs.db
 *.db-journal
 *.sqlite
 *.sqlite3
+mlflow.db
 smoke_test.db
 test_*.db
 

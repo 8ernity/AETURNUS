@@ -12,8 +12,9 @@ class DataCleaner:
         self.config = config
         self.clean_cfg = config.get("cleaning", {})
         self.ffill_limit = self.clean_cfg.get("ffill_limit", 3)
-        self.hampel_window = self.clean_cfg.get("hampel_window", 7)
-        self.hampel_sigma = self.clean_cfg.get("hampel_sigma", 3.0)
+        # Robust z-score outlier clipping (NOT a true Hampel filter)
+        self.robust_z_window = self.clean_cfg.get("hampel_window", self.clean_cfg.get("robust_z_window", 7))
+        self.robust_z_sigma = self.clean_cfg.get("hampel_sigma", self.clean_cfg.get("robust_z_sigma", 3.0))
         self.outlier_z_clip = self.clean_cfg.get("outlier_z_clip", 5.0)
         self.flatline_window = self.clean_cfg.get("flatline_window", 10)
         self.flatline_var_thresh = self.clean_cfg.get("flatline_var_threshold", 1e-5)
@@ -94,7 +95,7 @@ class DataCleaner:
     def clip_outliers_normalized(self, df: pd.DataFrame, sensor_cols: List[str]) -> Tuple[pd.DataFrame, Dict[str, Any]]:
         """
         Stage 2 Cleaning (POST-regime normalization):
-        Applies causal Hampel/robust z-clipping on normalized sensors (*_norm).
+        Applies causal robust z-score clipping on normalized sensors (*_norm).
         Detects flatlines over flatline_window.
         """
         df_out = df.copy()
@@ -113,7 +114,7 @@ class DataCleaner:
             if flatline_mask.any():
                 flatlines_count += int(flatline_mask.sum())
 
-            # Causal Hampel filter / robust z-clipping
+            # Causal robust z-score clipping
             # On normalized data, mean=0, std=1; clip extreme deviations beyond threshold
             vals = df_out[target_col].values
             extreme_mask = np.abs(vals) > self.outlier_z_clip

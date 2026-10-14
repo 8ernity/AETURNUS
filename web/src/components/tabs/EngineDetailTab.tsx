@@ -74,18 +74,26 @@ export const EngineDetailTab: React.FC<EngineDetailTabProps> = ({
   const isCritical = (pred.conservative_rul || 999) <= 15;
 
   const rawSubsystemHealth = engineData?.subsystem_health;
-  const subsystemHealthData = (rawSubsystemHealth && rawSubsystemHealth.length > 0)
-    ? rawSubsystemHealth.map((s: any) => ({
+  const subsystemHealthData = useMemo(() => {
+    if (rawSubsystemHealth && rawSubsystemHealth.length > 0) {
+      return rawSubsystemHealth.map((s: any) => ({
         ...s,
-        nominal_health: 85.0
-      }))
-    : [
-        { subsystem: "Fan / LPC", degradation: 18.0, health: 82.0, baseline: 15.0, nominal_health: 85.0, status: "NOMINAL" },
-        { subsystem: "HPC", degradation: isCritical ? 84.0 : 42.0, health: isCritical ? 16.0 : 58.0, baseline: 15.0, nominal_health: 85.0, status: isCritical ? "CRITICAL" : "ADVISORY" },
-        { subsystem: "Combustor", degradation: 26.0, health: 74.0, baseline: 15.0, nominal_health: 85.0, status: "ADVISORY" },
-        { subsystem: "HPT", degradation: isCritical ? 62.0 : 34.0, health: isCritical ? 38.0 : 66.0, baseline: 15.0, nominal_health: 85.0, status: isCritical ? "WARNING" : "NOMINAL" },
-        { subsystem: "LPT / Exhaust", degradation: 30.0, health: 70.0, baseline: 15.0, nominal_health: 85.0, status: "ADVISORY" },
-      ];
+        attribution_share: s.attribution_share !== undefined ? s.attribution_share : s.degradation,
+        nominal_baseline: 20.0
+      }));
+    }
+    const stations = ["Fan / LPC", "HPC", "Combustor", "HPT", "LPT / Exhaust"];
+    return stations.map((sub) => ({
+      subsystem: sub,
+      attribution_share: 20.0,
+      share: 20.0,
+      degradation: 20.0,
+      health: 80.0,
+      baseline: 20.0,
+      nominal_baseline: 20.0,
+      status: "NOMINAL"
+    }));
+  }, [rawSubsystemHealth]);
 
   // Multi-Horizon Failure Probabilities Evolution (H=10, 30, 60)
   const multiHorizonData = useMemo(() => {
@@ -605,13 +613,13 @@ export const EngineDetailTab: React.FC<EngineDetailTabProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="font-bold text-sm text-white">360° Turbofan Subsystem Health Radar</h3>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-rose-500/10 text-rose-300 border border-rose-500/20 uppercase font-bold">
-                  Multi-Axis Gas Path
+                <h3 className="font-bold text-sm text-white">360° Turbofan Subsystem Attribution Share Radar</h3>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-300 border border-purple-500/20 uppercase font-bold">
+                  Attribution Share (100% Sum)
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">
-                Normalized degradation strain &amp; thermal wear across 5 primary engine stations (Fan/LPC, HPC, Combustor, HPT, LPT)
+                Proportional |SHAP| attribution shares across 5 engine stations (Fan/LPC, HPC, Combustor, HPT, LPT/Exhaust). Sums to 100%.
               </p>
             </div>
           </div>
@@ -621,11 +629,11 @@ export const EngineDetailTab: React.FC<EngineDetailTabProps> = ({
               onClick={() => setRadarMode("degradation")}
               className={`px-3 py-1 text-xs rounded-lg transition-all font-medium ${
                 radarMode === "degradation"
-                  ? "bg-rose-600 text-white font-semibold shadow-md shadow-rose-600/30"
+                  ? "bg-purple-600 text-white font-semibold shadow-md shadow-purple-600/30"
                   : "text-slate-400 hover:text-slate-200"
               }`}
             >
-              Degradation Stress (%)
+              Attribution Share (%)
             </button>
             <button
               onClick={() => setRadarMode("health")}
@@ -635,7 +643,7 @@ export const EngineDetailTab: React.FC<EngineDetailTabProps> = ({
                   : "text-slate-400 hover:text-slate-200"
               }`}
             >
-              Mechanical Health (%)
+              Health Reserve Margin (%)
             </button>
           </div>
         </div>
@@ -664,15 +672,15 @@ export const EngineDetailTab: React.FC<EngineDetailTabProps> = ({
                   formatter={(val: any, name: any) => [`${val}%`, name]}
                 />
                 <Radar 
-                  name={radarMode === "degradation" ? "Current Degradation Stress (%)" : "Remaining Health Reserve (%)"}
+                  name={radarMode === "degradation" ? "Subsystem Attribution Share (%)" : "Remaining Health Reserve (%)"}
                   dataKey={radarMode === "degradation" ? "degradation" : "health"} 
-                  stroke={radarMode === "degradation" ? "#f43f5e" : "#10b981"} 
-                  fill={radarMode === "degradation" ? "#f43f5e" : "#10b981"} 
+                  stroke={radarMode === "degradation" ? "#a855f7" : "#10b981"} 
+                  fill={radarMode === "degradation" ? "#a855f7" : "#10b981"} 
                   fillOpacity={0.35} 
                 />
                 <Radar 
-                  name={radarMode === "degradation" ? "Nominal Baseline (15%)" : "Nominal Health (85%)"} 
-                  dataKey={radarMode === "degradation" ? "baseline" : "nominal_health"} 
+                  name={radarMode === "degradation" ? "Uniform Baseline (20%)" : "Nominal Health (80%)"} 
+                  dataKey={radarMode === "degradation" ? "baseline" : "nominal_baseline"} 
                   stroke="#38bdf8" 
                   fill="#38bdf8" 
                   fillOpacity={0.08} 
@@ -687,12 +695,13 @@ export const EngineDetailTab: React.FC<EngineDetailTabProps> = ({
           <div className="lg:col-span-5 space-y-2.5">
             <div className="flex items-center justify-between text-xs text-slate-400 pb-1 border-b border-slate-800">
               <span className="font-semibold uppercase tracking-wider text-[10px]">Gas-Path Station</span>
-              <span className="font-mono text-[10px]">Stress / Reserve</span>
+              <span className="font-mono text-[10px]">Attribution Share / Margin</span>
             </div>
             {subsystemHealthData.map((item: any, idx: number) => {
               const isCrit = item.status === "CRITICAL";
               const isWarn = item.status === "WARNING";
               const isAdv = item.status === "ADVISORY";
+              const share = item.attribution_share !== undefined ? item.attribution_share : item.degradation;
               return (
                 <div key={idx} className="bg-slate-900/80 hover:bg-slate-850 p-3 rounded-2xl border border-slate-800 transition-all space-y-1.5">
                   <div className="flex items-center justify-between">
@@ -708,8 +717,8 @@ export const EngineDetailTab: React.FC<EngineDetailTabProps> = ({
                       </span>
                     </div>
                     <div className="text-xs font-mono font-bold">
-                      <span className={isCrit ? "text-rose-400" : isWarn ? "text-amber-400" : "text-slate-300"}>
-                        {item.degradation}%
+                      <span className={isCrit ? "text-rose-400" : isWarn ? "text-amber-400" : "text-purple-300"}>
+                        {share}%
                       </span>
                       <span className="text-slate-500 text-[10px] mx-1">/</span>
                       <span className="text-emerald-400 text-[11px]">{item.health}%</span>

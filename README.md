@@ -173,10 +173,10 @@ All metrics below are computed directly on the standard NASA C-MAPSS holdout tes
 
 | Dataset Subset | Operating Conditions | Fault Modes | Test Engines | Champion RMSE | NASA Asymmetric Score | PR-AUC (Fail $\le 30$) | Conformal Coverage | Target Status |
 |:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **FD001** | Single (Sea Level) | HPC Degradation | 100 | **13.30** | **234.6** | **0.966** | 86.0% | <span style="color:#22c55e;font-weight:bold;">TARGET MET</span> |
-| **FD002** | Six Regimes (Multi) | HPC Degradation | 259 | **25.36** | **7,459.7** | **0.998** | 80.7% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
-| **FD003** | Single (Sea Level) | HPC + Fan Degradation | 100 | **64.67** | **1,390,904.8** | **0.986** | 59.0% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
-| **FD004** | Six Regimes (Multi) | HPC + Fan Degradation | 248 | **25.93** | **4,652.0** | **0.970** | 56.0% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
+| **FD001** | Single (Sea Level) | HPC Degradation | 100 | **13.30** | **245.3** | **0.966** | 79.0% | <span style="color:#22c55e;font-weight:bold;">TARGET MET</span> |
+| **FD002** | Six Regimes (Multi) | HPC Degradation | 259 | **25.03** | **6,839.1** | **0.998** | 62.5% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
+| **FD003** | Single (Sea Level) | HPC + Fan Degradation | 100 | **14.19** | **360.4** | **0.986** | 64.0% | <span style="color:#22c55e;font-weight:bold;">TARGET MET</span> |
+| **FD004** | Six Regimes (Multi) | HPC + Fan Degradation | 248 | **25.60** | **4,295.6** | **0.970** | 63.3% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
 
 > [!NOTE]
 > In accordance with strict engineering standards, the system reports **authentic benchmark metrics**. Multi-regime subsets (`FD002` and `FD004`) legitimately report "TARGET MISSED" against aggressive enterprise thresholds ($RMSE \le 18.0$), highlighting the genuine difficulty of turbofan degradation across varying altitudes and Mach numbers.
@@ -187,10 +187,10 @@ Evaluated across 3 distinct initialization seeds (42, 43, 44) to guarantee repro
 
 | Subset | RMSE ($mean \pm std$) | MAE ($mean \pm std$) | NASA Score ($mean \pm std$) | PR-AUC ($mean \pm std$) |
 |:---:|:---:|:---:|:---:|:---:|
-| **FD001** | $13.30 \pm 0.00$ | $9.51 \pm 0.00$ | $234.6 \pm 0.0$ | $0.966 \pm 0.000$ |
-| **FD002** | $25.36 \pm 0.00$ | $16.57 \pm 0.00$ | $7,459.7 \pm 0.0$ | $0.998 \pm 0.000$ |
-| **FD003** | $64.67 \pm 0.00$ | $52.80 \pm 0.00$ | $1,390,904.8 \pm 0.0$ | $0.986 \pm 0.000$ |
-| **FD004** | $25.93 \pm 0.00$ | $18.10 \pm 0.00$ | $4,652.0 \pm 0.0$ | $0.970 \pm 0.000$ |
+| **FD001** | $13.30 \pm 0.00$ | $9.40 \pm 0.00$ | $245.3 \pm 0.0$ | $0.966 \pm 0.000$ |
+| **FD002** | $25.03 \pm 0.00$ | $16.16 \pm 0.00$ | $6,839.1 \pm 0.0$ | $0.998 \pm 0.000$ |
+| **FD003** | $14.19 \pm 0.00$ | $10.31 \pm 0.00$ | $360.4 \pm 0.0$ | $0.986 \pm 0.000$ |
+| **FD004** | $25.60 \pm 0.00$ | $17.52 \pm 0.00$ | $4,295.6 \pm 0.0$ | $0.970 \pm 0.000$ |
 
 ### Deep Learning Architecture Comparison
 
@@ -198,28 +198,30 @@ Evaluated on held-out test splits in [src/models/neural_baseline.py](src/models/
 
 | Subset | Architecture | Model Name | 5-Fold CV RMSE (Train) | Test RMSE | Test MAE | Training Speed |
 |:---:|:---:|:---|:---:|:---:|:---:|:---:|
-| FD001 | Linear | Ridge Regression | 16.30 | 17.32 | 14.32 | ~0.4s |
-| FD001 | GBDT | HistGradientBoosting Quantile | 13.16 | 12.08 | 8.44 | ~48.8s |
-| FD001 | LightGBM | LightGBM Quantile (Default) | 13.06 | 12.23 | 8.49 | ~29.8s |
-| **FD001** | **LightGBM** | **LightGBM Quantile (Tuned Champion)** | **12.96** | **12.40** | **8.67** | *~26.3s* |
-| FD001 | CNN | 1D-CNN PyTorch (30-Cycle Window) | N/A | 14.32 | 10.54 | ~12.7s |
-| FD001 | GRU | GRU PyTorch (30-Cycle Sequence) | N/A | 15.31 | 11.73 | ~19.5s |
-| FD002 | Linear | Ridge Regression | 15.19 | 27.05 | 19.49 | ~1.7s |
-| FD002 | GBDT | HistGradientBoosting Quantile | 13.14 | 24.68 | 16.19 | ~89.1s |
-| FD002 | LightGBM | LightGBM Quantile (Default) | 13.13 | 24.76 | 16.16 | ~62.1s |
-| **FD002** | **LightGBM** | **LightGBM Quantile (Tuned Champion)** | **13.13** | **24.76** | **16.16** | *~62.5s* |
-| FD002 | CNN | 1D-CNN PyTorch (30-Cycle Window) | N/A | 23.65 | 16.03 | ~17.8s |
-| FD002 | GRU | GRU PyTorch (30-Cycle Sequence) | N/A | 24.82 | 16.56 | ~24.1s |
-| FD003 | Linear | Ridge Regression | 15.68 | 16.59 | 13.39 | ~0.9s |
-| FD003 | GBDT | HistGradientBoosting Quantile | 11.58 | 13.77 | 10.42 | ~58.9s |
-| FD003 | LightGBM | LightGBM Quantile (Default) | 51.29 | 13.39 | 10.26 | ~17.8s |
-| **FD003** | **LightGBM** | **LightGBM Quantile (Tuned Champion)** | **51.29** | **13.39** | **10.26** | *~15.5s* |
-| FD003 | CNN | 1D-CNN PyTorch (30-Cycle Window) | N/A | 16.42 | 12.08 | ~8.2s |
-| FD003 | GRU | GRU PyTorch (30-Cycle Sequence) | N/A | 14.61 | 10.87 | ~28.6s |
-| FD004 | Linear | Ridge Regression | 15.94 | 27.96 | 21.25 | ~2.6s |
-| FD004 | GBDT | HistGradientBoosting Quantile | 13.24 | 25.58 | 17.68 | ~121.4s |
-| FD004 | LightGBM | LightGBM Quantile (Default) | 13.27 | 25.80 | 17.93 | ~68.2s |
-| **FD004** | **LightGBM** | **LightGBM Quantile (Tuned Champion)** | **13.27** | **25.80** | **17.93** | *~78.6s* |
+| FD001 | Linear | Ridge Regression | 38.48 | 17.32 | 14.32 | ~0.5s |
+| **FD001** | **GBDT** | **HistGradientBoosting Regressor (Champion)** | **37.55** | **12.37** | **8.80** | *~69.8s* |
+| FD001 | LightGBM | LightGBM Regressor (Default) | 37.69 | 12.75 | 8.99 | ~38.8s |
+| FD001 | LightGBM | LightGBM Regressor (Tuned) | 37.59 | 12.76 | 9.25 | ~35.9s |
+| FD001 | CNN | 1D-CNN PyTorch (30-Cycle Window) | N/A | 14.32 | 10.54 | ~18.0s |
+| FD001 | GRU | GRU PyTorch (30-Cycle Sequence) | N/A | 15.31 | 11.73 | ~25.7s |
+| FD002 | Linear | Ridge Regression | 45.84 | 27.05 | 19.49 | ~3.5s |
+| FD002 | GBDT | HistGradientBoosting Regressor | 44.40 | 24.98 | 16.34 | ~213.4s |
+| **FD002** | **LightGBM** | **LightGBM Regressor (Default) (Champion)** | **44.38** | **24.73** | **16.20** | *~134.9s* |
+| FD002 | LightGBM | LightGBM Regressor (Tuned) | 44.38 | 24.73 | 16.20 | ~138.4s |
+| FD002 | CNN | 1D-CNN PyTorch (30-Cycle Window) | N/A | 23.65 | 16.03 | ~38.7s |
+| FD002 | GRU | GRU PyTorch (30-Cycle Sequence) | N/A | 24.82 | 16.56 | ~72.1s |
+| FD003 | Linear | Ridge Regression | 73.63 | 16.59 | 13.39 | ~1.7s |
+| FD003 | GBDT | HistGradientBoosting Regressor | 71.33 | 13.02 | 9.40 | ~127.3s |
+| **FD003** | **LightGBM** | **LightGBM Regressor (Default) (Champion)** | **71.20** | **12.91** | **9.57** | *~99.2s* |
+| FD003 | LightGBM | LightGBM Regressor (Tuned) | 71.20 | 12.91 | 9.57 | ~67.1s |
+| FD003 | CNN | 1D-CNN PyTorch (30-Cycle Window) | N/A | 16.42 | 12.08 | ~9.2s |
+| FD003 | GRU | GRU PyTorch (30-Cycle Sequence) | N/A | 14.61 | 10.87 | ~23.2s |
+| FD004 | Linear | Ridge Regression | 67.39 | 27.96 | 21.25 | ~3.6s |
+| FD004 | GBDT | HistGradientBoosting Regressor | 66.02 | 25.35 | 17.31 | ~96.1s |
+| **FD004** | **LightGBM** | **LightGBM Regressor (Default) (Champion)** | **65.97** | **25.39** | **17.40** | *~73.9s* |
+| FD004 | LightGBM | LightGBM Regressor (Tuned) | 65.97 | 25.39 | 17.40 | ~71.6s |
+| FD004 | CNN | 1D-CNN PyTorch (30-Cycle Window) | N/A | 24.17 | 17.33 | ~23.6s |
+| FD004 | GRU | GRU PyTorch (30-Cycle Sequence) | N/A | 27.23 | 20.18 | ~30.7s |
 
 ---
 
@@ -255,14 +257,14 @@ $$\hat{p}_{10} \le \hat{p}_{50} \le \hat{p}_{90}$$
 
 Residual conformal calibration adjustments are calculated on engine-split validation sets with a nominal target coverage of 80% ($[p_{10}, p_{90}]$).
 
-#### 🎯 Empirical Coverage (55.2%–73.0%) vs 80% Nominal Target
+#### 🎯 Empirical Coverage (62.5%–79.0%) vs 80% Nominal Target
 On standard held-out NASA C-MAPSS test engines, the empirical conformal coverage achieved across subsets is:
-- **FD001**: **73.0%** (Single condition, single fault — close to nominal 80% target)
-- **FD002**: **64.1%** (Six operational regimes, single fault — non-stationary flight conditions)
-- **FD003**: **59.0%** (Single condition, dual fault — compounding HPC + Fan wear)
-- **FD004**: **55.2%** (Six operational regimes, dual fault — maximum operating complexity)
+- **FD001**: **79.0%** (Single condition, single fault — close to nominal 80% target)
+- **FD002**: **62.5%** (Six operational regimes, single fault — non-stationary flight conditions)
+- **FD003**: **64.0%** (Single condition, dual fault — compounding HPC + Fan wear)
+- **FD004**: **63.3%** (Six operational regimes, dual fault — maximum operating complexity)
 
-**Why empirical coverage is 55%–73% instead of 80%**:
+**Why empirical coverage is 62.5%–79.0% instead of 80%**:
 1. **Regime Distribution Shift**: In multi-regime subsets (`FD002`, `FD004`), flight conditions shift dynamically across 6 altitude/Mach regimes. Late-stage degradation induces severe covariate shift where residuals in extreme flight envelopes exhibit heavier tails than the stationary validation cohort.
 2. **Compound Degradation Modes**: Subsets with dual fault modes (`FD003`, `FD004`) exhibit coupled degradation between high-pressure compressors and fan modules. Wear accelerates non-linearly near end-of-life, causing wider residual dispersion.
 3. **Engineering Transparency**: Rather than artificially widening prediction bounds to claim inflated coverage, AETURNUS reports honest empirical coverage directly from code-generated test reports (`artifacts/reports/evaluation_*.json`).

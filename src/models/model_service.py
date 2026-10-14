@@ -190,10 +190,10 @@ class ModelService:
                 random_state=random_state, verbose=-1
             ).fit(X_train, y_rul_train)
 
-            # p50: regression (huber) objective for unbiased point estimates
+            # p50: regression objective for unbiased point estimates
             # Quantile alpha=0.50 can produce biased medians on skewed subsets (e.g. FD003)
             self.rul_p50_model = lgb.LGBMRegressor(
-                objective="huber",
+                objective="regression",
                 n_estimators=n_est, learning_rate=lr,
                 num_leaves=n_leaves, min_child_samples=min_child,
                 reg_alpha=reg_alpha, reg_lambda=reg_lambda,
@@ -404,7 +404,7 @@ class ModelService:
         for f_idx, (tr_idx, val_idx) in enumerate(gkf.split(X, y, groups=groups), start=1):
             if self.algorithm == "lightgbm":
                 reg = lgb.LGBMRegressor(
-                    objective="huber",
+                    objective="regression",
                     n_estimators=150, learning_rate=0.05,
                     num_leaves=31, min_child_samples=20,
                     random_state=42, verbose=-1
@@ -835,12 +835,23 @@ class ModelService:
                     "subsystem": subsystem
                 })
 
-        if not top_contributors:
-            top_contributors = [
-                {"sensor": "s2", "name": "T24", "shap_value": -1.2, "contribution": 0.45, "direction": "shortens_life", "subsystem": "LPC"},
-                {"sensor": "s3", "name": "T30", "shap_value": -0.8, "contribution": 0.35, "direction": "shortens_life", "subsystem": "HPC"},
-                {"sensor": "s4", "name": "T50", "shap_value": 0.5, "contribution": 0.20, "direction": "prolongs_life", "subsystem": "LPT"}
-            ]
+        if not top_contributors and self.feature_cols:
+            for f in self.feature_cols:
+                m = re.match(r"^(s\d+)", f)
+                s_id = m.group(1) if m else f
+                if not any(tc.get("sensor") == s_id for tc in top_contributors):
+                    subsystem = self.sensor_cfg.get("sensors", {}).get(s_id, {}).get("subsystem", "HPC")
+                    s_name = self.sensor_cfg.get("sensors", {}).get(s_id, {}).get("name", s_id)
+                    top_contributors.append({
+                        "sensor": s_id,
+                        "name": s_name,
+                        "shap_value": 0.0,
+                        "contribution": 0.33,
+                        "direction": "shortens_life",
+                        "subsystem": subsystem
+                    })
+                if len(top_contributors) >= 3:
+                    break
 
         top_sensors = [c["sensor"] for c in top_contributors]
 
@@ -957,14 +968,31 @@ class ModelService:
         gkf = GroupKFold(n_splits=5)
         splits_list = list(gkf.split(X_tr_cv, y_tr_cv, groups=groups_cv))
 
-        # Helper to compute 5-fold CV metrics
+        # Protocol matching test: random truncation per held-out engine (5 draws, seed 42), uncapped RUL, NASA sum
+        uncapped_col = "rul_raw" if "rul_raw" in train_only_df.columns else "rul_capped"
+        y_uncapped_cv = train_only_df[uncapped_col].values
+
+        fold_truncation_evals = []
+        for tr_i, val_i in splits_list:
+            val_sub_df = train_only_df.iloc[val_i]
+            val_units = val_sub_df["unit"].unique()
+            rng = np.random.RandomState(42)
+            eval_indices = []
+            for u in val_units:
+                u_row_indices = val_sub_df.index[val_sub_df["unit"] == u].values
+                if len(u_row_indices) > 0:
+                    draws = rng.choice(u_row_indices, size=min(5, len(u_row_indices)), replace=False)
+                    eval_indices.extend(draws)
+            fold_truncation_evals.append((tr_i, eval_indices))
+
+        # Helper to compute 5-fold CV metrics using the SAME protocol as test
         def get_cv_metrics(model_fn):
             fold_rmses, fold_nasas = [], []
-            for tr_i, val_i in splits_list:
+            for tr_i, eval_i in fold_truncation_evals:
                 m = model_fn()
                 m.fit(X_tr_cv[tr_i], y_tr_cv[tr_i])
-                preds = np.maximum(0.0, m.predict(X_tr_cv[val_i]))
-                met = calculate_metrics(y_tr_cv[val_i], preds)
+                preds = np.maximum(0.0, m.predict(X_tr_cv[eval_i]))
+                met = calculate_metrics(y_uncapped_cv[eval_i], preds)
                 fold_rmses.append(met["rmse"])
                 fold_nasas.append(met["nasa_score"])
             return float(np.mean(fold_rmses)), float(np.mean(fold_nasas))
@@ -980,9 +1008,9 @@ class ModelService:
         # 2. HistGradientBoosting Baseline
         t0 = time.time()
         hgb_cv_rmse, hgb_cv_nasa = get_cv_metrics(
-            lambda: HistGradientBoostingRegressor(loss="quantile", quantile=0.50, max_iter=150, learning_rate=0.05, random_state=42)
+            lambda: HistGradientBoostingRegressor(loss="squared_error", max_iter=150, learning_rate=0.05, random_state=42)
         )
-        hgb_model = HistGradientBoostingRegressor(loss="quantile", quantile=0.50, max_iter=150, learning_rate=0.05, random_state=42).fit(X_train, y_train)
+        hgb_model = HistGradientBoostingRegressor(loss="squared_error", max_iter=150, learning_rate=0.05, random_state=42).fit(X_train, y_train)
         hgb_pred = np.maximum(0.0, hgb_model.predict(X_test))
         hgb_met = calculate_metrics(y_test, hgb_pred)
         hgb_time = round(time.time() - t0, 2)
@@ -990,14 +1018,14 @@ class ModelService:
         # 3. LightGBM Default
         t0 = time.time()
         lgb_def_cv_rmse, lgb_def_cv_nasa = get_cv_metrics(
-            lambda: lgb.LGBMRegressor(objective="quantile", alpha=0.50, n_estimators=150, learning_rate=0.05, num_leaves=31, min_child_samples=20, random_state=42, verbose=-1)
+            lambda: lgb.LGBMRegressor(objective="regression", n_estimators=150, learning_rate=0.05, num_leaves=31, min_child_samples=20, random_state=42, verbose=-1)
         )
-        lgb_def_model = lgb.LGBMRegressor(objective="quantile", alpha=0.50, n_estimators=150, learning_rate=0.05, num_leaves=31, min_child_samples=20, random_state=42, verbose=-1).fit(X_train, y_train)
+        lgb_def_model = lgb.LGBMRegressor(objective="regression", n_estimators=150, learning_rate=0.05, num_leaves=31, min_child_samples=20, random_state=42, verbose=-1).fit(X_train, y_train)
         lgb_def_pred = np.maximum(0.0, lgb_def_model.predict(X_test))
         lgb_def_met = calculate_metrics(y_test, lgb_def_pred)
         lgb_def_time = round(time.time() - t0, 2)
 
-        # 4. LightGBM Tuned (Champion)
+        # 4. LightGBM Tuned
         best_params_path = self.root_dir / "configs" / f"best_params_{self.subset}.json"
         tuned_p = {}
         if best_params_path.exists():
@@ -1016,9 +1044,9 @@ class ModelService:
 
         t0 = time.time()
         lgb_tuned_cv_rmse, lgb_tuned_cv_nasa = get_cv_metrics(
-            lambda: lgb.LGBMRegressor(objective="quantile", alpha=0.50, n_estimators=n_est, learning_rate=lr, num_leaves=n_leaves, min_child_samples=min_child, reg_alpha=reg_a, reg_lambda=reg_l, random_state=42, verbose=-1)
+            lambda: lgb.LGBMRegressor(objective="regression", n_estimators=n_est, learning_rate=lr, num_leaves=n_leaves, min_child_samples=min_child, reg_alpha=reg_a, reg_lambda=reg_l, random_state=42, verbose=-1)
         )
-        lgb_tuned_model = lgb.LGBMRegressor(objective="quantile", alpha=0.50, n_estimators=n_est, learning_rate=lr, num_leaves=n_leaves, min_child_samples=min_child, reg_alpha=reg_a, reg_lambda=reg_l, random_state=42, verbose=-1).fit(X_train, y_train)
+        lgb_tuned_model = lgb.LGBMRegressor(objective="regression", n_estimators=n_est, learning_rate=lr, num_leaves=n_leaves, min_child_samples=min_child, reg_alpha=reg_a, reg_lambda=reg_l, random_state=42, verbose=-1).fit(X_train, y_train)
         lgb_tuned_pred = np.maximum(0.0, lgb_tuned_model.predict(X_test))
         lgb_tuned_met = calculate_metrics(y_test, lgb_tuned_pred)
         lgb_tuned_time = round(time.time() - t0, 2)
@@ -1035,7 +1063,7 @@ class ModelService:
                 "train_time_sec": ridge_time
             },
             {
-                "model_name": "HistGradientBoosting Quantile",
+                "model_name": "HistGradientBoosting Regressor",
                 "architecture": "GBDT",
                 "cv_mean_rmse": round(hgb_cv_rmse, 2),
                 "cv_mean_nasa": round(hgb_cv_nasa, 1),
@@ -1045,7 +1073,7 @@ class ModelService:
                 "train_time_sec": hgb_time
             },
             {
-                "model_name": "LightGBM Quantile (Default)",
+                "model_name": "LightGBM Regressor (Default)",
                 "architecture": "LightGBM",
                 "cv_mean_rmse": round(lgb_def_cv_rmse, 2),
                 "cv_mean_nasa": round(lgb_def_cv_nasa, 1),
@@ -1055,7 +1083,7 @@ class ModelService:
                 "train_time_sec": lgb_def_time
             },
             {
-                "model_name": "LightGBM Quantile (Tuned Champion)",
+                "model_name": "LightGBM Regressor (Tuned)",
                 "architecture": "LightGBM",
                 "cv_mean_rmse": round(lgb_tuned_cv_rmse, 2),
                 "cv_mean_nasa": round(lgb_tuned_cv_nasa, 1),
@@ -1077,10 +1105,19 @@ class ModelService:
         except Exception as e:
             print(f"[{self.subset}] Skipping PyTorch deep benchmarks: {e}")
 
+        # Champion selected dynamically via lowest mean CV RMSE
+        champion_candidate = min(models_list, key=lambda m: (m.get("cv_mean_rmse", 999.0), m.get("cv_mean_nasa", 99999.0)))
+        champion_name = champion_candidate["model_name"]
+        champion_rule = (
+            f"Selected {champion_name} via lowest mean CV RMSE ({champion_candidate['cv_mean_rmse']:.2f}) "
+            f"on TRAIN engines (GroupKFold-5, 5 random truncation draws per held-out engine, uncapped RUL, "
+            f"NASA asymmetric penalty score). Test set metrics are reported for evaluation only, never used for selection."
+        )
+
         comparison = {
             "subset": self.subset,
-            "champion_selection_rule": "Lowest mean CV RMSE on TRAIN engines (GroupKFold-5), ties broken by validation NASA score. Test set metrics are reported for evaluation only, never used for selection.",
-            "champion": "LightGBM Quantile (Tuned Champion)",
+            "champion_selection_rule": champion_rule,
+            "champion": champion_name,
             "models": models_list
         }
 

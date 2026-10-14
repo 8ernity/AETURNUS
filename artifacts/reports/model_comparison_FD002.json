@@ -1,47 +1,47 @@
 {
   "subset": "FD002",
-  "champion_selection_rule": "Lowest mean CV RMSE on TRAIN engines (GroupKFold-5), ties broken by validation NASA score. Test set metrics are reported for evaluation only, never used for selection.",
-  "champion": "LightGBM Quantile (Tuned Champion)",
+  "champion_selection_rule": "Selected LightGBM Regressor (Default) via lowest mean CV RMSE (44.38) on TRAIN engines (GroupKFold-5, 5 random truncation draws per held-out engine, uncapped RUL, NASA asymmetric penalty score). Test set metrics are reported for evaluation only, never used for selection.",
+  "champion": "LightGBM Regressor (Default)",
   "models": [
     {
       "model_name": "Ridge Regression",
       "architecture": "Linear",
-      "cv_mean_rmse": 15.19,
-      "cv_mean_nasa": 30011.0,
+      "cv_mean_rmse": 45.84,
+      "cv_mean_nasa": 15599805.1,
       "rmse": 27.0452,
       "mae": 19.4932,
       "nasa_score": 6986.96,
-      "train_time_sec": 1.7
+      "train_time_sec": 3.47
     },
     {
-      "model_name": "HistGradientBoosting Quantile",
+      "model_name": "HistGradientBoosting Regressor",
       "architecture": "GBDT",
-      "cv_mean_rmse": 13.14,
-      "cv_mean_nasa": 27090.0,
-      "rmse": 24.6797,
-      "mae": 16.1865,
-      "nasa_score": 5797.16,
-      "train_time_sec": 89.12
+      "cv_mean_rmse": 44.4,
+      "cv_mean_nasa": 19251485.3,
+      "rmse": 24.9768,
+      "mae": 16.3425,
+      "nasa_score": 6287.36,
+      "train_time_sec": 213.44
     },
     {
-      "model_name": "LightGBM Quantile (Default)",
+      "model_name": "LightGBM Regressor (Default)",
       "architecture": "LightGBM",
-      "cv_mean_rmse": 13.13,
-      "cv_mean_nasa": 26882.0,
-      "rmse": 24.7585,
-      "mae": 16.1563,
-      "nasa_score": 6150.8,
-      "train_time_sec": 62.06
+      "cv_mean_rmse": 44.38,
+      "cv_mean_nasa": 21016317.2,
+      "rmse": 24.7311,
+      "mae": 16.202,
+      "nasa_score": 5757.88,
+      "train_time_sec": 134.91
     },
     {
-      "model_name": "LightGBM Quantile (Tuned Champion)",
+      "model_name": "LightGBM Regressor (Tuned)",
       "architecture": "LightGBM",
-      "cv_mean_rmse": 13.13,
-      "cv_mean_nasa": 26882.0,
-      "rmse": 24.7585,
-      "mae": 16.1563,
-      "nasa_score": 6150.8,
-      "train_time_sec": 62.52
+      "cv_mean_rmse": 44.38,
+      "cv_mean_nasa": 21016317.2,
+      "rmse": 24.7311,
+      "mae": 16.202,
+      "nasa_score": 5757.88,
+      "train_time_sec": 138.4
     },
     {
       "model_name": "1D-CNN PyTorch (30-Cycle Window)",
@@ -50,7 +50,7 @@
       "rmse": 23.65,
       "mae": 16.03,
       "nasa_score": 3866.58,
-      "train_time_sec": 17.78
+      "train_time_sec": 38.69
     },
     {
       "model_name": "GRU PyTorch (30-Cycle Sequence)",
@@ -59,7 +59,7 @@
       "rmse": 24.82,
       "mae": 16.56,
       "nasa_score": 4867.71,
-      "train_time_sec": 24.05
+      "train_time_sec": 72.11
     }
   ]
 }

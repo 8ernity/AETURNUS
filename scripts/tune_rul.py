@@ -66,7 +66,7 @@ def tune_subset(subset: str = "FD001", n_trials: int = 30, timeout: int = 300):
     default_rmses, default_nasas = [], []
     for tr_idx, val_idx in splits:
         model = lgb.LGBMRegressor(
-            objective="huber",
+            objective="regression",
             n_estimators=150,
             learning_rate=0.05,
             num_leaves=31,
@@ -103,7 +103,7 @@ def tune_subset(subset: str = "FD001", n_trials: int = 30, timeout: int = 300):
 
             for tr_idx, val_idx in splits:
                 model = lgb.LGBMRegressor(
-                    objective="huber",
+                    objective="regression",
                     n_estimators=n_estimators,
                     learning_rate=learning_rate,
                     num_leaves=num_leaves,
@@ -157,7 +157,7 @@ def tune_subset(subset: str = "FD001", n_trials: int = 30, timeout: int = 300):
     tuned_rmses, tuned_nasas = [], []
     for tr_idx, val_idx in splits:
         model = lgb.LGBMRegressor(
-            objective="huber",
+            objective="regression",
             n_estimators=best_params["n_estimators"],
             learning_rate=best_params["learning_rate"],
             num_leaves=best_params["num_leaves"],
@@ -197,7 +197,12 @@ def tune_subset(subset: str = "FD001", n_trials: int = 30, timeout: int = 300):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--subset", type=str, default="FD001")
+    parser.add_argument("--subset", type=str, default="all")
     parser.add_argument("--trials", type=int, default=30)
     args = parser.parse_args()
-    tune_subset(args.subset, n_trials=args.trials)
+    if args.subset.lower() == "all":
+        for sub in ["FD001", "FD002", "FD003", "FD004"]:
+            print(f"\n================ Tuning {sub} ({args.trials} trials) ================")
+            tune_subset(sub, n_trials=args.trials)
+    else:
+        tune_subset(args.subset, n_trials=args.trials)

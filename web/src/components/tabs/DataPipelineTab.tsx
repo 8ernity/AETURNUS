@@ -24,7 +24,7 @@ export const DataPipelineTab: React.FC<DataPipelineTabProps> = ({ currentSubset 
     },
     { 
       name: "2. Clean & Dedupe", 
-      desc: "Forward-fill (limit 3), linear interpolation, Hampel filter outlier clipping", 
+      desc: "Forward-fill (limit 3), linear interpolation, robust z-score outlier clipping", 
       status: qualityReport.train_cleaning ? `VERIFIED (${qualityReport.train_cleaning.outliers_cleaned} outliers clipped)` : "PENDING",
       verified: Boolean(qualityReport.train_cleaning)
     },
@@ -54,7 +54,7 @@ export const DataPipelineTab: React.FC<DataPipelineTabProps> = ({ currentSubset 
     },
   ] : [
     { name: "1. Ingest & Validate", desc: "Checks schema, dtypes, strictly increasing cycles", status: "AWAITING AUDIT", verified: false },
-    { name: "2. Clean & Dedupe", desc: "Causal forward-fill, Hampel / outlier clipping", status: "AWAITING AUDIT", verified: false },
+    { name: "2. Clean & Dedupe", desc: "Causal forward-fill, robust z-score outlier clipping", status: "AWAITING AUDIT", verified: false },
     { name: "3. Constant Sensor Drop", desc: "Programmatically drops zero-variance sensors", status: "AWAITING AUDIT", verified: false },
     { name: "4. Regime Clustering", desc: "K-Means operating regimes clustering", status: "AWAITING AUDIT", verified: false },
     { name: "5. Rolling Features", desc: "Causal EWMA & rolling trend metrics", status: "AWAITING AUDIT", verified: false },

@@ -33,7 +33,7 @@ def trim_memory():
     except Exception:
         pass
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, HTTPException, Body, UploadFile, File
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Query, HTTPException, Body, UploadFile, File
 from fastapi.responses import FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -546,7 +546,7 @@ def get_engine_detail(engine_id: str, subset: str = Query(default="FD001")):
     else:
         sensor_attributions = top_contribs
 
-    # 360° Turbofan Subsystem Health Radar (5 core gas-path stations)
+    # 360° Turbofan Subsystem Attribution Share (Sums strictly to 100%)
     subsystem_sensor_groups = {
         "Fan / LPC": ["s1", "s2", "s5", "s6", "s8", "s13", "s15"],
         "HPC": ["s3", "s7", "s11"],
@@ -554,47 +554,62 @@ def get_engine_detail(engine_id: str, subset: str = Query(default="FD001")):
         "HPT": ["s9", "s14", "s20"],
         "LPT / Exhaust": ["s4", "s17", "s21"]
     }
+    sensor_to_group = {}
+    for grp, s_list in subsystem_sensor_groups.items():
+        for s in s_list:
+            sensor_to_group[s] = grp
 
-    hi = float(pred.get("health_index", 1.0))
-    anomaly = float(pred.get("anomaly_score", 0.0))
-    base_degradation = max(5.0, min(95.0, (1.0 - hi) * 85.0 + anomaly * 15.0))
+    subsystem_shap_abs = {grp: 0.0 for grp in subsystem_sensor_groups}
 
-    shap_by_sub = {}
     for item in sensor_attributions:
-        sub = item.get("subsystem", "")
-        target_group = "HPC" if "HPC" in sub else (
-            "Fan / LPC" if ("Fan" in sub or "LPC" in sub) else (
-                "Combustor" if "Combustor" in sub else (
-                    "HPT" if "HPT" in sub or "Core" in sub else (
-                        "LPT / Exhaust" if "LPT" in sub or "Bleed" in sub else "HPC"
+        s = item.get("sensor", "")
+        grp = sensor_to_group.get(s)
+        if not grp:
+            sub = item.get("subsystem", "")
+            grp = "HPC" if "HPC" in sub else (
+                "Fan / LPC" if ("Fan" in sub or "LPC" in sub) else (
+                    "Combustor" if "Combustor" in sub else (
+                        "HPT" if "HPT" in sub or "Core" in sub else (
+                            "LPT / Exhaust" if "LPT" in sub or "Bleed" in sub else "HPC"
+                        )
                     )
                 )
             )
-        )
         val = abs(float(item.get("shap_value", item.get("contribution", 0.0))))
-        shap_by_sub[target_group] = max(shap_by_sub.get(target_group, 0.0), val)
+        subsystem_shap_abs[grp] += val
+
+    total_shap = sum(subsystem_shap_abs.values())
+    if total_shap <= 1e-6:
+        for grp, sensors in subsystem_sensor_groups.items():
+            for s in sensors:
+                if f"{s}_dev_base" in last_row:
+                    subsystem_shap_abs[grp] += abs(float(last_row[f"{s}_dev_base"]))
+                elif f"{s}_norm" in last_row:
+                    subsystem_shap_abs[grp] += abs(float(last_row[f"{s}_norm"]))
+        total_shap = sum(subsystem_shap_abs.values())
+
+    if total_shap > 1e-6:
+        raw_shares = {grp: (val / total_shap) * 100.0 for grp, val in subsystem_shap_abs.items()}
+    else:
+        raw_shares = {grp: 100.0 / len(subsystem_sensor_groups) for grp in subsystem_sensor_groups}
+
+    rounded_shares = {grp: round(raw_shares[grp], 1) for grp in subsystem_sensor_groups}
+    diff = round(100.0 - sum(rounded_shares.values()), 1)
+    if diff != 0.0:
+        max_grp = max(rounded_shares.keys(), key=lambda k: rounded_shares[k])
+        rounded_shares[max_grp] = round(rounded_shares[max_grp] + diff, 1)
 
     subsystem_health = []
-    for group_name, sensors in subsystem_sensor_groups.items():
-        devs = []
-        for s in sensors:
-            if f"{s}_dev_base" in last_row:
-                devs.append(abs(float(last_row[f"{s}_dev_base"])))
-            elif f"{s}_norm" in last_row:
-                devs.append(abs(float(last_row[f"{s}_norm"])))
-        avg_dev = (sum(devs) / len(devs)) if devs else 0.5
-        shap_weight = shap_by_sub.get(group_name, 0.0)
-
-        group_deg = base_degradation * 0.45 + min(40.0, avg_dev * 16.0) + min(35.0, shap_weight * 25.0)
-        group_deg = round(max(8.0, min(98.0, group_deg)), 1)
-        group_health = round(100.0 - group_deg, 1)
-
-        status = "CRITICAL" if group_deg >= 70.0 else ("WARNING" if group_deg >= 45.0 else ("ADVISORY" if group_deg >= 25.0 else "NOMINAL"))
+    for group_name in subsystem_sensor_groups:
+        share = rounded_shares[group_name]
+        status = "CRITICAL" if share >= 40.0 else ("WARNING" if share >= 25.0 else ("ADVISORY" if share >= 15.0 else "NOMINAL"))
         subsystem_health.append({
             "subsystem": group_name,
-            "health": group_health,
-            "degradation": group_deg,
-            "baseline": 15.0,
+            "attribution_share": share,
+            "share": share,
+            "health": round(100.0 - share, 1),
+            "degradation": share,
+            "baseline": 20.0,
             "status": status
         })
 
@@ -1461,11 +1476,50 @@ def get_monitoring_drift(subset: str = Query(default="FD001")):
 # ----------------- Observability & Metrics -----------------
 from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
 
-PDM_PREDICTIONS = Counter(
-    "pdm_predictions_total",
-    "Total engine cycle predictions scored",
-    ["subset", "severity"]
+# Required Item 5 Metrics
+HTTP_REQUESTS_TOTAL = Counter(
+    "http_requests_total",
+    "Total HTTP requests received",
+    ["method", "endpoint", "status"]
 )
+HTTP_REQUEST_DURATION_SECONDS = Histogram(
+    "http_request_duration_seconds",
+    "HTTP request latency in seconds",
+    ["method", "endpoint"]
+)
+PREDICTIONS_TOTAL = Counter(
+    "predictions_total",
+    "Total engine cycle predictions scored",
+    ["subset"]
+)
+OPEN_WORK_ORDERS = Gauge(
+    "open_work_orders",
+    "Number of open work orders by severity",
+    ["severity"]
+)
+AGENT_EXCEPTIONS_TOTAL = Counter(
+    "agent_exceptions_total",
+    "Total triage agent rule exceptions triggered",
+    ["rule"]
+)
+DRIFT_SHARE = Gauge(
+    "drift_share",
+    "Live feature drift share per subset",
+    ["subset"]
+)
+RETRAIN_TOTAL = Counter(
+    "retrain_total",
+    "Total model retraining attempts by outcome",
+    ["outcome"]
+)
+CHAMPION_INFO = Gauge(
+    "champion_info",
+    "Current active champion model info",
+    ["subset", "version"]
+)
+
+# Compatibility gauges
+PDM_PREDICTIONS = PREDICTIONS_TOTAL
 PDM_PREDICTION_LATENCY = Histogram(
     "pdm_prediction_latency_seconds",
     "Prediction inference latency",
@@ -1492,9 +1546,26 @@ PDM_CONFORMAL_COVERAGE = Gauge(
     ["subset"]
 )
 
+@app.middleware("http")
+async def track_http_metrics(request: Request, call_next):
+    start_time = time.time()
+    try:
+        response = await call_next(request)
+        status_code = str(response.status_code)
+    except Exception as exc:
+        status_code = "500"
+        raise exc from None
+    finally:
+        latency = time.time() - start_time
+        path = request.url.path
+        method = request.method
+        HTTP_REQUESTS_TOTAL.labels(method=method, endpoint=path, status=status_code).inc()
+        HTTP_REQUEST_DURATION_SECONDS.labels(method=method, endpoint=path).observe(latency)
+    return response
+
 @app.get("/metrics")
 def get_metrics():
-    # Update gauges with live evaluation reports and active alerts
+    # 1. Update test RMSE and conformal coverage
     for sub in ["FD001", "FD002", "FD003", "FD004"]:
         eval_f = ROOT_DIR / "artifacts" / "reports" / f"evaluation_{sub}.json"
         if eval_f.exists():
@@ -1506,6 +1577,39 @@ def get_metrics():
             except Exception:
                 pass
 
+    # 2. Update open_work_orders{severity}
+    active_orders = triage_agent.get_active_work_orders() if triage_agent else []
+    for sev in ["CRITICAL", "HIGH", "WARNING", "ADVISORY"]:
+        count = sum(1 for o in active_orders if o.get("severity") == sev)
+        OPEN_WORK_ORDERS.labels(severity=sev).set(count)
+
+    # 3. Update champion_info{subset,version}
+    for sub in ["FD001", "FD002", "FD003", "FD004"]:
+        v = "v1.0"
+        reg_file = ROOT_DIR / "artifacts" / "models" / f"registry_{sub}.json"
+        if reg_file.exists():
+            try:
+                with open(reg_file, "r", encoding="utf-8") as rf:
+                    reg_data = json.load(rf)
+                    v = reg_data.get("champion", {}).get("version", "v1.0")
+            except Exception:
+                pass
+        CHAMPION_INFO.labels(subset=sub, version=v).set(1.0)
+
+    # 4. Update drift_share{subset} computed from live data
+    for sub in ["FD001", "FD002", "FD003", "FD004"]:
+        try:
+            train_df = get_dataframe("train", sub)
+            test_df = get_dataframe("test", sub)
+            ref_sample = train_df.sample(min(300, len(train_df)), random_state=42)
+            curr_sample = test_df.sample(min(150, len(test_df)), random_state=42)
+            mgr = mlops_managers.get(sub) or MLOpsManager(sub)
+            report = mgr.calculate_drift_report(ref_sample, curr_sample)
+            DRIFT_SHARE.labels(subset=sub).set(float(report.get("drift_share", 0.0)))
+        except Exception:
+            DRIFT_SHARE.labels(subset=sub).set(0.0)
+
+    # 5. Evaluate active alerts using LIVE drift
     from src.mlops.alerts import AlertManager
     alert_mgr = AlertManager()
     alerts = alert_mgr.evaluate_alerts(triage_agent=triage_agent)
