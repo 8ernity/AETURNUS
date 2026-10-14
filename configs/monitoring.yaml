@@ -21,3 +21,13 @@ alerts:
   backlog_critical_high_threshold: 10
   coverage_min_threshold: 0.75
   latency_p95_ms_threshold: 100.0
+
+  # External Alert Webhook Dispatcher (Slack / Teams / PagerDuty / Generic)
+  webhook:
+    enabled: false
+    url: "" # e.g. https://hooks.slack.com/services/... or https://events.pagerduty.com/v2/enqueue
+    service: "slack" # "slack" | "teams" | "pagerduty" | "generic"
+    timeout_sec: 5.0
+    retry_count: 2
+    notify_rules: ["M1", "M2", "M3"]
+

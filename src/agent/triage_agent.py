@@ -393,6 +393,7 @@ class TriageAgent:
         if rul_drop >= drop_thresh:
             sev_idx = min(len(SEVERITY_ORDER) - 1, sev_idx + 1)
             trace.append(f"M1:fired(drop={rul_drop:.1f}->{SEVERITY_ORDER[sev_idx]})")
+            self._dispatch_rule_webhook("M1", engine_id, cycle, SEVERITY_ORDER[sev_idx], cons_rul, {"rul_drop": round(float(rul_drop), 1), "drop_thresh": drop_thresh})
         else:
             trace.append("M1:not_fired")
 
@@ -400,6 +401,7 @@ class TriageAgent:
         if anomaly_score >= anom_thresh and sev_idx <= SEVERITY_ORDER.index("MEDIUM"):
             sev_idx = min(len(SEVERITY_ORDER) - 1, sev_idx + 1)
             trace.append(f"M2:fired(anomaly={anomaly_score:.2f}->{SEVERITY_ORDER[sev_idx]})")
+            self._dispatch_rule_webhook("M2", engine_id, cycle, SEVERITY_ORDER[sev_idx], cons_rul, {"anomaly_score": round(float(anomaly_score), 2), "anom_thresh": anom_thresh})
         else:
             trace.append("M2:not_fired")
 
@@ -409,9 +411,11 @@ class TriageAgent:
         if fail_prob_10 >= 0.70:
             sev_idx = max(sev_idx, SEVERITY_ORDER.index("CRITICAL"))
             trace.append(f"M3:fired(fail_prob_10={fail_prob_10:.2f}->CRITICAL)")
+            self._dispatch_rule_webhook("M3", engine_id, cycle, "CRITICAL", cons_rul, {"fail_prob_10": round(float(fail_prob_10), 2), "threshold": 0.70})
         elif fail_prob >= effective_tau_30:
             sev_idx = max(sev_idx, SEVERITY_ORDER.index("HIGH"))
             trace.append(f"M3:fired(fail_prob={fail_prob:.2f}>={effective_tau_30:.2f}->HIGH)")
+            self._dispatch_rule_webhook("M3", engine_id, cycle, "HIGH", cons_rul, {"fail_prob_30": round(float(fail_prob), 2), "threshold": round(float(effective_tau_30), 2)})
         else:
             trace.append("M3:not_fired")
 
@@ -854,3 +858,34 @@ class TriageAgent:
             self._log_audit_event(engine_id=target_engine, action="CLOSE", actor="HumanOperator", cycle=cycle, work_order_id=work_order_id, reason=reason)
 
         return True
+
+    def _dispatch_rule_webhook(
+        self,
+        rule_id: str,
+        engine_id: Any,
+        cycle: int,
+        severity: str,
+        cons_rul: float,
+        details: Optional[Dict[str, Any]] = None,
+        suspected_subsystem: str = "HPC Compressor"
+    ):
+        """
+        Dispatches external webhook alert (Slack/Teams/PagerDuty) when Rule M1, M2, or M3 fires.
+        """
+        try:
+            if not hasattr(self, "_alert_manager") or self._alert_manager is None:
+                from src.mlops.alerts import AlertManager
+                self._alert_manager = AlertManager()
+            if self._alert_manager:
+                self._alert_manager.dispatch_m_rule(
+                    rule_id=rule_id,
+                    engine_id=engine_id,
+                    cycle=cycle,
+                    severity=severity,
+                    conservative_rul=cons_rul,
+                    details=details,
+                    suspected_subsystem=suspected_subsystem
+                )
+        except Exception:
+            pass
+

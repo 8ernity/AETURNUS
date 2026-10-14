@@ -66,8 +66,7 @@ def tune_subset(subset: str = "FD001", n_trials: int = 30, timeout: int = 300):
     default_rmses, default_nasas = [], []
     for tr_idx, val_idx in splits:
         model = lgb.LGBMRegressor(
-            objective="quantile",
-            alpha=0.50,
+            objective="huber",
             n_estimators=150,
             learning_rate=0.05,
             num_leaves=31,
@@ -104,8 +103,7 @@ def tune_subset(subset: str = "FD001", n_trials: int = 30, timeout: int = 300):
 
             for tr_idx, val_idx in splits:
                 model = lgb.LGBMRegressor(
-                    objective="quantile",
-                    alpha=0.50,
+                    objective="huber",
                     n_estimators=n_estimators,
                     learning_rate=learning_rate,
                     num_leaves=num_leaves,
@@ -159,8 +157,7 @@ def tune_subset(subset: str = "FD001", n_trials: int = 30, timeout: int = 300):
     tuned_rmses, tuned_nasas = [], []
     for tr_idx, val_idx in splits:
         model = lgb.LGBMRegressor(
-            objective="quantile",
-            alpha=0.50,
+            objective="huber",
             n_estimators=best_params["n_estimators"],
             learning_rate=best_params["learning_rate"],
             num_leaves=best_params["num_leaves"],

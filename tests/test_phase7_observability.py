@@ -92,3 +92,95 @@ def test_alert_manager_synthetic_triggers():
     lat_alerts = mgr.evaluate_alerts(context=lat_ctx)
     lat_alert = next(a for a in lat_alerts if a["rule_name"] == "RULE_INFERENCE_LATENCY_SPIKE")
     assert lat_alert["firing"] is True
+
+
+def test_webhook_dispatcher_payload_formatting():
+    """Verify webhook dispatcher formats payloads correctly for Slack, Teams, PagerDuty, and Generic schemas."""
+    from src.mlops.alerts import WebhookDispatcher
+
+    # 1. Slack format for Rule M1
+    slack_dispatcher = WebhookDispatcher({"webhook": {"service": "slack"}})
+    slack_payload = slack_dispatcher.format_payload("M1", 42, 120, "CRITICAL", 12.5)
+    assert "blocks" in slack_payload
+    assert "text" in slack_payload
+    assert any("M1" in str(b) for b in slack_payload["blocks"])
+    assert any("#42" in str(b) for b in slack_payload["blocks"])
+
+    # 2. Teams format for Rule M2
+    teams_dispatcher = WebhookDispatcher({"webhook": {"service": "teams"}})
+    teams_payload = teams_dispatcher.format_payload("M2", 15, 85, "HIGH", 28.0)
+    assert teams_payload["@type"] == "MessageCard"
+    assert "sections" in teams_payload
+    assert any(f["name"] == "Rule" for s in teams_payload["sections"] for f in s.get("facts", []))
+
+    # 3. PagerDuty format for Rule M3
+    pd_dispatcher = WebhookDispatcher({"webhook": {"service": "pagerduty"}})
+    pd_payload = pd_dispatcher.format_payload("M3", 7, 160, "CRITICAL", 8.4)
+    assert "payload" in pd_payload
+    assert pd_payload["payload"]["severity"] == "critical"
+    assert pd_payload["payload"]["custom_details"]["rule_id"] == "M3"
+
+    # 4. Generic format
+    gen_dispatcher = WebhookDispatcher({"webhook": {"service": "generic"}})
+    gen_payload = gen_dispatcher.format_payload("M1", 99, 45, "HIGH", 22.0)
+    assert gen_payload["event_type"] == "RULE_TRIGGERED"
+    assert gen_payload["rule_id"] == "M1"
+    assert gen_payload["engine_id"] == "99"
+
+
+def test_webhook_dispatcher_dispatch_execution():
+    """Verify webhook dispatcher handles mock dispatch, disabled state, and rule filtering."""
+    from src.mlops.alerts import WebhookDispatcher
+
+    sent_calls = []
+    def mock_sender(url, payload):
+        sent_calls.append({"url": url, "payload": payload})
+        class MockResp:
+            status_code = 200
+        return MockResp()
+
+    # Enabled dispatcher
+    enabled_cfg = {
+        "webhook": {
+            "enabled": True,
+            "url": "https://hooks.slack.com/services/TEST/123",
+            "service": "slack",
+            "notify_rules": ["M1", "M3"]
+        }
+    }
+    dispatcher = WebhookDispatcher(enabled_cfg)
+
+    # Dispatched Rule M1
+    res_m1 = dispatcher.dispatch_m_rule("M1", "E-101", 150, "CRITICAL", 11.2, mock_sender=mock_sender)
+    assert res_m1["status"] == "sent"
+    assert len(sent_calls) == 1
+    assert "E-101" in str(sent_calls[0]["payload"])
+
+    # Skipped Rule M2 (not in notify_rules)
+    res_m2 = dispatcher.dispatch_m_rule("M2", "E-102", 90, "HIGH", 25.0, mock_sender=mock_sender)
+    assert res_m2["status"] == "skipped"
+    assert len(sent_calls) == 1
+
+    # Disabled dispatcher
+    disabled_cfg = {"webhook": {"enabled": False, "url": ""}}
+    disabled_dispatcher = WebhookDispatcher(disabled_cfg)
+    res_dis = disabled_dispatcher.dispatch_m_rule("M1", "E-103", 50, "CRITICAL", 10.0, mock_sender=mock_sender)
+    assert res_dis["status"] == "disabled"
+
+
+def test_monitoring_webhooks_api_endpoints():
+    """Verify GET /api/v1/monitoring/webhooks and POST /api/v1/monitoring/webhooks/test."""
+    get_resp = client.get("/api/v1/monitoring/webhooks")
+    assert get_resp.status_code == 200
+    data = get_resp.json()
+    assert "enabled" in data
+    assert "service" in data
+    assert "notify_rules" in data
+    assert "M1" in data["notify_rules"]
+    assert "recent_dispatches" in data
+
+    post_resp = client.post("/api/v1/monitoring/webhooks/test?rule_id=M1&engine_id=12&cycle=135&severity=CRITICAL&conservative_rul=14.2")
+    assert post_resp.status_code == 200
+    test_data = post_resp.json()
+    assert test_data["status"] in ["disabled", "sent", "failed"]
+
