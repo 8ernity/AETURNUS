@@ -15,13 +15,32 @@ def test_train_does_not_write_active_bundle(tmp_path):
     ms.artifacts_dir = test_models_dir
     active_bundle_path = test_models_dir / f"model_bundle_{subset}.joblib"
     
-    # Synthetic small dataframe to test train()
+    # Synthetic dataframe with sufficient rows and degradation signal to pass train() guards
+    n_units = 10
+    n_cycles = 50
+    units = []
+    cycles = []
+    ruls = []
+    for u in range(1, n_units + 1):
+        for c in range(1, n_cycles + 1):
+            units.append(u)
+            cycles.append(c)
+            ruls.append(float(max(0, n_cycles - c)))
+
     cols = [f"s{i}" for i in range(1, 22)] + [f"s{i}_norm" for i in range(1, 22)]
-    dummy_data = {c: np.random.randn(60) for c in cols}
-    dummy_data["unit"] = [u for u in range(1, 7) for _ in range(10)]
-    dummy_data["cycle"] = list(range(1, 11)) * 6
-    dummy_data["rul_capped"] = [float(100 - c) for c in dummy_data["cycle"]]
-    dummy_data["fails_within_30"] = [1 if r < 30 else 0 for r in dummy_data["rul_capped"]]
+    rng = np.random.RandomState(42)
+    dummy_data = {c: rng.randn(len(units)) for c in cols}
+    # Correlate s2 and s3 with RUL so LightGBM can split nodes effectively
+    dummy_data["s2"] = [r * 0.1 + rng.randn() * 0.05 for r in ruls]
+    dummy_data["s2_norm"] = dummy_data["s2"]
+    dummy_data["s3"] = [r * -0.05 + rng.randn() * 0.05 for r in ruls]
+    dummy_data["s3_norm"] = dummy_data["s3"]
+    dummy_data["unit"] = units
+    dummy_data["cycle"] = cycles
+    dummy_data["rul_capped"] = ruls
+    dummy_data["fails_within_10"] = [1 if r < 10 else 0 for r in ruls]
+    dummy_data["fails_within_30"] = [1 if r < 30 else 0 for r in ruls]
+    dummy_data["fails_within_60"] = [1 if r < 60 else 0 for r in ruls]
     df = pd.DataFrame(dummy_data)
 
     # Call train()

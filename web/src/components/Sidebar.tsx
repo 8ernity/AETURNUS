@@ -9,6 +9,7 @@ import {
   HelpCircle, 
   ChevronLeft, 
   ChevronRight,
+  DollarSign,
   ShieldCheck,
   Flame
 } from "lucide-react";
@@ -35,6 +36,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: "fleet", label: "Fleet Overview", icon: Activity, badge: "Live" },
     { id: "engine", label: "Engine Detail", icon: Cpu, badge: "Telemetry" },
     { id: "work_orders", label: "Work Orders & Triage", icon: ClipboardList, badge: exceptionCount > 0 ? `${exceptionCount} Review` : "Agent", badgeAlert: exceptionCount > 0 },
+    { id: "cost_simulator", label: "Cost & ROI Simulator", icon: DollarSign, badge: "Finance" },
     { id: "model_lab", label: "Model Lab", icon: Layers, badge: "Benchmark" },
     { id: "mlops", label: "MLOps & Monitoring", icon: GitBranch, badge: "Drift" },
     { id: "pipeline", label: "Data Pipeline", icon: Database, badge: "ETL" },

@@ -5,6 +5,7 @@ import { FleetOverviewTab } from "./components/tabs/FleetOverviewTab";
 import { EngineDetailTab } from "./components/tabs/EngineDetailTab";
 import { WorkOrdersTab } from "./components/tabs/WorkOrdersTab";
 import { ModelLabTab } from "./components/tabs/ModelLabTab";
+import { CostSimulatorTab } from "./components/tabs/CostSimulatorTab";
 import { MLOpsTab } from "./components/tabs/MLOpsTab";
 import { DataPipelineTab } from "./components/tabs/DataPipelineTab";
 import { HowItWorksTab } from "./components/tabs/HowItWorksTab";
@@ -193,6 +194,10 @@ export function App() {
 
           {activeTab === "work_orders" && (
             <WorkOrdersTab currentSubset={currentSubset} />
+          )}
+
+          {activeTab === "cost_simulator" && (
+            <CostSimulatorTab currentSubset={currentSubset} />
           )}
 
           {activeTab === "model_lab" && (

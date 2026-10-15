@@ -1030,6 +1030,61 @@ def get_model_comparison(subset: str):
             return json.load(f)
     raise HTTPException(status_code=404, detail=f"Comparison report for {subset} not found")
 
+# ----------------- Operational Cost & Maintenance ROI Simulator -----------------
+class SimulationRequest(BaseModel):
+    subset: Optional[str] = "FD001"
+    threshold: Optional[float] = 30.0
+    use_conservative: Optional[bool] = True
+    cost_catastrophic: Optional[float] = 2500000.0
+    cost_overhaul: Optional[float] = 220000.0
+    cost_wasted_cycle: Optional[float] = 1200.0
+    cost_inspection: Optional[float] = 12500.0
+    cost_aog_day: Optional[float] = 45000.0
+    fixed_interval: Optional[int] = 140
+
+@app.get("/api/v1/economics/simulate")
+def get_economic_simulation(
+    subset: str = Query(default="FD001"),
+    threshold: float = Query(default=30.0),
+    use_conservative: bool = Query(default=True)
+):
+    validate_subset(subset)
+    from src.economics.cost_simulator import FleetCostSimulator
+    sim = FleetCostSimulator(subset=subset)
+    return sim.simulate_fleet(threshold=threshold, use_conservative=use_conservative)
+
+@app.post("/api/v1/economics/simulate")
+def post_economic_simulation(req: SimulationRequest):
+    sub = req.subset or "FD001"
+    validate_subset(sub)
+    from src.economics.cost_simulator import FleetCostSimulator
+    cost_params = {
+        "cost_catastrophic": req.cost_catastrophic or 2500000.0,
+        "cost_overhaul": req.cost_overhaul or 220000.0,
+        "cost_wasted_cycle": req.cost_wasted_cycle or 1200.0,
+        "cost_inspection": req.cost_inspection or 12500.0,
+        "cost_aog_day": req.cost_aog_day or 45000.0,
+        "fixed_interval": req.fixed_interval or 140
+    }
+    sim = FleetCostSimulator(subset=sub, cost_params=cost_params)
+    return sim.simulate_fleet(threshold=req.threshold, use_conservative=req.use_conservative)
+
+@app.get("/api/v1/economics/curve")
+def get_economic_curve(
+    subset: str = Query(default="FD001"),
+    use_conservative: bool = Query(default=True),
+    min_threshold: int = Query(default=5),
+    max_threshold: int = Query(default=60)
+):
+    validate_subset(subset)
+    from src.economics.cost_simulator import FleetCostSimulator
+    sim = FleetCostSimulator(subset=subset)
+    return sim.sweep_cost_curve(
+        min_threshold=min_threshold,
+        max_threshold=max_threshold,
+        use_conservative=use_conservative
+    )
+
 # ----------------- MLOps & Monitoring -----------------
 @app.get("/api/v1/mlops/registry")
 @app.get("/api/v1/registry")
