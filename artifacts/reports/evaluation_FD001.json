@@ -24,15 +24,15 @@
     "formula": "S = sum(exp(-d/13)-1 if d<0 else exp(d/10)-1)"
   },
   "generalization_gap": {
-    "train_rmse": 11.4,
-    "val_rmse": 13.06,
+    "train_rmse": 3.49,
+    "val_rmse": 12.62,
     "test_rmse": 13.3,
-    "train_test_gap": 1.9,
-    "train_val_gap": 1.66,
-    "val_test_gap": 0.24,
-    "gap_ratio_pct": 14.3,
-    "overfitting_status": "Low Overfitting",
-    "memorization_risk": "Low (<25%)"
+    "train_test_gap": 9.81,
+    "train_val_gap": 9.13,
+    "val_test_gap": 0.68,
+    "gap_ratio_pct": 73.8,
+    "overfitting_status": "High Overfitting Risk",
+    "memorization_risk": "Elevated"
   },
   "pr_auc": 0.966,
   "target_rmse": 14.0,

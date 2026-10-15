@@ -1,11 +1,59 @@
 {
-  "timestamp": "2026-10-13 22:52:55",
+  "timestamp": "2026-10-14 23:08:40",
   "subset": "FD001",
   "monitored_features_count": 14,
   "drifting_features_count": 0,
   "share_drifting_features": 0.0,
   "drift_alert": false,
   "sensor_metrics": {
+    "s3_dev_base": {
+      "psi": 0.003,
+      "ks_stat": 0.0186,
+      "ks_pvalue": 0.3503,
+      "is_drifting": false
+    },
+    "s9_dev_base": {
+      "psi": 0.0031,
+      "ks_stat": 0.0178,
+      "ks_pvalue": 0.4028,
+      "is_drifting": false
+    },
+    "s14_dev_base": {
+      "psi": 0.0062,
+      "ks_stat": 0.0267,
+      "ks_pvalue": 0.0564,
+      "is_drifting": false
+    },
+    "s20_dev_base": {
+      "psi": 0.0023,
+      "ks_stat": 0.0111,
+      "ks_pvalue": 0.913,
+      "is_drifting": false
+    },
+    "s13_dev_base": {
+      "psi": 0.0088,
+      "ks_stat": 0.0197,
+      "ks_pvalue": 0.2846,
+      "is_drifting": false
+    },
+    "s15_dev_base": {
+      "psi": 0.0055,
+      "ks_stat": 0.0188,
+      "ks_pvalue": 0.3379,
+      "is_drifting": false
+    },
+    "s4_dev_base": {
+      "psi": 0.0022,
+      "ks_stat": 0.0187,
+      "ks_pvalue": 0.3463,
+      "is_drifting": false
+    },
+    "s7_dev_base": {
+      "psi": 0.0014,
+      "ks_stat": 0.0153,
+      "ks_pvalue": 0.6024,
+      "is_drifting": false
+    },
     "s2_dev_base": {
       "psi": 0.0039,
       "ks_stat": 0.0193,
@@ -18,40 +66,16 @@
       "ks_pvalue": 0.5365,
       "is_drifting": false
     },
-    "s13_dev_base": {
-      "psi": 0.0088,
-      "ks_stat": 0.0197,
-      "ks_pvalue": 0.2846,
-      "is_drifting": false
-    },
-    "s11_dev_base": {
-      "psi": 0.002,
-      "ks_stat": 0.0204,
-      "ks_pvalue": 0.2455,
-      "is_drifting": false
-    },
-    "s3_dev_base": {
-      "psi": 0.003,
-      "ks_stat": 0.0186,
-      "ks_pvalue": 0.3503,
-      "is_drifting": false
-    },
-    "s20_dev_base": {
-      "psi": 0.0023,
-      "ks_stat": 0.0111,
-      "ks_pvalue": 0.913,
-      "is_drifting": false
-    },
     "s21_dev_base": {
       "psi": 0.0022,
       "ks_stat": 0.0117,
       "ks_pvalue": 0.8795,
       "is_drifting": false
     },
-    "s15_dev_base": {
-      "psi": 0.0055,
-      "ks_stat": 0.0188,
-      "ks_pvalue": 0.3379,
+    "s11_dev_base": {
+      "psi": 0.002,
+      "ks_stat": 0.0204,
+      "ks_pvalue": 0.2455,
       "is_drifting": false
     },
     "s17_dev_base": {
@@ -64,30 +88,6 @@
       "psi": 0.0109,
       "ks_stat": 0.0268,
       "ks_pvalue": 0.055,
-      "is_drifting": false
-    },
-    "s9_dev_base": {
-      "psi": 0.0031,
-      "ks_stat": 0.0178,
-      "ks_pvalue": 0.4028,
-      "is_drifting": false
-    },
-    "s7_dev_base": {
-      "psi": 0.0014,
-      "ks_stat": 0.0153,
-      "ks_pvalue": 0.6024,
-      "is_drifting": false
-    },
-    "s4_dev_base": {
-      "psi": 0.0022,
-      "ks_stat": 0.0187,
-      "ks_pvalue": 0.3463,
-      "is_drifting": false
-    },
-    "s14_dev_base": {
-      "psi": 0.0062,
-      "ks_stat": 0.0267,
-      "ks_pvalue": 0.0564,
       "is_drifting": false
     }
   }
