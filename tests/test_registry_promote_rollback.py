@@ -52,21 +52,42 @@ def test_get_registry_is_strictly_read_only():
         assert m["metrics"]["mae"] > 0
 
 
-def test_rollback_and_promote_swaps_bundle_and_reloads_cached_modelservice():
+def test_rollback_and_promote_swaps_bundle_and_reloads_cached_modelservice(tmp_path, monkeypatch):
     subset = "FD001"
-    mgr = MLOpsManager(subset)
-    active_bundle_path = root_dir / "artifacts" / "models" / f"model_bundle_{subset}.joblib"
-    assert active_bundle_path.exists()
+    import shutil
 
-    reg_backup = mgr.registry_file.read_text(encoding="utf-8")
-    bundle_backup = active_bundle_path.read_bytes()
+    # Isolate test artifacts in tmp_path
+    tmp_artifacts = tmp_path / "artifacts"
+    tmp_models = tmp_artifacts / "models"
+    tmp_reports = tmp_artifacts / "reports"
+    tmp_models.mkdir(parents=True, exist_ok=True)
+    tmp_reports.mkdir(parents=True, exist_ok=True)
+
+    src_active = root_dir / "artifacts" / "models" / f"model_bundle_{subset}.joblib"
+    src_reg = root_dir / "artifacts" / "reports" / "model_registry.json"
+    shutil.copyfile(src_active, tmp_models / f"model_bundle_{subset}.joblib")
+    shutil.copyfile(src_reg, tmp_reports / "model_registry.json")
+
+    # Copy configs into tmp_path so ModelService can load models.yaml, etc.
+    shutil.copytree(root_dir / "configs", tmp_path / "configs")
+
+    # Monkeypatch ROOT_DIR / get_root_dir to isolate test operations completely
+    monkeypatch.setattr("src.mlops.drift_and_retrain.get_root_dir", lambda: tmp_path)
+    monkeypatch.setattr("src.models.model_service.get_root_dir", lambda: tmp_path)
+    monkeypatch.setattr("src.api.server.ROOT_DIR", tmp_path)
+
+    from src.api.server import mlops_managers
+    mlops_managers[subset] = MLOpsManager(subset)
+    mgr = mlops_managers[subset]
+    active_bundle_path = tmp_models / f"model_bundle_{subset}.joblib"
+    assert active_bundle_path.exists()
 
     # Create two distinct test model versions to test swapping
     v_a = "v_test_a"
     v_b = "v_test_b"
 
-    path_a = root_dir / "artifacts" / "models" / f"model_bundle_{subset}_{v_a}.joblib"
-    path_b = root_dir / "artifacts" / "models" / f"model_bundle_{subset}_{v_b}.joblib"
+    path_a = tmp_models / f"model_bundle_{subset}_{v_a}.joblib"
+    path_b = tmp_models / f"model_bundle_{subset}_{v_b}.joblib"
 
     try:
         ms_a = ModelService(subset)
@@ -140,11 +161,8 @@ def test_rollback_and_promote_swaps_bundle_and_reloads_cached_modelservice():
         assert cached_rolled.get("test_marker") == "MARKER_A"
 
     finally:
-        # Cleanup test bundles and restore original registry
-        if path_a.exists():
-            path_a.unlink()
-        if path_b.exists():
-            path_b.unlink()
-        active_bundle_path.write_bytes(bundle_backup)
-        mgr.registry_file.write_text(reg_backup, encoding="utf-8")
+        # Restore server caches
+        from src.api.server import ROOT_DIR as PROD_ROOT
+        mlops_managers[subset] = MLOpsManager(subset)
         model_services[subset] = ModelService(subset).load()
+

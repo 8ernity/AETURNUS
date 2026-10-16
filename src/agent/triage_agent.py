@@ -732,6 +732,10 @@ class TriageAgent:
         self._log_audit_event(engine_id=engine_id, action="EXCEPTION_CREATE", actor="TriageAgent", cycle=cycle, work_order_id=work_order_id, reason=reason, trace=trace)
         return wo
 
+    def get_active_work_orders(self) -> List[Dict[str, Any]]:
+        """Returns a list of all currently active/open work orders."""
+        return list(self.open_orders.values())
+
     def human_action(self, work_order_id: str, action: str, new_severity: Optional[str] = None, reason: str = "", current_cycle: Optional[int] = None) -> bool:
         """
         Human-in-the-loop exception handling:

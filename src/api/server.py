@@ -363,7 +363,10 @@ def get_fleet(subset: str = Query(default="FD001")):
 
     all_units = sorted(df["unit"].unique())
     records = last_rows_df.to_dict("records")
-    preds = list(_fleet_executor.map(lambda r: get_cached_prediction(ms, r, subset), records))
+    try:
+        preds = list(_fleet_executor.map(lambda r: get_cached_prediction(ms, r, subset), records))
+    except ValueError as ve:
+        raise HTTPException(status_code=422, detail=str(ve))
     sensor_map = load_yaml("configs/sensor_map.yaml").get("sensors", {})
 
     for row_dict, pred in zip(records, preds):
@@ -600,17 +603,18 @@ def get_engine_detail(engine_id: str, subset: str = Query(default="FD001")):
         rounded_shares[max_grp] = round(rounded_shares[max_grp] + diff, 1)
 
     subsystem_health = []
-    for group_name in subsystem_sensor_groups:
+    sorted_groups = sorted(subsystem_sensor_groups.keys(), key=lambda g: rounded_shares[g], reverse=True)
+    for rank, group_name in enumerate(sorted_groups, start=1):
         share = rounded_shares[group_name]
-        status = "CRITICAL" if share >= 40.0 else ("WARNING" if share >= 25.0 else ("ADVISORY" if share >= 15.0 else "NOMINAL"))
+        driver_label = f"#{rank} Driver" if rank <= 2 else "Nominal"
         subsystem_health.append({
             "subsystem": group_name,
             "attribution_share": share,
             "share": share,
-            "health": round(100.0 - share, 1),
             "degradation": share,
             "baseline": 20.0,
-            "status": status
+            "driver_rank": rank,
+            "status": driver_label
         })
 
     return {
@@ -1427,7 +1431,10 @@ async def predict_batch(
         last_indices = df.groupby("unit")["cycle"].idxmax()
         last_rows = df.loc[last_indices].sort_values("unit")
         for _, row in last_rows.iterrows():
-            pred = ms.predict_point(row.to_dict())
+            try:
+                pred = ms.predict_point(row.to_dict())
+            except ValueError as ve:
+                raise HTTPException(status_code=422, detail=str(ve))
             c_rul = pred.get("conservative_rul", 999.0)
             subsys = "HPC"
             if pred.get("top_contributors"):
@@ -1542,11 +1549,12 @@ HTTP_REQUEST_DURATION_SECONDS = Histogram(
     "HTTP request latency in seconds",
     ["method", "endpoint"]
 )
-PREDICTIONS_TOTAL = Counter(
-    "predictions_total",
+PDM_PREDICTIONS_TOTAL = Counter(
+    "pdm_predictions_total",
     "Total engine cycle predictions scored",
     ["subset"]
 )
+PREDICTIONS_TOTAL = PDM_PREDICTIONS_TOTAL
 OPEN_WORK_ORDERS = Gauge(
     "open_work_orders",
     "Number of open work orders by severity",
@@ -1622,6 +1630,7 @@ async def track_http_metrics(request: Request, call_next):
 def get_metrics():
     # 1. Update test RMSE and conformal coverage
     for sub in ["FD001", "FD002", "FD003", "FD004"]:
+        PDM_PREDICTIONS_TOTAL.labels(subset=sub)
         eval_f = ROOT_DIR / "artifacts" / "reports" / f"evaluation_{sub}.json"
         if eval_f.exists():
             try:

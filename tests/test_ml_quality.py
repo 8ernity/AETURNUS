@@ -94,7 +94,10 @@ def test_deep_learning_gru_and_cnn_architectures():
 def test_top_sensors_use_normalized_deviations():
     """Verify predict_point identifies top sensors from normalized *_dev_base columns."""
     ms = ModelService(subset="FD001").load()
+    from src.api.server import get_test_df
+    base_row = get_test_df("FD001").iloc[0].to_dict()
     sample_row = {
+        **base_row,
         "unit": 1,
         "cycle": 50,
         "s2_dev_base": 0.12,

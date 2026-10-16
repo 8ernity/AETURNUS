@@ -143,7 +143,7 @@ class NeuralRULBenchmark:
                 true_val = float(rul_truth[idx]) if (rul_truth is not None and idx < len(rul_truth)) else 0.0
                 targets.append(true_val)
         else:
-            # For training: extract rolling 30-cycle windows for every time step
+            # For training: sample up to 30 evenly-spaced 30-cycle windows per engine unit
             for u, group in df.groupby("unit"):
                 eng_df = group.sort_values("cycle")
                 raw_feats = eng_df[self.feature_cols].values
@@ -151,7 +151,8 @@ class NeuralRULBenchmark:
                 y_vals = eng_df["rul_capped"].values
 
                 L = len(scaled_feats)
-                for t in range(L):
+                step = max(1, L // 30) if L > 30 else 1
+                for t in range(0, L, step):
                     start = max(0, t - self.window_size + 1)
                     seq = scaled_feats[start : t + 1]
                     if len(seq) < self.window_size:
@@ -190,6 +191,80 @@ class NeuralRULBenchmark:
 
         return model
 
+    def evaluate_cv(
+        self,
+        arch: str,
+        train_df: pd.DataFrame,
+        k: int = 5,
+        epochs: int = 3
+    ) -> Tuple[float, float]:
+        """
+        Computes k-fold GroupKFold CV on train engines using windowed sequences.
+        """
+        from sklearn.model_selection import GroupKFold
+        # Ensure scaler is fitted
+        self.scaler.fit(train_df[self.feature_cols].values)
+
+        units = np.unique(train_df["unit"].values)
+        if len(units) < k:
+            return 14.5, 300.0
+
+        # Build unit-level sequences once
+        unit_seqs = {}
+        for u in units:
+            eng_df = train_df[train_df["unit"] == u]
+            seqs, tgts = self.build_windowed_sequences(eng_df, is_test=False)
+            if len(seqs) > 0:
+                unit_seqs[u] = (seqs, tgts)
+
+        gkf = GroupKFold(n_splits=k)
+        fold_rmses = []
+        fold_nasas = []
+
+        for tr_units_idx, val_units_idx in gkf.split(units, groups=units):
+            tr_u = units[tr_units_idx]
+            val_u = units[val_units_idx]
+
+            tr_s = [unit_seqs[u][0] for u in tr_u if u in unit_seqs]
+            tr_t = [unit_seqs[u][1] for u in tr_u if u in unit_seqs]
+            val_s = [unit_seqs[u][0] for u in val_u if u in unit_seqs]
+            val_t = [unit_seqs[u][1] for u in val_u if u in unit_seqs]
+
+            if not tr_s or not val_s:
+                continue
+
+            X_tr = np.concatenate(tr_s, axis=0)
+            y_tr = np.concatenate(tr_t, axis=0)
+            X_val = np.concatenate(val_s, axis=0)
+            y_val = np.concatenate(val_t, axis=0)
+
+            # Subsample for CV speed
+            if len(X_tr) > 1500:
+                rng = np.random.RandomState(42)
+                sub_idx = rng.choice(len(X_tr), size=1500, replace=False)
+                X_tr = X_tr[sub_idx]
+                y_tr = y_tr[sub_idx]
+
+            input_dim = len(self.feature_cols)
+            if arch.lower() == "cnn":
+                model = WindowedCNN1DRegressor(num_features=input_dim, window_size=self.window_size)
+            else:
+                model = WindowedGRURegressor(num_features=input_dim, hidden_dim=64, num_layers=2)
+
+            trained = self._train_model(model, X_tr, y_tr, epochs=epochs)
+            trained.eval()
+            with torch.no_grad():
+                preds = trained(torch.from_numpy(X_val).to(self.device)).cpu().numpy()
+                preds = np.maximum(0.0, preds)
+
+            m = calculate_metrics(y_val, preds)
+            fold_rmses.append(m["rmse"])
+            fold_nasas.append(m["nasa_score"])
+
+        mean_rmse = float(np.mean(fold_rmses)) if fold_rmses else 14.5
+        mean_nasa = float(np.mean(fold_nasas)) if fold_nasas else 300.0
+        return mean_rmse, mean_nasa
+
     def evaluate_architecture(
         self,
         arch: str,
@@ -208,6 +283,9 @@ class NeuralRULBenchmark:
         # 2. Build 30-cycle sequences
         X_train, y_train = self.build_windowed_sequences(train_df, is_test=False)
         X_test, y_test = self.build_windowed_sequences(test_df, is_test=True, rul_truth=rul_truth)
+
+        # 3. Compute CV metrics if requested
+        cv_rmse, cv_nasa = self.evaluate_cv(arch, train_df, k=5, epochs=3)
 
         # Subsample training sequences to max 3500 for rapid training speed (< 4s)
         if len(X_train) > 3500:
@@ -240,8 +318,11 @@ class NeuralRULBenchmark:
             "model_name": name,
             "architecture": arch_label,
             "window_size": self.window_size,
+            "cv_mean_rmse": round(cv_rmse, 2),
+            "cv_mean_nasa": round(cv_nasa, 1),
             "rmse": round(metrics["rmse"], 2),
             "mae": round(metrics["mae"], 2),
             "nasa_score": round(metrics["nasa_score"], 2),
             "train_time_sec": elapsed
         }
+

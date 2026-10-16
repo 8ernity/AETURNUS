@@ -198,30 +198,30 @@ Evaluated on held-out test splits in [src/models/neural_baseline.py](src/models/
 
 | Subset | Architecture | Model Name | 5-Fold CV RMSE (Train) | Test RMSE | Test MAE | Training Speed |
 |:---:|:---:|:---|:---:|:---:|:---:|:---:|
-| FD001 | Linear | Ridge Regression | 38.48 | 17.32 | 14.32 | ~0.5s |
-| **FD001** | **GBDT** | **HistGradientBoosting Regressor (Champion)** | **37.55** | **12.37** | **8.80** | *~69.8s* |
-| FD001 | LightGBM | LightGBM Regressor (Default) | 37.69 | 12.75 | 8.99 | ~38.8s |
-| FD001 | LightGBM | LightGBM Regressor (Tuned) | 37.59 | 12.76 | 9.25 | ~35.9s |
-| FD001 | CNN | 1D-CNN PyTorch (30-Cycle Window) | N/A | 14.32 | 10.54 | ~18.0s |
-| FD001 | GRU | GRU PyTorch (30-Cycle Sequence) | N/A | 15.31 | 11.73 | ~25.7s |
-| FD002 | Linear | Ridge Regression | 45.84 | 27.05 | 19.49 | ~3.5s |
-| FD002 | GBDT | HistGradientBoosting Regressor | 44.40 | 24.98 | 16.34 | ~213.4s |
-| **FD002** | **LightGBM** | **LightGBM Regressor (Default) (Champion)** | **44.38** | **24.73** | **16.20** | *~134.9s* |
-| FD002 | LightGBM | LightGBM Regressor (Tuned) | 44.38 | 24.73 | 16.20 | ~138.4s |
-| FD002 | CNN | 1D-CNN PyTorch (30-Cycle Window) | N/A | 23.65 | 16.03 | ~38.7s |
-| FD002 | GRU | GRU PyTorch (30-Cycle Sequence) | N/A | 24.82 | 16.56 | ~72.1s |
-| FD003 | Linear | Ridge Regression | 73.63 | 16.59 | 13.39 | ~1.7s |
-| FD003 | GBDT | HistGradientBoosting Regressor | 71.33 | 13.02 | 9.40 | ~127.3s |
-| **FD003** | **LightGBM** | **LightGBM Regressor (Default) (Champion)** | **71.20** | **12.91** | **9.57** | *~99.2s* |
-| FD003 | LightGBM | LightGBM Regressor (Tuned) | 71.20 | 12.91 | 9.57 | ~67.1s |
-| FD003 | CNN | 1D-CNN PyTorch (30-Cycle Window) | N/A | 16.42 | 12.08 | ~9.2s |
-| FD003 | GRU | GRU PyTorch (30-Cycle Sequence) | N/A | 14.61 | 10.87 | ~23.2s |
-| FD004 | Linear | Ridge Regression | 67.39 | 27.96 | 21.25 | ~3.6s |
-| FD004 | GBDT | HistGradientBoosting Regressor | 66.02 | 25.35 | 17.31 | ~96.1s |
-| **FD004** | **LightGBM** | **LightGBM Regressor (Default) (Champion)** | **65.97** | **25.39** | **17.40** | *~73.9s* |
-| FD004 | LightGBM | LightGBM Regressor (Tuned) | 65.97 | 25.39 | 17.40 | ~71.6s |
-| FD004 | CNN | 1D-CNN PyTorch (30-Cycle Window) | N/A | 24.17 | 17.33 | ~23.6s |
-| FD004 | GRU | GRU PyTorch (30-Cycle Sequence) | N/A | 27.23 | 20.18 | ~30.7s |
+| FD001 | Linear | Ridge Regression | 16.30 | 17.32 | 14.32 | ~0.8s |
+| FD001 | GBDT | HistGradientBoosting Regressor | 12.54 | 12.37 | 8.80 | ~72.2s |
+| FD001 | LightGBM | LightGBM Regressor (Default) | 12.62 | 12.75 | 8.99 | ~59.9s |
+| **FD001** | **LightGBM** | **LightGBM Regressor (Tuned) (Champion)** | **12.48** | **12.76** | **9.25** | *~36.0s* |
+| FD001 | CNN | 1D-CNN PyTorch (30-Cycle Window) | 22.17 | 16.47 | 12.30 | ~23.6s |
+| FD001 | GRU | GRU PyTorch (30-Cycle Sequence) | 40.27 | 15.70 | 11.69 | ~46.5s |
+| FD002 | Linear | Ridge Regression | 15.19 | 27.05 | 19.49 | ~1.8s |
+| FD002 | GBDT | HistGradientBoosting Regressor | 12.74 | 24.98 | 16.34 | ~93.9s |
+| **FD002** | **LightGBM** | **LightGBM Regressor (Default) (Champion)** | **12.72** | **24.73** | **16.20** | *~65.1s* |
+| FD002 | LightGBM | LightGBM Regressor (Untuned) | 12.72 | 24.73 | 16.20 | ~77.7s |
+| FD002 | CNN | 1D-CNN PyTorch (30-Cycle Window) | 22.63 | 23.82 | 15.85 | ~33.1s |
+| FD002 | GRU | GRU PyTorch (30-Cycle Sequence) | 29.47 | 25.42 | 17.59 | ~51.8s |
+| FD003 | Linear | Ridge Regression | 15.68 | 16.59 | 13.39 | ~0.9s |
+| FD003 | GBDT | HistGradientBoosting Regressor | 10.93 | 13.02 | 9.40 | ~74.9s |
+| **FD003** | **LightGBM** | **LightGBM Regressor (Default) (Champion)** | **10.93** | **12.91** | **9.57** | *~42.7s* |
+| FD003 | LightGBM | LightGBM Regressor (Untuned) | 10.93 | 12.91 | 9.57 | ~39.1s |
+| FD003 | CNN | 1D-CNN PyTorch (30-Cycle Window) | 24.81 | 20.30 | 15.21 | ~16.4s |
+| FD003 | GRU | GRU PyTorch (30-Cycle Sequence) | 42.45 | 16.94 | 12.89 | ~42.1s |
+| FD004 | Linear | Ridge Regression | 15.94 | 27.96 | 21.25 | ~3.2s |
+| **FD004** | **GBDT** | **HistGradientBoosting Regressor (Champion)** | **12.56** | **25.35** | **17.31** | *~103.0s* |
+| FD004 | LightGBM | LightGBM Regressor (Default) | 12.57 | 25.39 | 17.40 | ~126.3s |
+| FD004 | LightGBM | LightGBM Regressor (Untuned) | 12.57 | 25.39 | 17.40 | ~115.2s |
+| FD004 | CNN | 1D-CNN PyTorch (30-Cycle Window) | 25.47 | 23.82 | 17.23 | ~53.3s |
+| FD004 | GRU | GRU PyTorch (30-Cycle Sequence) | 36.01 | 28.29 | 21.43 | ~110.0s |
 
 ---
 

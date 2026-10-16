@@ -968,31 +968,14 @@ class ModelService:
         gkf = GroupKFold(n_splits=5)
         splits_list = list(gkf.split(X_tr_cv, y_tr_cv, groups=groups_cv))
 
-        # Protocol matching test: random truncation per held-out engine (5 draws, seed 42), uncapped RUL, NASA sum
-        uncapped_col = "rul_raw" if "rul_raw" in train_only_df.columns else "rul_capped"
-        y_uncapped_cv = train_only_df[uncapped_col].values
-
-        fold_truncation_evals = []
-        for tr_i, val_i in splits_list:
-            val_sub_df = train_only_df.iloc[val_i]
-            val_units = val_sub_df["unit"].unique()
-            rng = np.random.RandomState(42)
-            eval_indices = []
-            for u in val_units:
-                u_row_indices = val_sub_df.index[val_sub_df["unit"] == u].values
-                if len(u_row_indices) > 0:
-                    draws = rng.choice(u_row_indices, size=min(5, len(u_row_indices)), replace=False)
-                    eval_indices.extend(draws)
-            fold_truncation_evals.append((tr_i, eval_indices))
-
-        # Helper to compute 5-fold CV metrics using the SAME protocol as test
+        # Protocol matching champion training path (evaluate_cv): GroupKFold-5 on persistent train engines, capped RUL target
         def get_cv_metrics(model_fn):
             fold_rmses, fold_nasas = [], []
-            for tr_i, eval_i in fold_truncation_evals:
+            for tr_i, val_i in splits_list:
                 m = model_fn()
                 m.fit(X_tr_cv[tr_i], y_tr_cv[tr_i])
-                preds = np.maximum(0.0, m.predict(X_tr_cv[eval_i]))
-                met = calculate_metrics(y_uncapped_cv[eval_i], preds)
+                preds = np.maximum(0.0, m.predict(X_tr_cv[val_i]))
+                met = calculate_metrics(y_tr_cv[val_i], preds)
                 fold_rmses.append(met["rmse"])
                 fold_nasas.append(met["nasa_score"])
             return float(np.mean(fold_rmses)), float(np.mean(fold_nasas))
@@ -1025,10 +1008,12 @@ class ModelService:
         lgb_def_met = calculate_metrics(y_test, lgb_def_pred)
         lgb_def_time = round(time.time() - t0, 2)
 
-        # 4. LightGBM Tuned
+        # 4. LightGBM Tuned / Untuned
         best_params_path = self.root_dir / "configs" / f"best_params_{self.subset}.json"
+        is_tuned = best_params_path.exists()
+        tuned_label = "LightGBM Regressor (Tuned)" if is_tuned else "LightGBM Regressor (Untuned)"
         tuned_p = {}
-        if best_params_path.exists():
+        if is_tuned:
             try:
                 with open(best_params_path, "r", encoding="utf-8") as f:
                     tuned_p = json.load(f)
@@ -1083,7 +1068,7 @@ class ModelService:
                 "train_time_sec": lgb_def_time
             },
             {
-                "model_name": "LightGBM Regressor (Tuned)",
+                "model_name": tuned_label,
                 "architecture": "LightGBM",
                 "cv_mean_rmse": round(lgb_tuned_cv_rmse, 2),
                 "cv_mean_nasa": round(lgb_tuned_cv_nasa, 1),
@@ -1108,9 +1093,21 @@ class ModelService:
         # Champion selected dynamically via lowest mean CV RMSE
         champion_candidate = min(models_list, key=lambda m: (m.get("cv_mean_rmse", 999.0), m.get("cv_mean_nasa", 99999.0)))
         champion_name = champion_candidate["model_name"]
+        
+        # Train and serve the selected algorithm
+        selected_arch = champion_candidate.get("architecture", "LightGBM")
+        if selected_arch == "GBDT":
+            self.algorithm = "histgb"
+        elif selected_arch == "LightGBM":
+            self.algorithm = "lightgbm"
+        elif selected_arch in ("CNN", "GRU"):
+            self.algorithm = selected_arch.lower()
+        else:
+            self.algorithm = "lightgbm"
+
         champion_rule = (
             f"Selected {champion_name} via lowest mean CV RMSE ({champion_candidate['cv_mean_rmse']:.2f}) "
-            f"on TRAIN engines (GroupKFold-5, 5 random truncation draws per held-out engine, uncapped RUL, "
+            f"on TRAIN engines (GroupKFold-5, capped RUL target matching champion training path, "
             f"NASA asymmetric penalty score). Test set metrics are reported for evaluation only, never used for selection."
         )
 
@@ -1127,6 +1124,8 @@ class ModelService:
             json.dump(comparison, f, indent=2)
 
         return comparison
+
+    evaluate_model_comparison = compare_deep_learning_models
 
     def _to_bundle(self, version: Optional[str] = None) -> Dict[str, Any]:
         bundle = {

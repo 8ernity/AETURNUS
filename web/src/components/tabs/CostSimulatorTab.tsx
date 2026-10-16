@@ -173,61 +173,73 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
           </div>
         </div>
 
-        {/* 4 Financial Metric Cards */}
+        {/* 4 Financial & Break-Even Metric Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
+          {/* Lead Metric: Break-Even Cost Ratio */}
+          <div className="bg-slate-950/70 p-4 rounded-2xl border border-indigo-500/30 space-y-1 shadow-lg shadow-indigo-950/20">
+            <div className="flex items-center justify-between text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
+              <span>Break-Even Cost Ratio</span>
+              <span className="text-[10px] text-cyan-400 font-bold bg-cyan-500/10 px-1.5 py-0.5 rounded font-mono">
+                C_cat / C_ovh Parity
+              </span>
+            </div>
+            <div className="text-2xl font-black font-mono text-cyan-300">
+              {summary?.breakeven_cost_ratio !== undefined ? `${summary.breakeven_cost_ratio}x` : (loading ? "..." : "—")}
+            </div>
+            <div className="text-[10px] text-slate-400 font-mono flex items-center justify-between">
+              <span>Assumed Ratio:</span>
+              <span className="text-emerald-300 font-bold">
+                {summary?.current_cost_ratio !== undefined ? `${summary.current_cost_ratio}x (Favorable)` : "—"}
+              </span>
+            </div>
+          </div>
+
+          {/* Net Fleet Savings vs Fixed Interval & vs Reactive */}
           <div className="bg-slate-950/70 p-4 rounded-2xl border border-emerald-500/30 space-y-1 shadow-lg shadow-emerald-950/20">
             <div className="flex items-center justify-between text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
               <span>Net Fleet Savings</span>
               <span className="text-[10px] text-emerald-400 font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded">
-                vs Reactive
+                vs Fixed Schedule
               </span>
             </div>
-            <div className="text-2xl font-black font-mono text-emerald-400">
-              {summary ? `+$${(summary.net_savings_vs_reactive / 1e6).toFixed(1)}M` : "+$223.2M"}
+            <div className={`text-2xl font-black font-mono ${summary && summary.net_savings_vs_fixed < 0 ? "text-amber-400" : "text-emerald-400"}`}>
+              {summary?.net_savings_vs_fixed !== undefined 
+                ? `${summary.net_savings_vs_fixed >= 0 ? "+" : ""}$${(summary.net_savings_vs_fixed / 1e6).toFixed(1)}M` 
+                : (loading ? "..." : "—")}
             </div>
             <div className="text-[10px] text-slate-400 font-mono flex items-center justify-between">
-              <span>Cost Reduction:</span>
-              <span className="text-emerald-300 font-bold">{summary?.cost_reduction_percent || "89.3"}%</span>
+              <span>vs Reactive Run-to-Failure:</span>
+              <span className="text-emerald-300 font-bold">
+                {summary?.net_savings_vs_reactive !== undefined 
+                  ? `${summary.net_savings_vs_reactive >= 0 ? "+" : ""}$${(summary.net_savings_vs_reactive / 1e6).toFixed(1)}M` 
+                  : "—"}
+              </span>
             </div>
           </div>
 
-          <div className="bg-slate-950/70 p-4 rounded-2xl border border-indigo-500/30 space-y-1">
+          {/* AETURNUS Total Cost */}
+          <div className="bg-slate-950/70 p-4 rounded-2xl border border-slate-700/60 space-y-1">
             <div className="flex items-center justify-between text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
-              <span>AETURNUS Total Cost</span>
+              <span>AETURNUS Fleet Cost</span>
               <span className="text-[10px] text-indigo-400 font-bold bg-indigo-500/10 px-1.5 py-0.5 rounded">
-                Optimized
+                Predictive AI
               </span>
             </div>
             <div className="text-2xl font-black font-mono text-white">
-              {summary ? `$${(summary.aeturnus_total_cost / 1e6).toFixed(2)}M` : "$26.75M"}
+              {summary?.aeturnus_total_cost !== undefined ? `$${(summary.aeturnus_total_cost / 1e6).toFixed(2)}M` : (loading ? "..." : "—")}
             </div>
             <div className="text-[10px] text-slate-400 font-mono flex items-center justify-between">
-              <span>Baseline Reactive:</span>
-              <span className="text-rose-400 line-through">${summary ? (summary.reactive_total_cost / 1e6).toFixed(0) : "250"}M</span>
-            </div>
-          </div>
-
-          <div className="bg-slate-950/70 p-4 rounded-2xl border border-cyan-500/30 space-y-1">
-            <div className="flex items-center justify-between text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
-              <span>Disasters Avoided</span>
-              <span className="text-[10px] text-cyan-400 font-bold bg-cyan-500/10 px-1.5 py-0.5 rounded">
-                Zero AOG
-              </span>
-            </div>
-            <div className="text-2xl font-black font-mono text-cyan-300">
-              {summary ? `${summary.avoided_catastrophic_failures} of ${simData?.fleet_size}` : "100 of 100"}
-            </div>
-            <div className="text-[10px] text-slate-400 font-mono flex items-center justify-between">
-              <span>Missed Failures:</span>
-              <span className={`font-bold ${summary?.catastrophic_failures_under_aeturnus > 0 ? "text-rose-400" : "text-emerald-400"}`}>
-                {summary?.catastrophic_failures_under_aeturnus ?? 0} engines
+              <span>Fixed Baseline:</span>
+              <span className="text-slate-400">
+                {summary?.fixed_total_cost !== undefined ? `$${(summary.fixed_total_cost / 1e6).toFixed(1)}M` : "—"}
               </span>
             </div>
           </div>
 
+          {/* Optimal Threshold Tau */}
           <div className="bg-slate-950/70 p-4 rounded-2xl border border-purple-500/30 space-y-1">
             <div className="flex items-center justify-between text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
-              <span>Mathematical Optimal τ*</span>
+              <span>Optimal Threshold τ*</span>
               <span className="text-[10px] text-purple-300 font-bold bg-purple-500/10 px-1.5 py-0.5 rounded font-mono">
                 Min Cost Point
               </span>
@@ -374,15 +386,21 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
           <div className="grid grid-cols-3 gap-2 text-center text-[10px] font-mono">
             <div className="p-2 rounded-xl bg-slate-900 border border-rose-500/20 text-rose-300">
               <div className="opacity-75">Reactive</div>
-              <div className="font-bold text-sm text-white">${policies?.reactive?.total_cost_m || "250"}M</div>
+              <div className="font-bold text-sm text-white">
+                {policies?.reactive?.total_cost_m !== undefined ? `$${policies.reactive.total_cost_m}M` : (loading ? "..." : "—")}
+              </div>
             </div>
             <div className="p-2 rounded-xl bg-slate-900 border border-amber-500/20 text-amber-300">
               <div className="opacity-75">Fixed Schedule</div>
-              <div className="font-bold text-sm text-white">${policies?.fixed_interval?.total_cost_m || "68"}M</div>
+              <div className="font-bold text-sm text-white">
+                {policies?.fixed_interval?.total_cost_m !== undefined ? `$${policies.fixed_interval.total_cost_m}M` : (loading ? "..." : "—")}
+              </div>
             </div>
             <div className="p-2 rounded-xl bg-slate-900 border border-emerald-500/20 text-emerald-300">
               <div className="opacity-75">AETURNUS</div>
-              <div className="font-bold text-sm text-white">${policies?.aeturnus?.total_cost_m || "26"}M</div>
+              <div className="font-bold text-sm text-white">
+                {policies?.aeturnus?.total_cost_m !== undefined ? `$${policies.aeturnus.total_cost_m}M` : (loading ? "..." : "—")}
+              </div>
             </div>
           </div>
         </div>
@@ -390,20 +408,28 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
 
       {/* Bottom Controls: Financial Sliders & Interactive Decision Engine */}
       <div className="glass-panel p-6 rounded-3xl space-y-5">
+        {/* Illustrative Unit Economics Disclaimer Banner */}
+        <div className="flex items-start gap-2.5 p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs">
+          <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <div>
+            <span className="font-bold">Illustrative Unit Economics Disclaimer:</span> All monetary figures ($ catastrophic AOG penalty, depot overhaul, line inspection, and unexpired life depreciation) are editable illustrative assumptions for comparative scenario modeling. Modify these inputs to reflect your fleet's actual contractual unit economics.
+          </div>
+        </div>
+
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-indigo-500/15 pb-4">
           <div className="flex items-center gap-2">
             <Sliders className="w-5 h-5 text-indigo-400" />
             <div>
-              <h3 className="font-bold text-base text-white">Interactive Financial &amp; Policy Sliders</h3>
+              <h3 className="font-bold text-base text-white">Illustrative Operational Assumptions (Editable)</h3>
               <p className="text-xs text-slate-400">
                 Adjust airline operational unit economics and observe instant recalculation across the entire fleet.
               </p>
             </div>
           </div>
 
-          {/* Quick Presets */}
+          {/* Scenario Presets */}
           <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-400 font-medium mr-1">Aviation Presets:</span>
+            <span className="text-xs text-slate-400 font-medium mr-1">Scenario Presets (Illustrative):</span>
             <button
               onClick={() => { handleApplyPreset("commercial"); fetchSimulation(); }}
               className="px-2.5 py-1 rounded-lg text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition-all"
@@ -487,10 +513,18 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
           {/* Catastrophic Failure Penalty Slider */}
           <div className="space-y-2 bg-slate-900/60 p-4 rounded-2xl border border-slate-800">
             <div className="flex justify-between items-center text-xs">
-              <span className="text-slate-300 font-semibold">Catastrophic AOG In-Flight Cost</span>
-              <span className="font-mono text-rose-400 font-bold text-sm">
-                ${(costCatastrophic / 1e6).toFixed(1)}M
-              </span>
+              <span className="text-slate-300 font-semibold">Catastrophic AOG Cost ($)</span>
+              <div className="flex items-center gap-1 font-mono text-rose-400 font-bold text-xs">
+                <span>$</span>
+                <input
+                  type="number"
+                  value={costCatastrophic}
+                  onChange={(e) => setCostCatastrophic(Math.max(0, parseFloat(e.target.value) || 0))}
+                  onBlur={fetchSimulation}
+                  onKeyDown={(e) => { if (e.key === "Enter") fetchSimulation(); }}
+                  className="w-24 px-1.5 py-0.5 rounded bg-slate-950 border border-slate-700 text-right text-rose-300 font-mono text-xs focus:border-rose-400 focus:outline-none"
+                />
+              </div>
             </div>
             <input 
               type="range" 
@@ -512,10 +546,18 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
           {/* Scheduled Depot Overhaul Cost */}
           <div className="space-y-2 bg-slate-900/60 p-4 rounded-2xl border border-slate-800">
             <div className="flex justify-between items-center text-xs">
-              <span className="text-slate-300 font-semibold">Scheduled Depot Overhaul Cost</span>
-              <span className="font-mono text-indigo-300 font-bold text-sm">
-                ${(costOverhaul / 1e3).toFixed(0)}k
-              </span>
+              <span className="text-slate-300 font-semibold">Scheduled Depot Overhaul ($)</span>
+              <div className="flex items-center gap-1 font-mono text-indigo-300 font-bold text-xs">
+                <span>$</span>
+                <input
+                  type="number"
+                  value={costOverhaul}
+                  onChange={(e) => setCostOverhaul(Math.max(0, parseFloat(e.target.value) || 0))}
+                  onBlur={fetchSimulation}
+                  onKeyDown={(e) => { if (e.key === "Enter") fetchSimulation(); }}
+                  className="w-24 px-1.5 py-0.5 rounded bg-slate-950 border border-slate-700 text-right text-indigo-300 font-mono text-xs focus:border-indigo-400 focus:outline-none"
+                />
+              </div>
             </div>
             <input 
               type="range" 
@@ -537,10 +579,18 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
           {/* Wasted Depreciation Cost */}
           <div className="space-y-2 bg-slate-900/60 p-4 rounded-2xl border border-slate-800">
             <div className="flex justify-between items-center text-xs">
-              <span className="text-slate-300 font-semibold">Wasted Useful Life Penalty</span>
-              <span className="font-mono text-amber-300 font-bold text-sm">
-                ${costWastedCycle}/cycle
-              </span>
+              <span className="text-slate-300 font-semibold">Wasted Useful Life ($/cyc)</span>
+              <div className="flex items-center gap-1 font-mono text-amber-300 font-bold text-xs">
+                <span>$</span>
+                <input
+                  type="number"
+                  value={costWastedCycle}
+                  onChange={(e) => setCostWastedCycle(Math.max(0, parseFloat(e.target.value) || 0))}
+                  onBlur={fetchSimulation}
+                  onKeyDown={(e) => { if (e.key === "Enter") fetchSimulation(); }}
+                  className="w-20 px-1.5 py-0.5 rounded bg-slate-950 border border-slate-700 text-right text-amber-300 font-mono text-xs focus:border-amber-400 focus:outline-none"
+                />
+              </div>
             </div>
             <input 
               type="range" 
@@ -562,10 +612,18 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
           {/* Line Triage Inspection Cost */}
           <div className="space-y-2 bg-slate-900/60 p-4 rounded-2xl border border-slate-800">
             <div className="flex justify-between items-center text-xs">
-              <span className="text-slate-300 font-semibold">Borescopic Line Inspection</span>
-              <span className="font-mono text-purple-300 font-bold text-sm">
-                ${(costInspection / 1e3).toFixed(1)}k
-              </span>
+              <span className="text-slate-300 font-semibold">Borescopic Line Inspection ($)</span>
+              <div className="flex items-center gap-1 font-mono text-purple-300 font-bold text-xs">
+                <span>$</span>
+                <input
+                  type="number"
+                  value={costInspection}
+                  onChange={(e) => setCostInspection(Math.max(0, parseFloat(e.target.value) || 0))}
+                  onBlur={fetchSimulation}
+                  onKeyDown={(e) => { if (e.key === "Enter") fetchSimulation(); }}
+                  className="w-20 px-1.5 py-0.5 rounded bg-slate-950 border border-slate-700 text-right text-purple-300 font-mono text-xs focus:border-purple-400 focus:outline-none"
+                />
+              </div>
             </div>
             <input 
               type="range" 

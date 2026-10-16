@@ -8,11 +8,12 @@ client = TestClient(app)
 
 def test_predict_batch_csv_with_processed_features():
     """Verify batch scoring endpoint works on CSV with features."""
-    csv_content = (
-        "unit,cycle,s2_norm,s2_ewma,s3_norm,s3_ewma,s4_norm,s4_ewma,s7_norm,s7_ewma\n"
-        "1,30,0.5,0.48,0.6,0.58,0.4,0.38,0.7,0.68\n"
-        "2,50,0.8,0.78,0.9,0.88,0.6,0.58,0.9,0.88\n"
-    )
+    from src.api.server import get_test_df
+    full_df = get_test_df("FD001")
+    df_u1 = full_df[full_df["unit"] == 1].iloc[-1:]
+    df_u2 = full_df[full_df["unit"] == 2].iloc[-1:]
+    df_sample = pd.concat([df_u1, df_u2], ignore_index=True)
+    csv_content = df_sample.to_csv(index=False)
     files = {"file": ("batch_features.csv", io.BytesIO(csv_content.encode("utf-8")), "text/csv")}
     resp = client.post("/api/v1/predict/batch?subset=FD001", files=files)
     assert resp.status_code == 200
@@ -32,6 +33,18 @@ def test_predict_batch_csv_with_processed_features():
     assert "suspected_subsystem" in first
     assert "summary" in data
     assert "critical_count" in data["summary"]
+
+def test_predict_batch_missing_columns_422():
+    """Verify batch scoring returns 422 with missing columns when required features are missing."""
+    csv_content = (
+        "unit,cycle,s2_norm,s2_ewma\n"
+        "1,30,0.5,0.48\n"
+    )
+    files = {"file": ("missing_cols.csv", io.BytesIO(csv_content.encode("utf-8")), "text/csv")}
+    resp = client.post("/api/v1/predict/batch?subset=FD001", files=files)
+    assert resp.status_code == 422
+    assert "missing" in resp.json()["detail"].lower()
+    assert "required feature" in resp.json()["detail"].lower()
 
 def test_predict_batch_cmapss_raw_txt():
     """Verify batch scoring handles whitespace-delimited raw C-MAPSS format."""

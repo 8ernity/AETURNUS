@@ -604,47 +604,24 @@ export const EngineDetailTab: React.FC<EngineDetailTabProps> = ({
         </div>
       </div>
 
-      {/* 360° Turbofan Subsystem Health Radar */}
-      <div className="glass-panel p-6 rounded-3xl space-y-4 border-rose-500/20">
+      {/* 360° Gas-Path Attribution Share Radar */}
+      <div className="glass-panel p-6 rounded-3xl space-y-4 border-indigo-500/20">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400">
+            <div className="p-2 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400">
               <Compass className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="font-bold text-sm text-white">360° Turbofan Subsystem Attribution Share Radar</h3>
+                <h3 className="font-bold text-sm text-white">Attribution share</h3>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-300 border border-purple-500/20 uppercase font-bold">
-                  Attribution Share (100% Sum)
+                  Station |SHAP| (100% Sum)
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">
-                Proportional |SHAP| attribution shares across 5 engine stations (Fan/LPC, HPC, Combustor, HPT, LPT/Exhaust). Sums to 100%.
+                Proportional |SHAP| attribution shares across 5 engine stations (Fan/LPC, HPC, Combustor, HPT, LPT/Exhaust). Uniform baseline is 20%.
               </p>
             </div>
-          </div>
-
-          <div className="flex items-center gap-1.5 bg-slate-900/80 p-1 rounded-xl border border-slate-800">
-            <button
-              onClick={() => setRadarMode("degradation")}
-              className={`px-3 py-1 text-xs rounded-lg transition-all font-medium ${
-                radarMode === "degradation"
-                  ? "bg-purple-600 text-white font-semibold shadow-md shadow-purple-600/30"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              Attribution Share (%)
-            </button>
-            <button
-              onClick={() => setRadarMode("health")}
-              className={`px-3 py-1 text-xs rounded-lg transition-all font-medium ${
-                radarMode === "health"
-                  ? "bg-emerald-600 text-white font-semibold shadow-md shadow-emerald-600/30"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              Health Reserve Margin (%)
-            </button>
           </div>
         </div>
 
@@ -672,15 +649,15 @@ export const EngineDetailTab: React.FC<EngineDetailTabProps> = ({
                   formatter={(val: any, name: any) => [`${val}%`, name]}
                 />
                 <Radar 
-                  name={radarMode === "degradation" ? "Subsystem Attribution Share (%)" : "Remaining Health Reserve (%)"}
-                  dataKey={radarMode === "degradation" ? "degradation" : "health"} 
-                  stroke={radarMode === "degradation" ? "#a855f7" : "#10b981"} 
-                  fill={radarMode === "degradation" ? "#a855f7" : "#10b981"} 
+                  name="Station Attribution Share (%)"
+                  dataKey="attribution_share" 
+                  stroke="#a855f7" 
+                  fill="#a855f7" 
                   fillOpacity={0.35} 
                 />
                 <Radar 
-                  name={radarMode === "degradation" ? "Uniform Baseline (20%)" : "Nominal Health (80%)"} 
-                  dataKey={radarMode === "degradation" ? "baseline" : "nominal_baseline"} 
+                  name="Uniform Baseline (20%)" 
+                  dataKey="baseline" 
                   stroke="#38bdf8" 
                   fill="#38bdf8" 
                   fillOpacity={0.08} 
@@ -695,12 +672,12 @@ export const EngineDetailTab: React.FC<EngineDetailTabProps> = ({
           <div className="lg:col-span-5 space-y-2.5">
             <div className="flex items-center justify-between text-xs text-slate-400 pb-1 border-b border-slate-800">
               <span className="font-semibold uppercase tracking-wider text-[10px]">Gas-Path Station</span>
-              <span className="font-mono text-[10px]">Attribution Share / Margin</span>
+              <span className="font-mono text-[10px]">Attribution Share</span>
             </div>
             {subsystemHealthData.map((item: any, idx: number) => {
-              const isCrit = item.status === "CRITICAL";
-              const isWarn = item.status === "WARNING";
-              const isAdv = item.status === "ADVISORY";
+              const rank = item.driver_rank || (idx + 1);
+              const isTop = rank === 1;
+              const isSecond = rank === 2;
               const share = item.attribution_share !== undefined ? item.attribution_share : item.degradation;
               return (
                 <div key={idx} className="bg-slate-900/80 hover:bg-slate-850 p-3 rounded-2xl border border-slate-800 transition-all space-y-1.5">
@@ -708,32 +685,29 @@ export const EngineDetailTab: React.FC<EngineDetailTabProps> = ({
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-xs text-white tracking-wide">{item.subsystem}</span>
                       <span className={`text-[9px] font-mono px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
-                        isCrit ? "bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse" :
-                        isWarn ? "bg-amber-500/20 text-amber-300 border border-amber-500/40" :
-                        isAdv ? "bg-sky-500/20 text-sky-300 border border-sky-500/40" :
-                        "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                        isTop ? "bg-purple-500/20 text-purple-300 border border-purple-500/40" :
+                        isSecond ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/40" :
+                        "bg-slate-800 text-slate-400 border border-slate-700"
                       }`}>
-                        {item.status}
+                        #{rank} Driver
                       </span>
                     </div>
                     <div className="text-xs font-mono font-bold">
-                      <span className={isCrit ? "text-rose-400" : isWarn ? "text-amber-400" : "text-purple-300"}>
+                      <span className={isTop ? "text-purple-300" : isSecond ? "text-indigo-300" : "text-slate-300"}>
                         {share}%
                       </span>
-                      <span className="text-slate-500 text-[10px] mx-1">/</span>
-                      <span className="text-emerald-400 text-[11px]">{item.health}%</span>
                     </div>
                   </div>
 
-                  {/* Dual-colored gauge bar */}
+                  {/* Gradient gauge bar */}
                   <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden flex shadow-inner">
                     <div 
                       className={`h-full transition-all duration-500 ${
-                        isCrit ? "bg-gradient-to-r from-amber-500 to-rose-500" :
-                        isWarn ? "bg-gradient-to-r from-yellow-500 to-amber-500" :
-                        "bg-gradient-to-r from-teal-500 to-emerald-500"
+                        isTop ? "bg-gradient-to-r from-indigo-500 to-purple-500" :
+                        isSecond ? "bg-gradient-to-r from-blue-500 to-indigo-500" :
+                        "bg-slate-700"
                       }`}
-                      style={{ width: `${item.degradation}%` }}
+                      style={{ width: `${Math.min(100, Math.max(0, share))}%` }}
                     />
                   </div>
                 </div>

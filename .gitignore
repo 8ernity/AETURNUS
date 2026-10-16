@@ -52,6 +52,7 @@ uploads/
 **/uploads/
 mlruns/
 artifacts/models/*_v*.joblib
+artifacts/tmp/
 
 # Archives & Zips
 *.zip

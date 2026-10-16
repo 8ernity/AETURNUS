@@ -31,7 +31,9 @@ def test_fleet_prediction_caching():
 
     # 3. Verify get_cached_prediction directly returns exact cached dict reference
     ms = get_model_service("FD001")
-    dummy_row = {"unit": 999, "cycle": 42, "s2": 642.0, "s3": 1590.0}
+    from src.api.server import get_test_df
+    base_row = get_test_df("FD001").iloc[0].to_dict()
+    dummy_row = {**base_row, "unit": 999, "cycle": 42}
     p1 = get_cached_prediction(ms, dummy_row, "FD001")
     p2 = get_cached_prediction(ms, dummy_row, "FD001")
     assert p1 is p2
@@ -58,7 +60,9 @@ def test_replay_no_cycle_wrap_around():
 def test_cache_cleared_on_model_reload():
     """Verify reload endpoint clears prediction cache."""
     ms = get_model_service("FD001")
-    dummy_row = {"unit": 1, "cycle": 10}
+    from src.api.server import get_test_df
+    base_row = get_test_df("FD001").iloc[0].to_dict()
+    dummy_row = {**base_row, "unit": 1, "cycle": 10}
     get_cached_prediction(ms, dummy_row, "FD001")
     assert len(_prediction_cache) > 0
 

@@ -58,6 +58,25 @@ class FleetCostSimulator:
         res = ms.evaluate_test(test_df, rul_truth, save_report=False)
         return res.get("parity_scatter", [])
 
+    def _load_holdout_lifespans(self) -> List[int]:
+        """
+        Loads real run-to-failure lifetimes from persistent holdout engines.
+        Each holdout engine ran continuously until functional failure (max cycle).
+        """
+        from src.common.splits import get_persistent_split
+        try:
+            split = get_persistent_split(self.subset)
+            holdout_units = set(split.get("lifecycle_holdout_units", []))
+            train_path = self.root_dir / "data" / "processed" / self.subset / "train.parquet"
+            if not train_path.exists():
+                return []
+            df = pd.read_parquet(train_path, columns=["unit", "cycle"])
+            hdf = df[df["unit"].isin(holdout_units)]
+            lifespans = hdf.groupby("unit")["cycle"].max().tolist()
+            return [int(x) for x in lifespans] if lifespans else []
+        except Exception:
+            return []
+
     def simulate_fleet(
         self,
         threshold: Optional[float] = None,
@@ -67,7 +86,7 @@ class FleetCostSimulator:
         """
         Simulates fleet-wide economics under 3 operational maintenance policies:
         1. Reactive (Run-to-Failure)
-        2. Fixed Flight-Cycle Schedule (Static Overhaul Interval)
+        2. Fixed Flight-Cycle Schedule (Static Overhaul Interval from real holdout lifespans)
         3. AETURNUS Dynamic Predictive Maintenance
         """
         cfg = {**self.cost_cfg, **(custom_cost_params or {})}
@@ -91,23 +110,36 @@ class FleetCostSimulator:
 
         # -------------------------------------------------------------
         # Policy 2: Static Fixed-Cycle Schedule (Overhaul at fixed_int)
+        # Simulated from real run-to-failure holdout engines using cfg fixed_interval
         # -------------------------------------------------------------
-        fixed_catastrophic_count = 0
-        fixed_scheduled_count = 0
-        fixed_wasted_cost = 0.0
-        fixed_total_cost = 0.0
+        holdout_lifespans = self._load_holdout_lifespans()
+        if not holdout_lifespans:
+            # Fallback based on test actuals if processed train holdout unavailable
+            holdout_lifespans = [int(r.get("actual", 50.0)) + 120 for r in self.eval_data]
 
-        for row in self.eval_data:
-            # Baseline proxy: engines failing early (< fixed_int proxy) incur in-flight shutdown
-            act = float(row.get("actual", 50.0))
-            if act <= 15.0: # Engine fails before scheduled depot interval
-                fixed_catastrophic_count += 1
-                fixed_total_cost += c_cat
+        h_cat_count = 0
+        h_sch_count = 0
+        h_wasted_cost = 0.0
+        h_total_cost = 0.0
+
+        for T in holdout_lifespans:
+            if T < fixed_int:
+                # Engine fails before reaching scheduled depot overhaul
+                h_cat_count += 1
+                h_total_cost += c_cat
             else:
-                fixed_scheduled_count += 1
-                wasted = max(0.0, act - 15.0) * c_waste
-                fixed_wasted_cost += wasted
-                fixed_total_cost += (c_ovh + wasted)
+                # Engine safely reaches scheduled depot overhaul at fixed_int cycles
+                h_sch_count += 1
+                wasted = max(0.0, float(T - fixed_int)) * c_waste
+                h_wasted_cost += wasted
+                h_total_cost += (c_ovh + wasted)
+
+        H = max(1, len(holdout_lifespans))
+        # Scale holdout policy rates to fleet size n_engines
+        fixed_catastrophic_count = int(round((h_cat_count / H) * n_engines))
+        fixed_scheduled_count = n_engines - fixed_catastrophic_count
+        fixed_wasted_cost = (h_wasted_cost / H) * n_engines
+        fixed_total_cost = (h_total_cost / H) * n_engines
 
         # -------------------------------------------------------------
         # Policy 3: AETURNUS Dynamic Predictive Maintenance Policy
@@ -141,6 +173,7 @@ class FleetCostSimulator:
                 outcome = "UNPLANNED_CATASTROPHIC_FAILURE"
                 aeturnus_catastrophic_count += 1
                 wasted_life = 0.0
+                avoided_catastrophic = False
             else:
                 # Safe preventive pull: depot overhaul + wasted remaining life
                 wasted_life = act_at_pull * c_waste
@@ -148,7 +181,10 @@ class FleetCostSimulator:
                 outcome = "SAFE_PREVENTIVE_OVERHAUL"
                 aeturnus_scheduled_count += 1
                 aeturnus_wasted_cost += wasted_life
-                avoided_catastrophic_count += 1
+                # "Avoided failure" ONLY if engine would fail before next scheduled interval
+                avoided_catastrophic = bool(act <= fixed_int)
+                if avoided_catastrophic:
+                    avoided_catastrophic_count += 1
 
             # Routine tarmac telemetry inspection cost for all monitored engines
             cost += c_insp
@@ -163,16 +199,30 @@ class FleetCostSimulator:
                 "effective_pull_cycle_margin": round(act_at_pull, 1),
                 "outcome": outcome,
                 "cost": round(cost, 2),
-                "avoided_catastrophic": (outcome == "SAFE_PREVENTIVE_OVERHAUL")
+                "avoided_catastrophic": avoided_catastrophic
             })
 
         # Sort ledger by actual RUL ascending (most critical engines first)
         engine_ledger.sort(key=lambda x: x["actual_rul"])
 
-        net_savings_vs_reactive = max(0.0, reactive_total_cost - aeturnus_total_cost)
-        net_savings_vs_fixed = max(0.0, fixed_total_cost - aeturnus_total_cost)
+        # Unclamped net savings (remove max(0, ...), show true negative savings when applicable)
+        net_savings_vs_reactive = reactive_total_cost - aeturnus_total_cost
+        net_savings_vs_fixed = fixed_total_cost - aeturnus_total_cost
         cost_reduction_pct = round((net_savings_vs_reactive / reactive_total_cost * 100.0), 1) if reactive_total_cost > 0 else 0.0
         roi_multiplier = round((net_savings_vs_reactive / aeturnus_total_cost), 2) if aeturnus_total_cost > 0 else 0.0
+
+        # Break-even cost ratio: (C_cat / C_ovh)* at which AETURNUS matches Fixed Interval baseline
+        delta_cat = fixed_catastrophic_count - aeturnus_catastrophic_count
+        if delta_cat > 0:
+            breakeven_ratio = (
+                (aeturnus_scheduled_count - fixed_scheduled_count) * c_ovh
+                + (aeturnus_wasted_cost - fixed_wasted_cost)
+                + aeturnus_inspection_cost
+            ) / (delta_cat * c_ovh)
+            breakeven_cost_ratio = max(0.5, round(float(breakeven_ratio), 2))
+        else:
+            breakeven_cost_ratio = 1.0
+        current_cost_ratio = round(c_cat / max(1.0, c_ovh), 2)
 
         return {
             "subset": self.subset,
@@ -181,6 +231,8 @@ class FleetCostSimulator:
             "use_conservative": use_conservative,
             "cost_parameters": cfg,
             "summary": {
+                "breakeven_cost_ratio": breakeven_cost_ratio,
+                "current_cost_ratio": current_cost_ratio,
                 "net_savings_vs_reactive": round(net_savings_vs_reactive, 2),
                 "net_savings_vs_fixed": round(net_savings_vs_fixed, 2),
                 "cost_reduction_percent": cost_reduction_pct,
