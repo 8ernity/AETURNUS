@@ -93,6 +93,18 @@ def clear_prediction_cache():
         _prediction_cache.clear()
     trim_memory()
 
+# In-memory trajectory cache for instant < 100ms engine detail telemetry loading
+engine_trajectory_cache: Dict[Tuple[str, str], Dict[str, Any]] = {}
+_trajectory_cache_lock = threading.Lock()
+
+def clear_engine_trajectory_cache(subset: Optional[str] = None):
+    global engine_trajectory_cache
+    with _trajectory_cache_lock:
+        if subset:
+            engine_trajectory_cache = {k: v for k, v in engine_trajectory_cache.items() if k[0] != subset}
+        else:
+            engine_trajectory_cache.clear()
+
 # Replay simulation state
 class ReplayState:
     def __init__(self):
@@ -121,10 +133,6 @@ def _load_downcasted_parquet(path: Path) -> pd.DataFrame:
 
 def get_model_service(subset: str = "FD001") -> ModelService:
     if subset not in model_services:
-        # Evict older models to keep only 1 active model bundle in memory
-        model_services.clear()
-        trim_memory()
-
         ms = ModelService(subset)
         try:
             ms.load()
@@ -138,15 +146,11 @@ def get_model_service(subset: str = "FD001") -> ModelService:
 
 def get_mlops_manager(subset: str = "FD001") -> MLOpsManager:
     if subset not in mlops_managers:
-        mlops_managers.clear()
-        trim_memory()
         mlops_managers[subset] = MLOpsManager(subset)
     return mlops_managers[subset]
 
 def get_streaming_pipeline(subset: str = "FD001") -> StreamingEnginePipeline:
     if subset not in streaming_pipelines:
-        streaming_pipelines.clear()
-        trim_memory()
         ms = get_model_service(subset)
         streaming_pipelines[subset] = StreamingEnginePipeline(subset=subset, model_service=ms, triage_agent=triage_agent)
     return streaming_pipelines[subset]
@@ -164,33 +168,24 @@ def get_test_df(subset: str = "FD001") -> pd.DataFrame:
     validate_subset(subset)
     key = f"test_{subset}"
     if key not in loaded_dfs:
-        # Keep only the active dataset in memory to guarantee RAM < 200MB
-        loaded_dfs.clear()
-        trim_memory()
-
         proc_path = ROOT_DIR / "data" / "processed" / subset / "test.parquet"
         if not proc_path.exists():
             from src.features.pipeline import DataPipeline
             DataPipeline(subset).run()
             trim_memory()
         loaded_dfs[key] = _load_downcasted_parquet(proc_path)
-        trim_memory()
     return loaded_dfs[key]
 
 def get_train_df(subset: str = "FD001") -> pd.DataFrame:
     validate_subset(subset)
     key = f"train_{subset}"
     if key not in loaded_dfs:
-        loaded_dfs.clear()
-        trim_memory()
-
         proc_path = ROOT_DIR / "data" / "processed" / subset / "train.parquet"
         if not proc_path.exists():
             from src.features.pipeline import DataPipeline
             DataPipeline(subset).run()
             trim_memory()
         loaded_dfs[key] = _load_downcasted_parquet(proc_path)
-        trim_memory()
     return loaded_dfs[key]
 
 # ----------------- WebSocket Hub -----------------
@@ -321,9 +316,41 @@ def is_system_ready() -> bool:
         return True
     return False
 
+def bootstrap_fleet_triage(subsets: Optional[List[str]] = None):
+    """
+    Executes a one-time batch evaluation of the current fleet state on startup.
+    Passes all current engines through triage_agent.evaluate_and_persist(engine)
+    to populate artifacts/sqlite/work_orders.db before frontend connects.
+    """
+    target_subsets = subsets or ["FD001", "FD002", "FD003", "FD004"]
+    for sub in target_subsets:
+        try:
+            df = get_test_df(sub)
+            ms = get_model_service(sub)
+            last_indices = df.groupby("unit")["cycle"].idxmax()
+            last_rows = df.loc[last_indices].sort_values("unit")
+            for _, row in last_rows.iterrows():
+                row_dict = row.to_dict()
+                pred = ms.predict_point(row_dict, compute_shap=False)
+                triage_agent.evaluate_and_persist(pred)
+        except Exception as e:
+            print(f"Bootstrap triage notice for {sub}: {e}")
+
 @app.on_event("startup")
 async def startup_event():
     try:
+        # 1. Preload feature parquets and models into memory so endpoints serve in < 100ms
+        for sub in ["FD001", "FD002", "FD003", "FD004"]:
+            try:
+                get_test_df(sub)
+                get_model_service(sub)
+            except Exception:
+                pass
+
+        # 2. Bootstrap Triage Agent on startup: batch evaluation of fleet state
+        bootstrap_fleet_triage(["FD001", "FD002", "FD003", "FD004"])
+
+        # 3. Prime initial fleet prediction cache
         ms = get_model_service(current_subset)
         df = get_test_df(current_subset)
         last_indices = df.groupby("unit")["cycle"].idxmax()
@@ -483,13 +510,23 @@ def get_fleet(subset: str = Query(default="FD001")):
 
 @app.get("/api/v1/engines/{engine_id}")
 def get_engine_detail(engine_id: str, subset: str = Query(default="FD001")):
-    df = get_test_df(subset)
-    ms = get_model_service(subset)
+    validate_subset(subset)
     try:
         unit_str = engine_id.split("-")[-1]
         unit_num = int(unit_str)
     except Exception:
         raise HTTPException(status_code=400, detail=f"Invalid engine ID: {engine_id}")
+
+    cache_key = (str(subset), str(engine_id))
+    with _trajectory_cache_lock:
+        if cache_key in engine_trajectory_cache:
+            res = dict(engine_trajectory_cache[cache_key])
+            pred_id = res.get("prediction", {}).get("engine_id", engine_id)
+            res["work_order"] = triage_agent.open_orders.get(pred_id)
+            return res
+
+    df = get_test_df(subset)
+    ms = get_model_service(subset)
 
     unit_df = df[df["unit"] == unit_num].sort_values("cycle")
     if unit_df.empty:
@@ -499,31 +536,8 @@ def get_engine_detail(engine_id: str, subset: str = Query(default="FD001")):
     pred = ms.predict_point(last_row, compute_shap=True)
     order = triage_agent.open_orders.get(pred["engine_id"])
 
-    # Build cycle-by-cycle series for charts
-    trajectory = []
-    for _, row in unit_df.iterrows():
-        r_dict = row.to_dict()
-        p = ms.predict_point(r_dict, compute_shap=False)
-        trajectory.append({
-            "cycle": int(r_dict["cycle"]),
-            "rul_p10": p["rul_p10"],
-            "rul_p50": p["rul_p50"],
-            "rul_p90": p["rul_p90"],
-            "true_rul": round(float(r_dict.get("rul_raw", 0.0)), 1),
-            "health_index": p["health_index"],
-            "anomaly_score": p["anomaly_score"],
-            "fail_prob_10": round(float(p.get("fail_prob_10", 0.0)), 3),
-            "fail_prob_30": round(float(p.get("fail_prob_30", 0.0)), 3),
-            "fail_prob_60": round(float(p.get("fail_prob_60", 0.0)), 3),
-            "s2_raw": round(float(r_dict.get("s2", 0.0)), 2),
-            "s2_ewma": round(float(r_dict.get("s2_ewma", 0.0)), 2),
-            "s3_raw": round(float(r_dict.get("s3", 0.0)), 2),
-            "s3_ewma": round(float(r_dict.get("s3_ewma", 0.0)), 2),
-            "s4_raw": round(float(r_dict.get("s4", 0.0)), 2),
-            "s4_ewma": round(float(r_dict.get("s4_ewma", 0.0)), 2),
-            "s7_raw": round(float(r_dict.get("s7", 0.0)), 2),
-            "s7_ewma": round(float(r_dict.get("s7_ewma", 0.0)), 2),
-        })
+    # Ultra-fast vectorized cycle-by-cycle trajectory series (< 10ms)
+    trajectory = ms.predict_trajectories(unit_df)
 
     # Sensor attributions computed via sensor_map.yaml
     sensor_map_cfg = load_yaml("configs/sensor_map.yaml")
@@ -617,7 +631,7 @@ def get_engine_detail(engine_id: str, subset: str = Query(default="FD001")):
             "status": driver_label
         })
 
-    return {
+    res = {
         "engine_id": engine_id,
         "unit": unit_num,
         "subset": subset,
@@ -631,6 +645,13 @@ def get_engine_detail(engine_id: str, subset: str = Query(default="FD001")):
         "subsystem_disclaimer": subsystem_disclaimer,
         "regime": int(last_row.get("regime", 0))
     }
+
+    with _trajectory_cache_lock:
+        if len(engine_trajectory_cache) >= 1000:
+            engine_trajectory_cache.clear()
+        engine_trajectory_cache[cache_key] = res
+
+    return res
 
 
 # ----------------- Replay Controls -----------------
@@ -1210,6 +1231,7 @@ def promote_model(
     if subset in streaming_pipelines:
         streaming_pipelines[subset].model_service = reloaded_ms
     clear_prediction_cache()
+    clear_engine_trajectory_cache(subset)
 
     return res
 
@@ -1240,6 +1262,7 @@ def rollback_model(
     if subset in streaming_pipelines:
         streaming_pipelines[subset].model_service = reloaded_ms
     clear_prediction_cache()
+    clear_engine_trajectory_cache(subset)
 
     return res
 
@@ -1261,6 +1284,7 @@ def reload_models(subset: Optional[str] = Query(default=None)):
                 reloaded.append(s)
     loaded_dfs.clear()
     clear_prediction_cache()
+    clear_engine_trajectory_cache()
     return {"status": "reloaded", "reloaded_subsets": reloaded}
 
 @app.post("/api/v1/pipeline/run")
@@ -1508,6 +1532,7 @@ async def predict_batch(
 # ==============================================================================
 # MLOps & Drift Monitoring Endpoints
 # ==============================================================================
+@app.get("/api/v1/mlops/status")
 @app.get("/api/v1/mlops/registry")
 def get_mlops_registry(subset: str = Query(default="FD001")):
     validate_subset(subset)
@@ -1741,6 +1766,8 @@ async def trigger_mlops_retrain(scenario: str = Query(default="B"), subset: str 
         svc = ModelService(subset)
         svc.load(promoted_ver)
         model_services[subset] = svc
+        clear_prediction_cache()
+        clear_engine_trajectory_cache(subset)
         await broadcast("model_promoted", {
             "subset": subset,
             "version": promoted_ver,
