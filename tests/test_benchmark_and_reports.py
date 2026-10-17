@@ -124,7 +124,6 @@ def test_bundle_rmse_within_threshold_of_evaluation_json():
         test_path = root_dir / "data" / "processed" / sub / "test.parquet"
         if not test_path.exists():
             from src.features.pipeline import DataPipeline
-            DataPipeline(subset=sub).run()
             dp = DataPipeline(subset=sub, inject_faults=False)
             dp.run()
         test_df = pd.read_parquet(test_path)
