@@ -86,10 +86,15 @@ def test_retrain_demo_fixed_holdout_and_no_fake_multipliers():
             assert len(m["data_hash"]) == len("sha256:") + 16
 
         # Verify versioned model file exists on disk
+        target_version = result.get("promoted_version") or result.get("challenger_version")
+        if target_version:
+            target_model_file = root_dir / "artifacts" / "models" / f"model_bundle_FD001_{target_version}.joblib"
+            assert target_model_file.exists(), f"Trained bundle {target_model_file} must exist on disk"
+
         latest_model = models[-1]
         if "model_path" in latest_model:
             model_file = root_dir / latest_model["model_path"]
-            assert model_file.exists()
+            assert model_file.exists(), f"Model file {model_file} must exist on disk"
     finally:
         if orig_bundle and bundle_file.exists():
             bundle_file.write_bytes(orig_bundle)

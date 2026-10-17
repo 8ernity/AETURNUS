@@ -22,7 +22,7 @@
       },
       "created_at": "2026-10-17 12:21:52",
       "data_hash": "sha256:ec8ec78b148ad7bb",
-      "model_path": "artifacts/models/model_bundle_FD001_v1.0.joblib"
+      "model_path": "artifacts/models/model_bundle_FD001.joblib"
     },
     {
       "version": "v2.0",
@@ -45,7 +45,7 @@
       },
       "created_at": "2026-10-14 14:00:00",
       "data_hash": "sha256:a98564cd1712d86f",
-      "model_path": "artifacts/models/model_bundle_FD001_v1.0.joblib"
+      "model_path": "artifacts/models/model_bundle_FD001.joblib"
     },
     {
       "version": "v3.0",
@@ -68,7 +68,7 @@
       },
       "created_at": "2026-10-15 11:22:10",
       "data_hash": "sha256:044adf5e886e2907",
-      "model_path": "artifacts/models/model_bundle_FD001_v3.0.joblib"
+      "model_path": "artifacts/models/model_bundle_FD001.joblib"
     },
     {
       "version": "v4.0",
@@ -91,7 +91,7 @@
       },
       "created_at": "2026-10-15 15:45:30",
       "data_hash": "sha256:1a8ec90b2210a4df",
-      "model_path": "artifacts/models/model_bundle_FD001_v4.0.joblib"
+      "model_path": "artifacts/models/model_bundle_FD001.joblib"
     },
     {
       "version": "v5.0",
@@ -114,7 +114,7 @@
       },
       "created_at": "2026-10-16 09:12:44",
       "data_hash": "sha256:3b99ca88df01e233",
-      "model_path": "artifacts/models/model_bundle_FD001_v5.0.joblib"
+      "model_path": "artifacts/models/model_bundle_FD001.joblib"
     },
     {
       "version": "v6.0",
@@ -137,7 +137,7 @@
       },
       "created_at": "2026-10-16 14:31:51",
       "data_hash": "sha256:88fe1023ba9941cd",
-      "model_path": "artifacts/models/model_bundle_FD001_v6.0.joblib"
+      "model_path": "artifacts/models/model_bundle_FD001.joblib"
     },
     {
       "version": "v7.0",
@@ -160,7 +160,7 @@
       },
       "created_at": "2026-10-16 14:42:12",
       "data_hash": "sha256:044adf5e886e2907",
-      "model_path": "artifacts/models/model_bundle_FD001_v7.0.joblib"
+      "model_path": "artifacts/models/model_bundle_FD001.joblib"
     },
     {
       "version": "v8.0",
@@ -184,7 +184,7 @@
       },
       "created_at": "2026-10-11 21:05:11",
       "data_hash": "sha256:ec8ec78b148ad7bb",
-      "model_path": "artifacts/models/model_bundle_FD001_v8.0.joblib"
+      "model_path": "artifacts/models/model_bundle_FD001.joblib"
     },
     {
       "version": "v9.0",
@@ -208,7 +208,7 @@
       },
       "created_at": "2026-10-17 12:21:52",
       "data_hash": "sha256:ec8ec78b148ad7bb",
-      "model_path": "artifacts/models/model_bundle_FD001_v9.0.joblib"
+      "model_path": "artifacts/models/model_bundle_FD001.joblib"
     },
     {
       "version": "v10.0",
@@ -231,7 +231,7 @@
       },
       "created_at": "2026-10-17 12:24:44",
       "data_hash": "sha256:4849449dc5628da0",
-      "model_path": "artifacts/models/model_bundle_FD001_v10.0.joblib"
+      "model_path": "artifacts/models/model_bundle_FD001.joblib"
     }
   ],
   "active_champion": "v1.0",

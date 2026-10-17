@@ -97,7 +97,7 @@ class MLOpsManager:
                         "metrics": metrics,
                         "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                         "data_hash": data_hash,
-                        "model_path": f"artifacts/models/model_bundle_{self.subset}_v1.0.joblib"
+                        "model_path": f"artifacts/models/model_bundle_{self.subset}.joblib"
                     }
                 ],
                 "active_champion": "v1.0"
@@ -111,10 +111,12 @@ class MLOpsManager:
                     data = json.load(f)
                 updated = False
                 for m in data.get("models", []):
-                    if not m.get("model_path"):
+                    sub = m.get("subset", self.subset)
+                    curr_path = m.get("model_path", "")
+                    if not curr_path or not (self.root_dir / curr_path).exists():
                         v = m.get("version", "v1.0")
-                        sub = m.get("subset", self.subset)
-                        m["model_path"] = f"artifacts/models/model_bundle_{sub}_{v}.joblib"
+                        ver_file = self.artifacts_dir / "models" / f"model_bundle_{sub}_{v}.joblib"
+                        m["model_path"] = f"artifacts/models/model_bundle_{sub}_{v}.joblib" if ver_file.exists() else f"artifacts/models/model_bundle_{sub}.joblib"
                         updated = True
                 if updated:
                     with open(self.registry_file, "w", encoding="utf-8") as f:
@@ -124,9 +126,8 @@ class MLOpsManager:
 
     def get_mlflow_registry(self) -> Optional[Dict[str, Any]]:
         """
-        Queries the local MLflow tracking server (checking both mlruns/ and artifacts/mlflow.db)
+        Queries the local MLflow tracking server (prioritizing artifacts/mlflow.db SQLite store)
         to retrieve real model runs and metrics for champion, challenger, and previous aliases.
-        Prioritizes live MLflow data, with graceful degradation.
         """
         os.environ["MLFLOW_ALLOW_FILE_STORE"] = "true"
         os.environ["MLFLOW_DISABLE_AGENT_HINT"] = "1"
@@ -134,21 +135,22 @@ class MLOpsManager:
         from mlflow.tracking import MlflowClient
 
         clients = []
-        # 1. Check mlruns directory
-        mlruns_dir = self.root_dir / "mlruns"
-        if mlruns_dir.exists():
-            try:
-                clients.append(MlflowClient(mlruns_dir.as_uri()))
-            except Exception:
-                pass
-
-        # 2. Check artifacts/mlflow.db SQLite tracking store
+        # 1. Primary: Check artifacts/mlflow.db SQLite tracking store
         mlflow_db = self.artifacts_dir / "mlflow.db"
         if mlflow_db.exists():
             try:
                 clients.append(MlflowClient(f"sqlite:///{mlflow_db.resolve().as_posix()}"))
             except Exception:
                 pass
+
+        # 2. Secondary fallback: Check mlruns directory only if no SQLite store exists
+        if not clients:
+            mlruns_dir = self.root_dir / "mlruns"
+            if mlruns_dir.exists():
+                try:
+                    clients.append(MlflowClient(mlruns_dir.as_uri()))
+                except Exception:
+                    pass
 
         target_exps = [f"cmapss_{self.subset}", self.subset, f"AETURNUS-Tuning-{self.subset}"]
         found_runs = []
@@ -245,7 +247,11 @@ class MLOpsManager:
                 },
                 "created_at": created_at,
                 "data_hash": params.get("data_hash", self._compute_data_hash()),
-                "model_path": f"artifacts/models/model_bundle_{self.subset}_{version}.joblib"
+                "model_path": (
+                    f"artifacts/models/model_bundle_{self.subset}_{version}.joblib"
+                    if (self.artifacts_dir / "models" / f"model_bundle_{self.subset}_{version}.joblib").exists()
+                    else f"artifacts/models/model_bundle_{self.subset}.joblib"
+                )
             })
 
         # Merge with static models from json so historical versions remain accessible
@@ -263,7 +269,13 @@ class MLOpsManager:
         if not models:
             return None
 
-        models.sort(key=lambda m: (0 if m.get("alias") == "champion" else 1, m.get("version", "")))
+        def version_sort_key(m):
+            v_str = m.get("version", "")
+            nums = [int(n) for n in re.findall(r"\d+", v_str)]
+            # champion first (0), then other aliases (1), then natural numerical version sort
+            return (0 if m.get("alias") == "champion" else 1, nums or [0])
+
+        models.sort(key=version_sort_key)
 
         return {
             "models": models,
@@ -715,5 +727,6 @@ class MLOpsManager:
             "challenger_holdout_metrics": chal_holdout_metrics,
             "gate_passed": gate_passed,
             "gate_reasons": reasons,
-            "promoted_version": chal_version if gate_passed else None
+            "promoted_version": chal_version if gate_passed else None,
+            "challenger_version": chal_version
         }
