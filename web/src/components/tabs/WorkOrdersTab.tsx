@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import toast from "react-hot-toast";
 import { 
   ClipboardList, 
   CheckCircle2, 
@@ -21,7 +22,8 @@ import {
   FileCheck,
   ChevronRight,
   AlertTriangle,
-  ArrowRight
+  ArrowRight,
+  Loader2
 } from "lucide-react";
 
 interface WorkOrdersTabProps {
@@ -52,6 +54,8 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
   const [simCrit, setSimCrit] = useState<number>(15);
   const [simHigh, setSimHigh] = useState<number>(30);
   const [simResult, setSimResult] = useState<any | null>(null);
+  const [isSimulating, setIsSimulating] = useState<boolean>(false);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState<boolean>(false);
 
   const fetchOrders = () => {
     fetch("/api/v1/work-orders")
@@ -138,6 +142,9 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
   };
 
   const runWhatIf = async () => {
+    if (isSimulating) return;
+    setIsSimulating(true);
+    const toastId = toast.loading(`Running What-If Policy Simulation on ${currentSubset}...`);
     try {
       const res = await fetch(`/api/v1/rules/simulate?subset=${currentSubset}`, {
         method: "POST",
@@ -148,10 +155,43 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
           anomaly_threshold: 0.80
         })
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: Simulation error`);
       const data = await res.json();
       setSimResult(data);
-    } catch (err) {
-      console.error(err);
+      toast.success(
+        `What-If Simulation Complete: ${data.total_simulated_orders} work orders evaluated across ${currentSubset}`,
+        { id: toastId }
+      );
+    } catch (err: any) {
+      console.error("Simulation failed:", err);
+      toast.error(`Simulation failed: ${err.message || "Error running policy simulation"}`, { id: toastId });
+    } finally {
+      setIsSimulating(false);
+    }
+  };
+
+  const handleDownloadWorkOrderPdf = async (wo: any) => {
+    if (isDownloadingPdf || !wo) return;
+    setIsDownloadingPdf(true);
+    const toastId = toast.loading(`Generating Maintenance Report PDF for ${wo.work_order_id}...`);
+    try {
+      const res = await fetch(`/api/v1/work-orders/${wo.work_order_id}/maintenance-report.pdf`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to generate report`);
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `maintenance_report_${wo.work_order_id}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      toast.success(`Maintenance Report PDF downloaded for ${wo.work_order_id}`, { id: toastId });
+    } catch (err: any) {
+      console.error("PDF download error:", err);
+      toast.error(`Download failed: ${err.message || "Error generating report"}`, { id: toastId });
+    } finally {
+      setIsDownloadingPdf(false);
     }
   };
 
@@ -549,9 +589,17 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
 
           <button 
             onClick={runWhatIf}
-            className="glass-button text-white text-xs px-4 py-2.5 rounded-xl font-semibold w-full"
+            disabled={isSimulating}
+            className="glass-button text-white text-xs px-4 py-2.5 rounded-xl font-semibold w-full flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
           >
-            Run What-If Simulation on {currentSubset}
+            {isSimulating ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin text-cyan-300" />
+                <span>Simulating Fleet Policies on {currentSubset}...</span>
+              </>
+            ) : (
+              <span>Run What-If Simulation on {currentSubset}</span>
+            )}
           </button>
 
           {simResult && (
@@ -618,15 +666,18 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
               </div>
               <div className="flex items-center gap-3">
                 {/* One-click PDF download */}
-                <a
-                  href={`/api/v1/work-orders/${selectedOrder.work_order_id}/maintenance-report.pdf`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 text-indigo-200 text-xs font-semibold transition-all shadow-md"
+                <button
+                  onClick={() => handleDownloadWorkOrderPdf(selectedOrder)}
+                  disabled={isDownloadingPdf}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 text-indigo-200 text-xs font-semibold transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <FileDown className="w-4 h-4 text-indigo-300" />
+                  {isDownloadingPdf ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-indigo-300" />
+                  ) : (
+                    <FileDown className="w-4 h-4 text-indigo-300" />
+                  )}
                   <span>Maintenance Report PDF</span>
-                </a>
+                </button>
                 <button 
                   onClick={() => setSelectedOrder(null)}
                   className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"

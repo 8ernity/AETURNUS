@@ -875,6 +875,90 @@ class ModelService:
             "model_version": f"rul-{self.subset.lower()}@{getattr(self, 'version', 'v1.0')}"
         }
 
+    def predict_trajectories(self, unit_df: pd.DataFrame) -> List[Dict[str, Any]]:
+        """
+        Ultra-fast vectorized prediction of full cycle trajectories for an engine.
+        Replaces slow row-by-row predict_point calls to achieve < 50ms latency.
+        """
+        if unit_df.empty:
+            return []
+        df_sorted = unit_df.sort_values("cycle").reset_index(drop=True)
+        missing_features = [c for c in self.feature_cols if c not in df_sorted.columns]
+        if missing_features:
+            raise ValueError(f"[{self.subset}] predict_trajectories missing features: {missing_features[:5]}")
+
+        feats = df_sorted[self.feature_cols].to_numpy(dtype=np.float32)
+        n = len(feats)
+
+        # Anomaly scores
+        if self.anomaly_detector:
+            raw_scores = self.anomaly_detector.decision_function(feats)
+            anomaly_scores = np.clip(0.5 - (raw_scores * 2.0), 0.0, 1.0)
+        else:
+            anomaly_scores = np.zeros(n, dtype=np.float32)
+
+        # Quantile RUL Regressors
+        raw_p10 = self.rul_p10_model.predict(feats) if self.rul_p10_model else np.zeros(n)
+        rul_p50 = np.maximum(0.0, self.rul_p50_model.predict(feats)) if self.rul_p50_model else np.zeros(n)
+        raw_p90 = self.rul_p90_model.predict(feats) if self.rul_p90_model else np.zeros(n)
+
+        cal_offset = getattr(self, "interval_calibration_offset", getattr(self, "conformal_q", 0.0))
+        rul_p10 = np.maximum(0.0, np.minimum(raw_p10, rul_p50) - cal_offset)
+        rul_p90 = np.maximum(rul_p50, np.maximum(raw_p90, rul_p50) + cal_offset)
+
+        # Multi-horizon probabilities [10, 30, 60]
+        fail_prob_10 = np.zeros(n, dtype=np.float32)
+        fail_prob_30 = np.zeros(n, dtype=np.float32)
+        fail_prob_60 = np.zeros(n, dtype=np.float32)
+        for h, target_arr in [(10, fail_prob_10), (30, fail_prob_30), (60, fail_prob_60)]:
+            cls_h = self.classifiers.get(h, self.classifier)
+            if cls_h:
+                probs = cls_h.predict_proba(feats)
+                target_arr[:] = probs[:, 1] if probs.shape[1] > 1 else probs[:, 0]
+
+        fail_prob_30 = np.maximum(fail_prob_10, fail_prob_30)
+        fail_prob_60 = np.maximum(fail_prob_30, fail_prob_60)
+
+        cycles = df_sorted["cycle"].to_numpy(dtype=int)
+        true_ruls = df_sorted["rul_raw"].to_numpy(dtype=float) if "rul_raw" in df_sorted.columns else np.zeros(n)
+        health_indices = df_sorted["health_index"].to_numpy(dtype=float) if "health_index" in df_sorted.columns else np.ones(n)
+
+        def get_col(col_name: str) -> np.ndarray:
+            return df_sorted[col_name].to_numpy(dtype=float) if col_name in df_sorted.columns else np.zeros(n)
+
+        s2_raw = get_col("s2")
+        s2_ewma = get_col("s2_ewma")
+        s3_raw = get_col("s3")
+        s3_ewma = get_col("s3_ewma")
+        s4_raw = get_col("s4")
+        s4_ewma = get_col("s4_ewma")
+        s7_raw = get_col("s7")
+        s7_ewma = get_col("s7_ewma")
+
+        trajectory = []
+        for i in range(n):
+            trajectory.append({
+                "cycle": int(cycles[i]),
+                "rul_p10": round(float(rul_p10[i]), 1),
+                "rul_p50": round(float(rul_p50[i]), 1),
+                "rul_p90": round(float(rul_p90[i]), 1),
+                "true_rul": round(float(true_ruls[i]), 1),
+                "health_index": round(float(health_indices[i]), 3),
+                "anomaly_score": round(float(anomaly_scores[i]), 3),
+                "fail_prob_10": round(float(fail_prob_10[i]), 3),
+                "fail_prob_30": round(float(fail_prob_30[i]), 3),
+                "fail_prob_60": round(float(fail_prob_60[i]), 3),
+                "s2_raw": round(float(s2_raw[i]), 2),
+                "s2_ewma": round(float(s2_ewma[i]), 2),
+                "s3_raw": round(float(s3_raw[i]), 2),
+                "s3_ewma": round(float(s3_ewma[i]), 2),
+                "s4_raw": round(float(s4_raw[i]), 2),
+                "s4_ewma": round(float(s4_ewma[i]), 2),
+                "s7_raw": round(float(s7_raw[i]), 2),
+                "s7_ewma": round(float(s7_ewma[i]), 2),
+            })
+        return trajectory
+
     def evaluate_multi_seed(
         self, train_df: pd.DataFrame, test_df: pd.DataFrame, rul_truth: np.ndarray, seeds: List[int] = [42, 43, 44]
     ) -> Dict[str, Any]:

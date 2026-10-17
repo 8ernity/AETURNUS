@@ -40,50 +40,66 @@ def test_compute_df_sha256():
     assert hash1 != hash3
 
 def test_retrain_demo_fixed_holdout_and_no_fake_multipliers():
-    mgr = MLOpsManager("FD001")
-    result = mgr.run_retrain_demo(scenario="A")
-    
-    assert "champion_metrics" in result
-    assert "challenger_metrics" in result
-    assert "champion_holdout_metrics" in result
-    assert "challenger_holdout_metrics" in result
-    assert "gate_passed" in result
-    assert "gate_reasons" in result
+    bundle_file = root_dir / "artifacts" / "models" / "model_bundle_FD001.joblib"
+    orig_bundle = bundle_file.read_bytes() if bundle_file.exists() else None
+    reg_file = root_dir / "artifacts" / "reports" / "model_registry.json"
+    orig_reg = reg_file.read_text(encoding="utf-8") if reg_file.exists() else None
 
-    # Check metrics are positive floats
-    champ_holdout = result["champion_holdout_metrics"]
-    chal_holdout = result["challenger_holdout_metrics"]
-    assert champ_holdout["rmse"] > 0
-    assert chal_holdout["rmse"] > 0
-    assert champ_holdout["nasa_score"] > 0
-    assert chal_holdout["nasa_score"] > 0
+    try:
+        mgr = MLOpsManager("FD001")
+        result = mgr.run_retrain_demo(scenario="A")
+        
+        assert "champion_metrics" in result
+        assert "challenger_metrics" in result
+        assert "champion_holdout_metrics" in result
+        assert "challenger_holdout_metrics" in result
+        assert "gate_passed" in result
+        assert "gate_reasons" in result
 
-    # Ensure no fake 0.96 or 0.94 hardcoding:
-    # In fake code, chal_rmse was exactly round(champ_rmse * 0.96, 4)
-    # Check that it is evaluated independently from the model heads on holdout
-    ratio = chal_holdout["rmse"] / champ_holdout["rmse"]
-    assert abs(ratio - 0.96) > 1e-4 or abs(ratio - 0.94) > 1e-4
+        # Check metrics are positive floats
+        champ_holdout = result["champion_holdout_metrics"]
+        chal_holdout = result["challenger_holdout_metrics"]
+        assert champ_holdout["rmse"] > 0
+        assert chal_holdout["rmse"] > 0
+        assert champ_holdout["nasa_score"] > 0
+        assert chal_holdout["nasa_score"] > 0
 
-    # Check registry updated with real data hashes and aliases
-    reg = mgr.get_registry()
-    models = reg["models"]
-    assert len(models) >= 2
-    
-    # Check aliases
-    aliases = [m["alias"] for m in models]
-    assert "champion" in aliases
-    assert any("previous" in a or "challenger" in a for a in aliases)
+        # Ensure no fake 0.96 or 0.94 hardcoding:
+        # In fake code, chal_rmse was exactly round(champ_rmse * 0.96, 4)
+        # Check that it is evaluated independently from the model heads on holdout
+        ratio = chal_holdout["rmse"] / champ_holdout["rmse"]
+        assert abs(ratio - 0.96) > 1e-4 or abs(ratio - 0.94) > 1e-4
 
-    # Check data hash of all models are sha256 hex
-    for m in models:
-        assert m["data_hash"].startswith("sha256:")
-        assert len(m["data_hash"]) == len("sha256:") + 16
+        # Check registry updated with real data hashes and aliases
+        reg = mgr.get_registry()
+        models = reg["models"]
+        assert len(models) >= 2
+        
+        # Check aliases
+        aliases = [m["alias"] for m in models]
+        assert "champion" in aliases
+        assert any("previous" in a or "challenger" in a for a in aliases)
 
-    # Verify versioned model file exists on disk
-    latest_model = models[-1]
-    if "model_path" in latest_model:
-        model_file = root_dir / latest_model["model_path"]
-        assert model_file.exists()
+        # Check data hash of all models are sha256 hex
+        for m in models:
+            assert m["data_hash"].startswith("sha256:")
+            assert len(m["data_hash"]) == len("sha256:") + 16
+
+        # Verify versioned model file exists on disk
+        target_version = result.get("promoted_version") or result.get("challenger_version")
+        if target_version:
+            target_model_file = root_dir / "artifacts" / "models" / f"model_bundle_FD001_{target_version}.joblib"
+            assert target_model_file.exists(), f"Trained bundle {target_model_file} must exist on disk"
+
+        latest_model = models[-1]
+        if "model_path" in latest_model:
+            model_file = root_dir / latest_model["model_path"]
+            assert model_file.exists(), f"Model file {model_file} must exist on disk"
+    finally:
+        if orig_bundle and bundle_file.exists():
+            bundle_file.write_bytes(orig_bundle)
+        if orig_reg and reg_file.exists():
+            reg_file.write_text(orig_reg, encoding="utf-8")
 
 def test_mlflow_runs_logged():
     import mlflow

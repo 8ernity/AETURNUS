@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { Toaster } from "react-hot-toast";
 import { Sidebar } from "./components/Sidebar";
 import { Header } from "./components/Header";
 import { FleetOverviewTab } from "./components/tabs/FleetOverviewTab";
@@ -228,6 +229,19 @@ export function App() {
         fleetData={fleetData}
         recentAlerts={recentAlerts}
         onSelectEngine={handleSelectEngine}
+      />
+
+      <Toaster 
+        position="top-right" 
+        toastOptions={{
+          style: {
+            background: "#0f172a",
+            color: "#f8fafc",
+            border: "1px solid rgba(99, 102, 241, 0.3)",
+            fontSize: "12px",
+            borderRadius: "1rem"
+          }
+        }}
       />
     </div>
   );

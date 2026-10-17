@@ -36,8 +36,21 @@ class TriageAgent:
         self.sensor_cfg = load_yaml("configs/sensor_map.yaml")
         self.rules_version = self.rules_cfg.get("rules_version", "2026-10-07.1")
         
-        # SQLite Database Path
-        self.db_path = db_path or (self.root_dir / "data" / "work_orders.db")
+        # SQLite Database Path (Primary: artifacts/sqlite/work_orders.db)
+        default_sqlite = self.root_dir / "artifacts" / "sqlite" / "work_orders.db"
+        legacy_sqlite = self.root_dir / "data" / "work_orders.db"
+        if not db_path:
+            default_sqlite.parent.mkdir(parents=True, exist_ok=True)
+            if not default_sqlite.exists() and legacy_sqlite.exists():
+                import shutil
+                try:
+                    shutil.copy2(legacy_sqlite, default_sqlite)
+                except Exception:
+                    pass
+            self.db_path = default_sqlite
+        else:
+            self.db_path = Path(db_path) if str(db_path) != ":memory:" else db_path
+
         self.is_memory_db = str(self.db_path) == ":memory:"
         if not self.is_memory_db:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -273,6 +286,50 @@ class TriageAgent:
                 now
             ))
 
+        legacy_sqlite = self.root_dir / "data" / "work_orders.db"
+        if not self.is_memory_db and self.db_path != legacy_sqlite:
+            try:
+                legacy_sqlite.parent.mkdir(parents=True, exist_ok=True)
+                with sqlite3.connect(str(legacy_sqlite)) as leg_conn:
+                    leg_conn.execute("""
+                        INSERT OR REPLACE INTO work_orders (
+                            work_order_id, engine_id, unit, subset, created_at_cycle, current_cycle,
+                            closed_at_cycle, severity, raw_severity, status, conservative_rul,
+                            rul_p10, rul_p50, rul_p90, fail_prob_30, anomaly_score,
+                            due_by_cycle, suspected_subsystem, top_sensors, recommended_action,
+                            decision_trace, model_version, rules_version, exception, events, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        order["work_order_id"],
+                        order["engine_id"],
+                        int(order.get("unit", 1)),
+                        order.get("subset", "FD001"),
+                        int(order.get("created_at_cycle", 1)),
+                        int(order.get("current_cycle", order.get("created_at_cycle", 1))),
+                        order.get("closed_at_cycle"),
+                        order["severity"],
+                        order.get("raw_severity", order["severity"]),
+                        order["status"],
+                        float(order.get("conservative_rul", 0.0)),
+                        float(pred_rul.get("p10", 0.0)),
+                        float(pred_rul.get("p50", 0.0)),
+                        float(pred_rul.get("p90", 0.0)),
+                        float(order.get("fail_prob_30", 0.0)),
+                        float(order.get("anomaly_score", 0.0)),
+                        int(order.get("due_by_cycle", 1)),
+                        order.get("suspected_subsystem", "HPC"),
+                        json.dumps(order.get("top_sensors", [])),
+                        order.get("recommended_action", ""),
+                        json.dumps(order.get("decision_trace", [])),
+                        order.get("model_version") or "unknown",
+                        order.get("rules_version", self.rules_version),
+                        order.get("exception"),
+                        json.dumps(order.get("events", [])),
+                        now
+                    ))
+            except Exception:
+                pass
+
     def _log_audit_event(self, engine_id: str, action: str, actor: str, cycle: int, work_order_id: Optional[str] = None, reason: str = "", trace: Optional[List[str]] = None):
         event_id = f"EVT-{uuid.uuid4()}"
         now = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -292,6 +349,37 @@ class TriageAgent:
                 json.dumps(trace or []),
                 now
             ))
+
+    def evaluate_and_persist(
+        self,
+        engine: Dict[str, Any],
+        db_session: Optional[Any] = None
+    ) -> Tuple[Optional[Dict[str, Any]], List[str]]:
+        """
+        Executes the 9-step decision pipeline on an engine prediction/state and guarantees
+        immediate persistence into the SQLite database (artifacts/sqlite/work_orders.db).
+        
+        Args:
+            engine: Engine prediction dictionary containing keys like engine_id, unit, cycle,
+                    conservative_rul, rul_p10, fail_prob_30, anomaly_score.
+            db_session: Optional database session object (e.g. SQLAlchemy session or connection).
+        
+        Returns:
+            Tuple of (work_order, decision_trace).
+        """
+        if "conservative_rul" not in engine and "rul_p10" in engine:
+            engine["conservative_rul"] = engine["rul_p10"]
+
+        order, trace = self.evaluate_engine_cycle(engine)
+        if order is not None:
+            self._persist_order(order)
+            if db_session is not None:
+                try:
+                    if hasattr(db_session, "commit"):
+                        db_session.commit()
+                except Exception:
+                    pass
+        return order, trace
 
     def evaluate_engine_cycle(
         self,
