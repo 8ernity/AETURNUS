@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import toast from "react-hot-toast";
 import { 
   Cpu, 
   TrendingDown, 
@@ -14,7 +15,8 @@ import {
   Plane,
   PackageCheck,
   Wrench,
-  Compass
+  Compass,
+  Loader2
 } from "lucide-react";
 import { 
   ResponsiveContainer, 
@@ -51,6 +53,32 @@ export const EngineDetailTab: React.FC<EngineDetailTabProps> = ({
   const [selectedSensor, setSelectedSensor] = useState<string>("s3"); // s3 is T30 (HPC temp)
   const [radarMode, setRadarMode] = useState<"degradation" | "health">("degradation");
   const [multiHorizonMode, setMultiHorizonMode] = useState<"stacked" | "cumulative">("stacked");
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState<boolean>(false);
+
+  const handleDownloadPdf = async () => {
+    if (isDownloadingPdf || !engineData?.engine_id) return;
+    setIsDownloadingPdf(true);
+    const toastId = toast.loading(`Generating Maintenance Report PDF for ${engineData.engine_id}...`);
+    try {
+      const res = await fetch(`/api/v1/engines/${engineData.engine_id}/maintenance-report.pdf?subset=${currentSubset}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to generate report`);
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `maintenance_report_${engineData.engine_id}_${currentSubset}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      toast.success(`Maintenance Report PDF downloaded for ${engineData.engine_id}`, { id: toastId });
+    } catch (err: any) {
+      console.error("PDF download failed:", err);
+      toast.error(`Download failed: ${err.message || "Error generating report"}`, { id: toastId });
+    } finally {
+      setIsDownloadingPdf(false);
+    }
+  };
 
   useEffect(() => {
     if (!selectedEngineId) return;
@@ -197,15 +225,20 @@ export const EngineDetailTab: React.FC<EngineDetailTabProps> = ({
             </div>
           </div>
 
-          <a
-            href={`/api/v1/engines/${engineData.engine_id}/maintenance-report.pdf?subset=${currentSubset}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 px-4 py-3 rounded-2xl bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 text-indigo-200 text-xs font-bold transition-all shadow-md group"
+          <button
+            onClick={handleDownloadPdf}
+            disabled={isDownloadingPdf}
+            className="flex items-center gap-2 px-4 py-3 rounded-2xl bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 text-indigo-200 text-xs font-bold transition-all shadow-md group disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <FileDown className="w-4 h-4 text-indigo-300 group-hover:scale-110 transition-transform" />
-            <span className="hidden sm:inline">Maintenance Report PDF</span>
-          </a>
+            {isDownloadingPdf ? (
+              <Loader2 className="w-4 h-4 animate-spin text-indigo-300" />
+            ) : (
+              <FileDown className="w-4 h-4 text-indigo-300 group-hover:scale-110 transition-transform" />
+            )}
+            <span className="hidden sm:inline">
+              {isDownloadingPdf ? "Generating PDF..." : "Maintenance Report PDF"}
+            </span>
+          </button>
         </div>
       </div>
 

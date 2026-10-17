@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import toast from "react-hot-toast";
 import { 
   DollarSign, 
   TrendingUp, 
@@ -107,16 +108,19 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
       setCostOverhaul(240000);
       setCostWastedCycle(1400);
       setCostInspection(15000);
+      toast.success("Applied Commercial Airline Preset ($3.0M AOG, $240k Overhaul)");
     } else if (preset === "cargo") {
       setCostCatastrophic(2000000);
       setCostOverhaul(200000);
       setCostWastedCycle(1000);
       setCostInspection(10000);
+      toast.success("Applied Cargo Operator Preset ($2.0M AOG, $200k Overhaul)");
     } else {
       setCostCatastrophic(4500000);
       setCostOverhaul(350000);
       setCostWastedCycle(2200);
       setCostInspection(25000);
+      toast.success("Applied Military / Heavy Preset ($4.5M AOG, $350k Overhaul)");
     }
   };
 
