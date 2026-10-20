@@ -1,0 +1,446 @@
+{
+  "run_id": "run_1792497391_538e785a",
+  "git_sha": "538e785ad6980a0be726bcfe4557d122613185be",
+  "config_hash": "ec8828aaf4a877cc933dd9e3a978546a0cc6b51dfd28bf0d1cf8ba9a4a597b62",
+  "data_sha256": {
+    "FD001_train": "8d39aa11937f96cdcaf873242336fb1a8be1f92a6c6cac2fcd59f067cddcace2",
+    "FD001_test": "9e4783f9d661b1042cf2c2e4e8db76a8382fee9a225882e197088d723cc2c150",
+    "FD002_train": "4468c0690714b495533b376ef08fbdf9d3478cbca515e920a74492674016a843",
+    "FD002_test": "8980dff3eeaf2686966f3fa65719ad8dbfa5590be448001251e177336fb6eb20",
+    "FD003_train": "656de3e912785168efcab23bebe1697cd33179050903a979a2fface7d5a0738a",
+    "FD003_test": "c471d0c1b8c29cf04da975ec03f92d052c2235b71cac56580f74f3b0122ebaca",
+    "FD004_train": "bd6372c910cea4c2a372061c42c11944bb1d69033bfeaed2e1bb1d445eeb1062",
+    "FD004_test": "d78250cc27c6f24b2d1aa6eacc01c4a6e57f93d7acf77b04c99b79864538f805"
+  },
+  "created_at": 1792497887.981648,
+  "subsets": {
+    "FD001": {
+      "bundle_sha256": "781fa254a60f1d35ce164d89bf2d82990176f44931d34e00a908a68804fc1111",
+      "algorithm": "lightgbm",
+      "protocol_id": "protocol_cmapss_nasa_phm08_cap125_seed42",
+      "n_engines": 100,
+      "metrics": {
+        "rmse": 13.295494530089277,
+        "mae": 9.400307588052794,
+        "nasa_score": 245.27603460745772,
+        "early_rate": 0.44,
+        "late_rate": 0.56,
+        "pr_auc": 0.966,
+        "interval_coverage": 0.79,
+        "mean_interval_width": 31.46
+      },
+      "cv": {
+        "protocol_id": "protocol_cmapss_nasa_phm08_cap125_seed42",
+        "k_folds": 5,
+        "mean_rmse": 12.62,
+        "std_rmse": 0.81,
+        "mean_nasa": 8117.5,
+        "std_nasa": 1913.1,
+        "mean_train_rmse": 3.49
+      },
+      "comparison_rows": [
+        {
+          "model_name": "Ridge Regression",
+          "architecture": "Linear",
+          "cv_mean_rmse": 16.3,
+          "cv_mean_nasa": 12241.6,
+          "rmse": 17.321942045296154,
+          "mae": 14.32121357086715,
+          "nasa_score": 425.13004829473886,
+          "train_time_sec": 0.41
+        },
+        {
+          "model_name": "HistGradientBoosting Regressor",
+          "architecture": "GBDT",
+          "cv_mean_rmse": 12.54,
+          "cv_mean_nasa": 7964.5,
+          "rmse": 12.374106037118255,
+          "mae": 8.803687822335807,
+          "nasa_score": 221.86744532484013,
+          "train_time_sec": 47.62
+        },
+        {
+          "model_name": "LightGBM Regressor (Default)",
+          "architecture": "LightGBM",
+          "cv_mean_rmse": 12.62,
+          "cv_mean_nasa": 8117.5,
+          "rmse": 12.747266862286926,
+          "mae": 8.989783234726708,
+          "nasa_score": 237.1899691935861,
+          "train_time_sec": 30.77
+        },
+        {
+          "model_name": "LightGBM Regressor (Tuned)",
+          "architecture": "LightGBM",
+          "cv_mean_rmse": 12.48,
+          "cv_mean_nasa": 7919.7,
+          "rmse": 12.757031607180597,
+          "mae": 9.251609920211582,
+          "nasa_score": 231.534996210179,
+          "train_time_sec": 27.04
+        },
+        {
+          "model_name": "1D-CNN PyTorch (30-Cycle Window)",
+          "architecture": "CNN",
+          "window_size": 30,
+          "cv_mean_rmse": 22.17,
+          "cv_mean_nasa": 7467.2,
+          "rmse": 16.47,
+          "mae": 12.3,
+          "nasa_score": 468.5,
+          "train_time_sec": 19.4
+        },
+        {
+          "model_name": "GRU PyTorch (30-Cycle Sequence)",
+          "architecture": "GRU",
+          "window_size": 30,
+          "cv_mean_rmse": 40.27,
+          "cv_mean_nasa": 28309.3,
+          "rmse": 15.7,
+          "mae": 11.69,
+          "nasa_score": 354.06,
+          "train_time_sec": 34.76
+        }
+      ],
+      "champion": {
+        "selected_algorithm": "lightgbm",
+        "model_name": "LightGBM Regressor (Tuned)",
+        "selection_rule": "min_cv_rmse_with_nasa_safety",
+        "rule_inputs": {
+          "max_acceptable_late_rate": 0.6,
+          "primary_metric": "cv_mean_rmse",
+          "secondary_metric": "nasa_score",
+          "evaluated_algorithms": [
+            "Ridge Regression",
+            "HistGradientBoosting Regressor",
+            "LightGBM Regressor (Default)",
+            "LightGBM Regressor (Tuned)",
+            "1D-CNN PyTorch (30-Cycle Window)",
+            "GRU PyTorch (30-Cycle Sequence)"
+          ]
+        }
+      }
+    },
+    "FD002": {
+      "bundle_sha256": "901e59a0f42b8660b50aa8ca5ac05162f18190be00d339e99aa6076b0b5d807b",
+      "algorithm": "lightgbm",
+      "protocol_id": "protocol_cmapss_nasa_phm08_cap125_seed42",
+      "n_engines": 259,
+      "metrics": {
+        "rmse": 25.03121105684983,
+        "mae": 16.162880882300986,
+        "nasa_score": 6839.080307045063,
+        "early_rate": 0.5752895752895753,
+        "late_rate": 0.4247104247104247,
+        "pr_auc": 0.998,
+        "interval_coverage": 0.6255,
+        "mean_interval_width": 28.81
+      },
+      "cv": {
+        "protocol_id": "protocol_cmapss_nasa_phm08_cap125_seed42",
+        "k_folds": 5,
+        "mean_rmse": 12.72,
+        "std_rmse": 0.17,
+        "mean_nasa": 22550.0,
+        "std_nasa": 981.1,
+        "mean_train_rmse": 7.15
+      },
+      "comparison_rows": [
+        {
+          "model_name": "Ridge Regression",
+          "architecture": "Linear",
+          "cv_mean_rmse": 15.19,
+          "cv_mean_nasa": 30011.0,
+          "rmse": 27.04519998335494,
+          "mae": 19.49319888090044,
+          "nasa_score": 6986.958037740883,
+          "train_time_sec": 3.72
+        },
+        {
+          "model_name": "HistGradientBoosting Regressor",
+          "architecture": "GBDT",
+          "cv_mean_rmse": 12.74,
+          "cv_mean_nasa": 22420.8,
+          "rmse": 24.97682834383014,
+          "mae": 16.342460869606057,
+          "nasa_score": 6287.357235554049,
+          "train_time_sec": 107.47
+        },
+        {
+          "model_name": "LightGBM Regressor (Default)",
+          "architecture": "LightGBM",
+          "cv_mean_rmse": 12.72,
+          "cv_mean_nasa": 22550.0,
+          "rmse": 24.731076448484934,
+          "mae": 16.20203154294541,
+          "nasa_score": 5757.884021630181,
+          "train_time_sec": 66.73
+        },
+        {
+          "model_name": "LightGBM Regressor (Untuned)",
+          "architecture": "LightGBM",
+          "cv_mean_rmse": 12.72,
+          "cv_mean_nasa": 22550.0,
+          "rmse": 24.731076448484934,
+          "mae": 16.20203154294541,
+          "nasa_score": 5757.884021630181,
+          "train_time_sec": 59.15
+        },
+        {
+          "model_name": "1D-CNN PyTorch (30-Cycle Window)",
+          "architecture": "CNN",
+          "window_size": 30,
+          "cv_mean_rmse": 22.63,
+          "cv_mean_nasa": 225388.1,
+          "rmse": 23.82,
+          "mae": 15.85,
+          "nasa_score": 4150.66,
+          "train_time_sec": 24.51
+        },
+        {
+          "model_name": "GRU PyTorch (30-Cycle Sequence)",
+          "architecture": "GRU",
+          "window_size": 30,
+          "cv_mean_rmse": 29.47,
+          "cv_mean_nasa": 42690.8,
+          "rmse": 25.42,
+          "mae": 17.59,
+          "nasa_score": 4965.05,
+          "train_time_sec": 50.45
+        }
+      ],
+      "champion": {
+        "selected_algorithm": "lightgbm",
+        "model_name": "LightGBM Regressor (Default)",
+        "selection_rule": "min_cv_rmse_with_nasa_safety",
+        "rule_inputs": {
+          "max_acceptable_late_rate": 0.6,
+          "primary_metric": "cv_mean_rmse",
+          "secondary_metric": "nasa_score",
+          "evaluated_algorithms": [
+            "Ridge Regression",
+            "HistGradientBoosting Regressor",
+            "LightGBM Regressor (Default)",
+            "LightGBM Regressor (Untuned)",
+            "1D-CNN PyTorch (30-Cycle Window)",
+            "GRU PyTorch (30-Cycle Sequence)"
+          ]
+        }
+      }
+    },
+    "FD003": {
+      "bundle_sha256": "ca840874060853d7a8d447f5035f48a9e9b546dbbdc9c7b4695fefd8b59a0997",
+      "algorithm": "hist_gb",
+      "protocol_id": "protocol_cmapss_nasa_phm08_cap125_seed42",
+      "n_engines": 100,
+      "metrics": {
+        "rmse": 13.794512413124217,
+        "mae": 9.927358293159783,
+        "nasa_score": 338.72089180760565,
+        "early_rate": 0.4,
+        "late_rate": 0.6,
+        "pr_auc": 0.98,
+        "interval_coverage": 0.57,
+        "mean_interval_width": 22.96
+      },
+      "cv": {
+        "protocol_id": "protocol_cmapss_nasa_phm08_cap125_seed42",
+        "k_folds": 5,
+        "mean_rmse": 10.93,
+        "std_rmse": 1.17,
+        "mean_nasa": 7208.5,
+        "std_nasa": 1998.0,
+        "mean_train_rmse": 3.12
+      },
+      "comparison_rows": [
+        {
+          "model_name": "Ridge Regression",
+          "architecture": "Linear",
+          "cv_mean_rmse": 15.68,
+          "cv_mean_nasa": 517785.8,
+          "rmse": 16.591867319647363,
+          "mae": 13.389582455460477,
+          "nasa_score": 418.4091233925708,
+          "train_time_sec": 0.79
+        },
+        {
+          "model_name": "HistGradientBoosting Regressor",
+          "architecture": "GBDT",
+          "cv_mean_rmse": 10.93,
+          "cv_mean_nasa": 7255.7,
+          "rmse": 13.017989530704218,
+          "mae": 9.398874493542195,
+          "nasa_score": 289.9882541384218,
+          "train_time_sec": 53.29
+        },
+        {
+          "model_name": "LightGBM Regressor (Default)",
+          "architecture": "LightGBM",
+          "cv_mean_rmse": 10.93,
+          "cv_mean_nasa": 7208.5,
+          "rmse": 12.905202937978384,
+          "mae": 9.56932961484555,
+          "nasa_score": 269.77271414712345,
+          "train_time_sec": 34.46
+        },
+        {
+          "model_name": "LightGBM Regressor (Untuned)",
+          "architecture": "LightGBM",
+          "cv_mean_rmse": 10.93,
+          "cv_mean_nasa": 7208.5,
+          "rmse": 12.905202937978384,
+          "mae": 9.56932961484555,
+          "nasa_score": 269.77271414712345,
+          "train_time_sec": 36.33
+        },
+        {
+          "model_name": "1D-CNN PyTorch (30-Cycle Window)",
+          "architecture": "CNN",
+          "window_size": 30,
+          "cv_mean_rmse": 24.81,
+          "cv_mean_nasa": 15677.9,
+          "rmse": 20.3,
+          "mae": 15.21,
+          "nasa_score": 1296.17,
+          "train_time_sec": 13.49
+        },
+        {
+          "model_name": "GRU PyTorch (30-Cycle Sequence)",
+          "architecture": "GRU",
+          "window_size": 30,
+          "cv_mean_rmse": 42.45,
+          "cv_mean_nasa": 46838.2,
+          "rmse": 16.94,
+          "mae": 12.89,
+          "nasa_score": 610.53,
+          "train_time_sec": 38.57
+        }
+      ],
+      "champion": {
+        "selected_algorithm": "hist_gb",
+        "model_name": "HistGradientBoosting Regressor",
+        "selection_rule": "min_cv_rmse_with_nasa_safety",
+        "rule_inputs": {
+          "max_acceptable_late_rate": 0.6,
+          "primary_metric": "cv_mean_rmse",
+          "secondary_metric": "nasa_score",
+          "evaluated_algorithms": [
+            "Ridge Regression",
+            "HistGradientBoosting Regressor",
+            "LightGBM Regressor (Default)",
+            "LightGBM Regressor (Untuned)",
+            "1D-CNN PyTorch (30-Cycle Window)",
+            "GRU PyTorch (30-Cycle Sequence)"
+          ]
+        }
+      }
+    },
+    "FD004": {
+      "bundle_sha256": "898396ba8120e6bcd43b53da499d4bcf32598e52d488d054ac4dce39a4350abe",
+      "algorithm": "hist_gb",
+      "protocol_id": "protocol_cmapss_nasa_phm08_cap125_seed42",
+      "n_engines": 248,
+      "metrics": {
+        "rmse": 25.785582398747604,
+        "mae": 17.630400427106498,
+        "nasa_score": 4413.727520928919,
+        "early_rate": 0.5403225806451613,
+        "late_rate": 0.4596774193548387,
+        "pr_auc": 0.97,
+        "interval_coverage": 0.629,
+        "mean_interval_width": 37.01
+      },
+      "cv": {
+        "protocol_id": "protocol_cmapss_nasa_phm08_cap125_seed42",
+        "k_folds": 5,
+        "mean_rmse": 12.57,
+        "std_rmse": 1.25,
+        "mean_nasa": 55349.0,
+        "std_nasa": 62051.9,
+        "mean_train_rmse": 6.7
+      },
+      "comparison_rows": [
+        {
+          "model_name": "Ridge Regression",
+          "architecture": "Linear",
+          "cv_mean_rmse": 15.94,
+          "cv_mean_nasa": 1109294878.9,
+          "rmse": 27.95831718333116,
+          "mae": 21.24510890042601,
+          "nasa_score": 5269.441157563618,
+          "train_time_sec": 9.09
+        },
+        {
+          "model_name": "HistGradientBoosting Regressor",
+          "architecture": "GBDT",
+          "cv_mean_rmse": 12.56,
+          "cv_mean_nasa": 55176.7,
+          "rmse": 25.353491888493302,
+          "mae": 17.3137121105307,
+          "nasa_score": 4040.257555997181,
+          "train_time_sec": 116.8
+        },
+        {
+          "model_name": "LightGBM Regressor (Default)",
+          "architecture": "LightGBM",
+          "cv_mean_rmse": 12.57,
+          "cv_mean_nasa": 55349.0,
+          "rmse": 25.39416067854348,
+          "mae": 17.40379461289914,
+          "nasa_score": 4066.2747022308313,
+          "train_time_sec": 87.22
+        },
+        {
+          "model_name": "LightGBM Regressor (Untuned)",
+          "architecture": "LightGBM",
+          "cv_mean_rmse": 12.57,
+          "cv_mean_nasa": 55349.0,
+          "rmse": 25.39416067854348,
+          "mae": 17.40379461289914,
+          "nasa_score": 4066.2747022308313,
+          "train_time_sec": 81.75
+        },
+        {
+          "model_name": "1D-CNN PyTorch (30-Cycle Window)",
+          "architecture": "CNN",
+          "window_size": 30,
+          "cv_mean_rmse": 25.47,
+          "cv_mean_nasa": 13981960.4,
+          "rmse": 23.82,
+          "mae": 17.23,
+          "nasa_score": 3157.6,
+          "train_time_sec": 27.95
+        },
+        {
+          "model_name": "GRU PyTorch (30-Cycle Sequence)",
+          "architecture": "GRU",
+          "window_size": 30,
+          "cv_mean_rmse": 36.01,
+          "cv_mean_nasa": 138685.2,
+          "rmse": 28.29,
+          "mae": 21.43,
+          "nasa_score": 5195.11,
+          "train_time_sec": 57.62
+        }
+      ],
+      "champion": {
+        "selected_algorithm": "hist_gb",
+        "model_name": "HistGradientBoosting Regressor",
+        "selection_rule": "min_cv_rmse_with_nasa_safety",
+        "rule_inputs": {
+          "max_acceptable_late_rate": 0.6,
+          "primary_metric": "cv_mean_rmse",
+          "secondary_metric": "nasa_score",
+          "evaluated_algorithms": [
+            "Ridge Regression",
+            "HistGradientBoosting Regressor",
+            "LightGBM Regressor (Default)",
+            "LightGBM Regressor (Untuned)",
+            "1D-CNN PyTorch (30-Cycle Window)",
+            "GRU PyTorch (30-Cycle Sequence)"
+          ]
+        }
+      }
+    }
+  }
+}

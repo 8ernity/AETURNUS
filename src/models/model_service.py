@@ -16,7 +16,14 @@ from sklearn.inspection import permutation_importance
 from sklearn.model_selection import GroupKFold
 import lightgbm as lgb
 
-from src.common.utils import get_root_dir, load_yaml, calculate_metrics
+from src.common.utils import get_root_dir, load_yaml
+from src.eval.protocol import (
+    calculate_metrics,
+    calculate_nasa_score,
+    sample_truncation,
+    cap_rul,
+    get_protocol_id,
+)
 
 SENSOR_REGEX = re.compile(r"^s\d+$")
 
@@ -436,8 +443,9 @@ class ModelService:
             "subset": self.subset,
             "k_folds": k,
             "algorithm": self.algorithm,
+            "protocol_id": get_protocol_id(),
             "folds": fold_results,
-            "mean_train_rmse": round(float(np.mean(train_rmses)), 2) if train_rmses else 11.40,
+            "mean_train_rmse": round(float(np.mean(train_rmses)), 2) if train_rmses else 0.0,
             "mean_rmse": round(float(np.mean(rmses)), 2),
             "std_rmse": round(float(np.std(rmses)), 2),
             "mean_nasa": round(float(np.mean(nasas)), 1),
@@ -458,8 +466,7 @@ class ModelService:
         - Split-conformal coverage, mean width, Wilson 95% CI
         - Multi-horizon classification (PR-AUC, precision, recall at tuned threshold)
         """
-        last_indices = test_df.groupby("unit")["cycle"].idxmax()
-        eval_rows = test_df.loc[last_indices].sort_values("unit").copy()
+        eval_rows = sample_truncation(test_df, mode="last")
 
         for c in self.feature_cols:
             if c not in eval_rows.columns:
@@ -594,12 +601,8 @@ class ModelService:
             act = round(float(y_true[i]), 1)
             pr = round(float(pred_p50[i]), 1)
             diff = round(pr - act, 1)
-            if diff < 0:
-                pen = round(float(np.exp(-diff / 13.0) - 1.0), 2)
-                cat = "early_safe"
-            else:
-                pen = round(float(np.exp(diff / 10.0) - 1.0), 2)
-                cat = "late_penalty"
+            pen = round(calculate_nasa_score([act], [pr]), 2)
+            cat = "early_safe" if diff < 0 else "late_penalty"
             
             unit_val = int(eval_rows.iloc[i]["unit"]) if "unit" in eval_rows.columns else (i + 1)
             parity_scatter.append({
@@ -615,19 +618,16 @@ class ModelService:
 
         # Generalization gap / Overfitting diagnostics (Dr-DKP criterion)
         cv_file = self.root_dir / "artifacts" / "reports" / f"cv_{self.subset}.json"
-        mean_cv_rmse = 13.06
-        mean_train_rmse = 11.40
+        mean_cv_rmse = 0.0
+        mean_train_rmse = 0.0
         if cv_file.exists():
             try:
                 with open(cv_file, "r", encoding="utf-8") as f:
                     cv_d = json.load(f)
-                mean_cv_rmse = float(cv_d.get("mean_rmse", 13.06))
-                mean_train_rmse = float(cv_d.get("mean_train_rmse", max(1.0, mean_cv_rmse - 1.66)))
+                mean_cv_rmse = float(cv_d.get("mean_rmse", 0.0))
+                mean_train_rmse = float(cv_d.get("mean_train_rmse", 0.0))
             except Exception:
                 pass
-        else:
-            mean_train_rmse = max(1.0, round(metrics["rmse"] - 1.90, 2))
-            mean_cv_rmse = max(1.0, round(metrics["rmse"] - 0.24, 2))
 
         train_test_gap = round(float(metrics["rmse"] - mean_train_rmse), 2)
         train_val_gap = round(float(mean_cv_rmse - mean_train_rmse), 2)
@@ -649,6 +649,7 @@ class ModelService:
         results = {
             "subset": self.subset,
             "algorithm": self.algorithm,
+            "protocol_id": get_protocol_id(),
             "condition": cond,
             "faults": faults,
             "metrics": metrics,

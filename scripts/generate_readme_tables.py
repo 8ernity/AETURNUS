@@ -114,6 +114,10 @@ def generate_model_comparison_table(reports_dir: Path) -> str:
 
 
 def update_readme():
+    from scripts.render_readme import update_or_check_readme
+    return update_or_check_readme(check_only=False)
+
+def _unused_old_update_readme():
     root_dir = get_root_dir()
     readme_path = root_dir / "README.md"
     reports_dir = root_dir / "artifacts" / "reports"

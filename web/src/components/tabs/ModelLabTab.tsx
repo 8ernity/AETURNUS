@@ -33,6 +33,7 @@ import {
 
 export const ModelLabTab: React.FC = () => {
   const [benchmarks, setBenchmarks] = useState<any[]>([]);
+  const [benchmarkMeta, setBenchmarkMeta] = useState<any>(null);
   const [selectedSub, setSelectedSub] = useState<string>("FD001");
   const [modelDetails, setModelDetails] = useState<any | null>(null);
   const [comparison, setComparison] = useState<any | null>(null);
@@ -44,6 +45,7 @@ export const ModelLabTab: React.FC = () => {
       .then((res) => res.json())
       .then((data) => {
         setBenchmarks(data.benchmarks || []);
+        setBenchmarkMeta(data);
       })
       .catch((err) => console.error("Error fetching benchmarks:", err));
   }, []);
@@ -101,6 +103,21 @@ export const ModelLabTab: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Stale Artifact Warning Banner */}
+      {(benchmarkMeta?.stale || modelDetails?.stale) && (
+        <div className="bg-amber-500/15 border border-amber-500/30 text-amber-300 p-4 rounded-2xl flex items-center gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+          <div className="text-xs space-y-0.5">
+            <div className="font-bold text-amber-200">Artifact Stale Warning</div>
+            <div>
+              Model bundle hash on disk does not match run manifest. Run <code className="bg-black/30 px-1 py-0.5 rounded font-mono">make evaluate</code> to synchronize.
+              {benchmarkMeta?.stale_reason && <span className="ml-1 text-amber-400/80">({benchmarkMeta.stale_reason})</span>}
+              {modelDetails?.stale_reason && <span className="ml-1 text-amber-400/80">({modelDetails.stale_reason})</span>}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Benchmark Summary Table */}
       <div className="glass-panel p-6 rounded-3xl space-y-4">
         <div className="flex items-center justify-between">
@@ -243,10 +260,10 @@ export const ModelLabTab: React.FC = () => {
               )}
             </div>
             <div className="text-xl font-black font-mono text-emerald-400">
-              {modelDetails?.interval_coverage ? `${(modelDetails.interval_coverage * 100).toFixed(1)}%` : "80.0%"}
+              {modelDetails?.interval_coverage ? `${(modelDetails.interval_coverage * 100).toFixed(1)}%` : "—"}
             </div>
             <div className="text-[10px] text-slate-500 font-mono">
-              Wilson 95% CI: {modelDetails?.coverage_wilson_ci_95 ? `[${(modelDetails.coverage_wilson_ci_95[0] * 100).toFixed(1)}%, ${(modelDetails.coverage_wilson_ci_95[1] * 100).toFixed(1)}%]` : "[74%, 86%]"}
+              Wilson 95% CI: {modelDetails?.coverage_wilson_ci_95 ? `[${(modelDetails.coverage_wilson_ci_95[0] * 100).toFixed(1)}%, ${(modelDetails.coverage_wilson_ci_95[1] * 100).toFixed(1)}%]` : "—"}
             </div>
           </div>
 
@@ -394,10 +411,10 @@ export const ModelLabTab: React.FC = () => {
               </span>
             </div>
             <div className="text-2xl font-black font-mono text-emerald-400">
-              {genGap?.train_test_gap !== undefined ? (genGap.train_test_gap >= 0 ? `+${Number(genGap.train_test_gap).toFixed(2)}` : `${Number(genGap.train_test_gap).toFixed(2)}`) : "+1.90"} <span className="text-xs font-sans text-slate-500 font-normal">cyc</span>
+              {genGap?.train_test_gap !== undefined ? (genGap.train_test_gap >= 0 ? `+${Number(genGap.train_test_gap).toFixed(2)}` : `${Number(genGap.train_test_gap).toFixed(2)}`) : "—"} <span className="text-xs font-sans text-slate-500 font-normal">cyc</span>
             </div>
             <div className="text-[10px] text-slate-500 font-mono">
-              Overfitting Ratio: {genGap?.gap_ratio_pct !== undefined ? `${genGap.gap_ratio_pct}%` : "14.3%"} (Safe &lt; 25%)
+              Overfitting Ratio: {genGap?.gap_ratio_pct !== undefined ? `${genGap.gap_ratio_pct}%` : "—"} (Safe &lt; 25%)
             </div>
           </div>
         </div>

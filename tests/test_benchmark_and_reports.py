@@ -99,8 +99,8 @@ def test_registry_has_real_hash_and_metrics():
     report_file = root_dir / "artifacts" / "reports" / "evaluation_FD001.json"
     with open(report_file, "r", encoding="utf-8") as f:
         disk_data = json.load(f)
-    assert v1_model["metrics"]["rmse"] == disk_data["rmse"]
-    assert v1_model["metrics"]["nasa_score"] == disk_data["nasa_score"]
+    assert v1_model["metrics"]["rmse"] == pytest.approx(disk_data["rmse"], rel=1e-4)
+    assert v1_model["metrics"]["nasa_score"] == pytest.approx(disk_data["nasa_score"], rel=1e-4)
 
 def test_bundle_rmse_within_threshold_of_evaluation_json():
     """

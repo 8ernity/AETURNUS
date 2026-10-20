@@ -1,0 +1,74 @@
+{
+  "entries": [
+    {
+      "file": "web/src/components/tabs/CostSimulatorTab.tsx",
+      "pattern": "$3.0M",
+      "justification": "Toast confirmation message reflecting Commercial Airline preset parameters ($3.0M AOG cost assumption)"
+    },
+    {
+      "file": "web/src/components/tabs/CostSimulatorTab.tsx",
+      "pattern": "$240k",
+      "justification": "Toast confirmation message reflecting Commercial Airline preset parameters ($240k Overhaul cost assumption)"
+    },
+    {
+      "file": "web/src/components/tabs/CostSimulatorTab.tsx",
+      "pattern": "$2.0M",
+      "justification": "Toast confirmation message reflecting Cargo Operator preset parameters ($2.0M AOG cost assumption)"
+    },
+    {
+      "file": "web/src/components/tabs/CostSimulatorTab.tsx",
+      "pattern": "$200k",
+      "justification": "Toast confirmation message reflecting Cargo Operator preset parameters ($200k Overhaul cost assumption)"
+    },
+    {
+      "file": "web/src/components/tabs/CostSimulatorTab.tsx",
+      "pattern": "$4.5M",
+      "justification": "Toast confirmation message reflecting Military / Heavy preset parameters ($4.5M AOG cost assumption)"
+    },
+    {
+      "file": "web/src/components/tabs/CostSimulatorTab.tsx",
+      "pattern": "$350k",
+      "justification": "Toast confirmation message reflecting Military / Heavy preset parameters ($350k Overhaul cost assumption)"
+    },
+    {
+      "file": "web/src/components/tabs/CostSimulatorTab.tsx",
+      "pattern": "$1.0M",
+      "justification": "Lower-bound axis scale label for interactive AOG failure cost slider"
+    },
+    {
+      "file": "web/src/components/tabs/CostSimulatorTab.tsx",
+      "pattern": "$5.0M",
+      "justification": "Upper-bound axis scale label for interactive AOG failure cost slider"
+    },
+    {
+      "file": "web/src/components/tabs/CostSimulatorTab.tsx",
+      "pattern": "$80k",
+      "justification": "Lower-bound axis scale label for interactive depot overhaul cost slider"
+    },
+    {
+      "file": "web/src/components/tabs/CostSimulatorTab.tsx",
+      "pattern": "$500k",
+      "justification": "Upper-bound axis scale label for interactive depot overhaul cost slider"
+    },
+    {
+      "file": "web/src/components/tabs/CostSimulatorTab.tsx",
+      "pattern": "$400",
+      "justification": "Lower-bound axis scale label for wasted cycle cost slider"
+    },
+    {
+      "file": "web/src/components/tabs/CostSimulatorTab.tsx",
+      "pattern": "$3,000",
+      "justification": "Upper-bound axis scale label for wasted cycle cost slider"
+    },
+    {
+      "file": "web/src/components/tabs/CostSimulatorTab.tsx",
+      "pattern": "$2.0k",
+      "justification": "Lower-bound axis scale label for line inspection cost slider"
+    },
+    {
+      "file": "web/src/components/tabs/CostSimulatorTab.tsx",
+      "pattern": "$30.0k",
+      "justification": "Upper-bound axis scale label for line inspection cost slider"
+    }
+  ]
+}

@@ -31,27 +31,75 @@ dataset:
     - s21
 
 cleaning:
-  ffill_limit: 3
-  hampel_window: 7
-  hampel_sigma: 3.0
-  outlier_z_clip: 5.0
-  flatline_window: 10
-  flatline_var_threshold: 1.0e-5
-  constant_sensor_var_threshold: 1.0e-4
+  ffill_limit:
+    value: 3
+    kind: policy
+    source: "Maximum consecutive sensor dropout cycles imputed with forward fill"
+  hampel_window:
+    value: 7
+    kind: policy
+    source: "Sliding window size for Hampel median filter spike detection"
+  hampel_sigma:
+    value: 3.0
+    kind: policy
+    source: "Standard deviation threshold for Hampel outlier detection"
+  outlier_z_clip:
+    value: 5.0
+    kind: policy
+    source: "Z-score clipping threshold to suppress extreme unphysical sensor spikes"
+  flatline_window:
+    value: 10
+    kind: policy
+    source: "Window length to detect stuck sensor flatline anomalies"
+  flatline_var_threshold:
+    value: 1.0e-5
+    kind: policy
+    source: "Minimum sensor variance required over flatline window"
+  constant_sensor_var_threshold:
+    value: 1.0e-4
+    kind: policy
+    source: "Variance threshold below which non-informative constant sensors are dropped"
 
 regime:
-  n_clusters_single_regime: 1
-  n_clusters_multi_regime: 6
+  n_clusters_single_regime:
+    value: 1
+    kind: policy
+    source: "Sea-level single flight condition baseline (FD001 and FD003)"
+  n_clusters_multi_regime:
+    value: 6
+    kind: policy
+    source: "Six distinct flight envelope operating regimes (FD002 and FD004)"
   multi_regime_subsets: ["FD002", "FD004"]
 
 features:
   rolling_windows: [5, 10, 30]
-  healthy_baseline_cycles: 20
-  smoothing_alpha: 0.2
-  rul_cap: 125
-  sequence_window_len: 30
+  healthy_baseline_cycles:
+    value: 20
+    kind: policy
+    source: "Engine cycles used to calculate pristine reference baseline statistics"
+  smoothing_alpha:
+    value: 0.2
+    kind: policy
+    source: "Exponentially weighted moving average (EWMA) smoothing parameter"
+  rul_cap:
+    value: 125
+    kind: policy
+    source: "Piecewise linear RUL target ceiling to suppress early steady-state noise"
+  sequence_window_len:
+    value: 30
+    kind: policy
+    source: "Sequence history window length for deep neural baselines"
 
 splits:
-  train_ratio: 0.80
-  val_ratio: 0.20
-  random_seed: 42
+  train_ratio:
+    value: 0.80
+    kind: policy
+    source: "Engine unit split ratio allocated to training set"
+  val_ratio:
+    value: 0.20
+    kind: policy
+    source: "Engine unit split ratio allocated to validation set"
+  random_seed:
+    value: 42
+    kind: policy
+    source: "Deterministic split random seed"

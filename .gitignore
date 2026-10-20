@@ -45,14 +45,25 @@ mlflow.db
 smoke_test.db
 test_*.db
 
-# Generated data, duplicate checkpoints, and uploads
+# Generated data, reports, duplicate checkpoints, and uploads
 data/processed/
 data/uploads/
 uploads/
 **/uploads/
 mlruns/
-artifacts/models/*_v*.joblib
+artifacts/reports/*
 artifacts/tmp/
+artifacts/*.db
+artifacts/models/*_v*.joblib
+artifacts/models/*_test*.joblib
+artifacts/models/*_temp*.joblib
+artifacts/models/*_legacy.joblib
+artifacts/models/*_new.joblib
+!artifacts/run_manifest.json
+!artifacts/models/model_bundle_FD001.joblib
+!artifacts/models/model_bundle_FD002.joblib
+!artifacts/models/model_bundle_FD003.joblib
+!artifacts/models/model_bundle_FD004.joblib
 
 # Archives & Zips
 *.zip

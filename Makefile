@@ -15,6 +15,10 @@ train:
 
 evaluate:
 	$(PYTHON) -m scripts.evaluate_all_models
+	$(PYTHON) scripts/render_readme.py
+
+check-readme:
+	$(PYTHON) scripts/render_readme.py --check
 
 demo:
 	$(PYTHON) run_app.py

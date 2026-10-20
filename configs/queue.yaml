@@ -3,14 +3,36 @@
 # Weights are starting heuristic defaults for decision support, not learned physical parameters.
 
 weights:
-  w_rul: 0.40       # Weight on urgency from conservative RUL (p10 <= 60 cycles)
-  w_fail: 0.30      # Weight on calibrated P(fail <= 30 cycles)
-  w_anom: 0.15      # Weight on Isolation Forest anomaly score
-  w_trend: 0.15     # Weight on rapid RUL drop trend
+  w_rul:
+    value: 0.40
+    kind: policy
+    source: "Priority heuristic weighting conservative remaining useful life (p10 <= 60 cycles)"
+  w_fail:
+    value: 0.30
+    kind: policy
+    source: "Priority heuristic weighting calibrated probability of uncommanded failure within 30 cycles"
+  w_anom:
+    value: 0.15
+    kind: policy
+    source: "Priority heuristic weighting multivariate Isolation Forest anomaly score"
+  w_trend:
+    value: 0.15
+    kind: policy
+    source: "Priority heuristic weighting rapid degradation rate in rolling RUL predictions"
 
 normalization:
-  max_urgency_rul: 60.0    # Normalization ceiling for conservative RUL
-  max_rul_drop: 30.0       # Normalization ceiling for RUL drop
+  max_urgency_rul:
+    value: 60.0
+    kind: policy
+    source: "Maximum cycle threshold window defining urgent dispatch pull priority"
+  max_rul_drop:
+    value: 30.0
+    kind: policy
+    source: "Maximum expected RUL drop across 10-cycle operational window"
 
-daily_service_capacity: 5  # Default maximum engines scheduled per maintenance shift
+daily_service_capacity:
+  value: 5
+  kind: policy
+  source: "Hangar turn-around limit on simultaneous turbofan depot maintenance bays"
+
 disclaimer: "Configured starting weights for decision support, not empirical physical claims."

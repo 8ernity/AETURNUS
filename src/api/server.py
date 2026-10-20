@@ -14,6 +14,7 @@ import concurrent.futures
 import gc
 import ctypes
 import json
+import hashlib
 import shutil
 import threading
 import time
@@ -40,11 +41,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from src.common.utils import get_root_dir, load_yaml
-from src.models.model_service import ModelService
+from src.models.model_service import ModelService, CONDITIONS_MAP
 from src.agent.triage_agent import TriageAgent
 from src.agent.self_healing_engine import SelfHealingEngine
 from src.mlops.drift_and_retrain import MLOpsManager
 from src.features.streaming import StreamingEnginePipeline
+from src.ingest.loader import CMAPSSLoader
 
 app = FastAPI(
     title="AETURNUS API",
@@ -955,100 +957,161 @@ def simulate_what_if(req: WhatIfRequest, subset: str = Query(default="FD001")):
 # ----------------- Model Lab & Benchmarks -----------------
 @app.get("/api/v1/models/benchmark")
 def get_model_benchmark():
-    summary_file = ROOT_DIR / "artifacts" / "reports" / "benchmark_summary.json"
-    if summary_file.exists():
-        with open(summary_file, "r", encoding="utf-8") as f:
-            return json.load(f)
-    
-    # Fallback to computing on the fly if file missing
-    from scripts.evaluate_all_models import main as run_eval
-    run_eval()
-    if summary_file.exists():
-        with open(summary_file, "r", encoding="utf-8") as f:
-            return json.load(f)
-    raise HTTPException(status_code=404, detail="Benchmark summary report not found")
+    manifest_file = ROOT_DIR / "artifacts" / "run_manifest.json"
+    if not manifest_file.exists():
+        raise HTTPException(status_code=404, detail="Run manifest (run_manifest.json) not found on disk. Run make evaluate.")
+
+    with open(manifest_file, "r", encoding="utf-8") as f:
+        manifest = json.load(f)
+
+    is_stale = False
+    stale_reasons = []
+    benchmarks = []
+
+    for sub in ["FD001", "FD002", "FD003", "FD004"]:
+        sub_info = manifest.get("subsets", {}).get(sub)
+        if not sub_info:
+            continue
+        bundle_file = ROOT_DIR / "artifacts" / "models" / f"model_bundle_{sub}.joblib"
+        if not bundle_file.exists():
+            is_stale = True
+            stale_reasons.append(f"model_bundle_{sub}.joblib missing")
+        else:
+            actual_sha = hashlib.sha256(bundle_file.read_bytes()).hexdigest()
+            if actual_sha != sub_info.get("bundle_sha256"):
+                is_stale = True
+                stale_reasons.append(f"model_bundle_{sub}.joblib hash mismatch")
+
+        m = sub_info.get("metrics", {})
+        target_rmse = 14.0 if sub == "FD001" else (22.0 if sub == "FD002" else (15.0 if sub == "FD003" else 22.0))
+        status = "Target Met" if (m.get("rmse") or 999.0) <= target_rmse else "Target Missed"
+        cond, faults = CONDITIONS_MAP.get(sub, ("Single (Sea Level)", "1 (HPC Degradation)"))
+        benchmarks.append({
+            "subset": sub,
+            "condition": cond,
+            "faults": faults,
+            "algorithm": sub_info.get("algorithm", "lightgbm"),
+            "protocol_id": sub_info.get("protocol_id", ""),
+            "n_engines": sub_info.get("n_engines", 100),
+            "target_rmse": target_rmse,
+            "status": status,
+            "rmse": m.get("rmse"),
+            "mae": m.get("mae"),
+            "nasa_score": m.get("nasa_score"),
+            "early_rate": m.get("early_rate"),
+            "late_rate": m.get("late_rate"),
+            "pr_auc": m.get("pr_auc"),
+            "interval_coverage": m.get("interval_coverage"),
+            "mean_interval_width": m.get("mean_interval_width"),
+            "cv": sub_info.get("cv", {}),
+            "deep_comparison": sub_info.get("comparison_rows", []),
+            "champion": sub_info.get("champion", {})
+        })
+
+    return {
+        "run_id": manifest.get("run_id"),
+        "git_sha": manifest.get("git_sha"),
+        "config_hash": manifest.get("config_hash"),
+        "stale": is_stale,
+        "stale_reason": "; ".join(stale_reasons) if stale_reasons else None,
+        "benchmarks": benchmarks
+    }
 
 @app.get("/api/v1/models/{subset}/details")
 def get_model_details(subset: str):
     validate_subset(subset)
-    eval_file = ROOT_DIR / "artifacts" / "reports" / f"evaluation_{subset}.json"
-    data = {}
-    if eval_file.exists():
-        with open(eval_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
+    manifest_file = ROOT_DIR / "artifacts" / "run_manifest.json"
+    if not manifest_file.exists():
+        raise HTTPException(status_code=404, detail=f"Run manifest not found for {subset}")
+
+    with open(manifest_file, "r", encoding="utf-8") as f:
+        manifest = json.load(f)
+
+    sub_info = manifest.get("subsets", {}).get(subset)
+    if not sub_info:
+        raise HTTPException(status_code=404, detail=f"No manifest entry for subset {subset}")
+
+    bundle_file = ROOT_DIR / "artifacts" / "models" / f"model_bundle_{subset}.joblib"
+    is_stale = False
+    stale_reason = None
+    if not bundle_file.exists():
+        is_stale = True
+        stale_reason = f"model_bundle_{subset}.joblib missing"
     else:
-        test_df = get_test_df(subset)
-        loader = CMAPSSLoader(subset=subset)
-        _, _, rul_truth = loader.load_raw_data()
-        ms = get_model_service(subset)
-        data = ms.evaluate_test(test_df, rul_truth)
+        actual_sha = hashlib.sha256(bundle_file.read_bytes()).hexdigest()
+        if actual_sha != sub_info.get("bundle_sha256"):
+            is_stale = True
+            stale_reason = f"model_bundle_{subset}.joblib hash mismatch"
 
-    cv_file = ROOT_DIR / "artifacts" / "reports" / f"cv_{subset}.json"
-    cv_data = None
-    if cv_file.exists():
-        with open(cv_file, "r", encoding="utf-8") as f:
-            cv_data = json.load(f)
+    # Compute parity scatter live from bundle+data
+    test_path = ROOT_DIR / "data" / "processed" / subset / "test.parquet"
+    if not test_path.exists():
+        raise HTTPException(status_code=404, detail=f"Processed test data for {subset} not found")
 
-    tuning_file = ROOT_DIR / "artifacts" / "reports" / f"tuning_{subset}.json"
-    tuning_data = None
-    if tuning_file.exists():
-        with open(tuning_file, "r", encoding="utf-8") as f:
-            tuning_data = json.load(f)
+    test_df = pd.read_parquet(test_path)
+    loader = CMAPSSLoader(subset=subset)
+    _, _, rul_truth = loader.load_raw_data()
+    ms = get_model_service(subset)
+    eval_res = ms.evaluate_test(test_df, rul_truth, save_report=False)
 
-    parity_scatter = data.get("parity_scatter", [])
-    if not parity_scatter:
-        try:
-            test_df = get_test_df(subset)
-            loader = CMAPSSLoader(subset=subset)
-            _, _, rul_truth = loader.load_raw_data()
-            ms = get_model_service(subset)
-            eval_res = ms.evaluate_test(test_df, rul_truth, save_report=True)
-            parity_scatter = eval_res.get("parity_scatter", [])
-        except Exception:
-            pass
+    cv_data = sub_info.get("cv", {})
+    tr_mean = float(cv_data.get("mean_train_rmse", 0.0))
+    cv_mean = float(cv_data.get("mean_rmse", 0.0))
+    te_mean = float(sub_info["metrics"]["rmse"])
+    tt_gap = round(te_mean - tr_mean, 2)
 
-    gen_gap = data.get("generalization_gap")
-    if not gen_gap:
-        cv_mean = float(cv_data.get("mean_rmse", 13.06)) if cv_data else 13.06
-        tr_mean = float(cv_data.get("mean_train_rmse", max(1.0, cv_mean - 1.66))) if cv_data else 11.40
-        te_mean = float(data.get("rmse", 13.30))
-        tt_gap = round(te_mean - tr_mean, 2)
-        gen_gap = {
-            "train_rmse": round(tr_mean, 2),
-            "val_rmse": round(cv_mean, 2),
-            "test_rmse": round(te_mean, 2),
-            "train_test_gap": tt_gap,
-            "train_val_gap": round(cv_mean - tr_mean, 2),
-            "val_test_gap": round(te_mean - cv_mean, 2),
-            "gap_ratio_pct": round((tt_gap / te_mean * 100.0), 1) if te_mean > 0 else 14.3,
-            "overfitting_status": "Low Overfitting" if tt_gap <= 3.5 else "Moderate Gap",
-            "memorization_risk": "Low (<25%)"
-        }
+    gen_gap = {
+        "train_rmse": round(tr_mean, 2),
+        "val_rmse": round(cv_mean, 2),
+        "test_rmse": round(te_mean, 2),
+        "train_test_gap": tt_gap,
+        "train_val_gap": round(cv_mean - tr_mean, 2),
+        "val_test_gap": round(te_mean - cv_mean, 2),
+        "gap_ratio_pct": round((tt_gap / te_mean * 100.0), 1) if te_mean > 0 else 0.0,
+        "overfitting_status": "Low Overfitting" if tt_gap <= 3.5 else "Moderate Gap",
+        "memorization_risk": "Low (<25%)"
+    }
 
     return {
         "subset": subset,
-        "bucket_errors": data.get("bucket_errors", []),
-        "feature_importance": data.get("feature_importance", []),
-        "parity_scatter": parity_scatter,
-        "nasa_score": data.get("nasa_score", 0.0),
-        "early_rate": data.get("early_rate", 0.51),
-        "late_rate": data.get("late_rate", 0.49),
-        "nasa_phm08": data.get("nasa_phm08", {}),
-        "status": data.get("status", "Evaluated"),
-        "interval_coverage": data.get("interval_coverage", 0.8),
-        "mean_interval_width": data.get("mean_interval_width", 0.0),
-        "coverage_wilson_ci_95": data.get("coverage_wilson_ci_95", []),
-        "coverage_ci_excludes_80": data.get("coverage_ci_excludes_80", False),
-        "test_rmse_bootstrap_ci_95": data.get("test_rmse_bootstrap_ci_95", []),
-        "multi_horizon_metrics": data.get("multi_horizon_metrics", {}),
+        "stale": is_stale,
+        "stale_reason": stale_reason,
+        "algorithm": sub_info.get("algorithm"),
+        "protocol_id": sub_info.get("protocol_id"),
+        "bucket_errors": eval_res.get("bucket_errors", []),
+        "feature_importance": eval_res.get("feature_importance", []),
+        "parity_scatter": eval_res.get("parity_scatter", []),
+        "nasa_score": sub_info["metrics"]["nasa_score"],
+        "early_rate": sub_info["metrics"]["early_rate"],
+        "late_rate": sub_info["metrics"]["late_rate"],
+        "nasa_phm08": eval_res.get("nasa_phm08", {}),
+        "status": eval_res.get("status", "Evaluated"),
+        "interval_coverage": sub_info["metrics"]["interval_coverage"],
+        "mean_interval_width": sub_info["metrics"]["mean_interval_width"],
+        "coverage_wilson_ci_95": eval_res.get("coverage_wilson_ci_95", []),
+        "coverage_ci_excludes_80": eval_res.get("coverage_ci_excludes_80", False),
+        "test_rmse_bootstrap_ci_95": eval_res.get("test_rmse_bootstrap_ci_95", []),
+        "multi_horizon_metrics": eval_res.get("multi_horizon_metrics", {}),
         "cv_metrics": cv_data,
-        "tuning": tuning_data,
+        "comparison_rows": sub_info.get("comparison_rows", []),
+        "champion": sub_info.get("champion", {}),
         "generalization_gap": gen_gap
     }
 
 @app.get("/api/v1/models/{subset}/comparison")
 def get_model_comparison(subset: str):
     validate_subset(subset)
+    manifest_file = ROOT_DIR / "artifacts" / "run_manifest.json"
+    if manifest_file.exists():
+        with open(manifest_file, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+        sub_info = manifest.get("subsets", {}).get(subset)
+        if sub_info and "comparison_rows" in sub_info:
+            return {
+                "subset": subset,
+                "champion": sub_info.get("champion", {}).get("selected_algorithm", "lightgbm"),
+                "models": sub_info["comparison_rows"]
+            }
     comp_file = ROOT_DIR / "artifacts" / "reports" / f"model_comparison_{subset}.json"
     if comp_file.exists():
         with open(comp_file, "r", encoding="utf-8") as f:
@@ -1541,24 +1604,52 @@ def get_mlops_registry(subset: str = Query(default="FD001")):
     return mlops_managers[subset].get_registry()
 
 @app.get("/api/v1/monitoring/drift")
-def get_monitoring_drift(subset: str = Query(default="FD001")):
+def get_monitoring_drift(subset: str = Query(default="FD001"), n_cycles: int = Query(default=100)):
+    validate_subset(subset)
+    from src.mlops.drift_and_retrain import get_latest_drift_run
+    latest = get_latest_drift_run(subset)
+    if latest is not None:
+        return latest
+
+    # Compute on demand: reference = train sample matched by engine age, current = last N scored cycles
+    if subset not in mlops_managers:
+        mlops_managers[subset] = MLOpsManager(subset)
+    mgr = mlops_managers[subset]
+
+    train_df = get_dataframe("train", subset)
+    test_df = get_dataframe("test", subset)
+    curr_df = test_df.tail(n_cycles * 10) if len(test_df) > n_cycles * 10 else test_df
+    c_min = int(curr_df["cycle"].min())
+    c_max = int(curr_df["cycle"].max())
+    matched_ref = train_df[(train_df["cycle"] >= c_min) & (train_df["cycle"] <= c_max)]
+    if len(matched_ref) < 30:
+        matched_ref = train_df
+    ref_sample = matched_ref.sample(min(1000, len(matched_ref)), random_state=42)
+    curr_sample = curr_df.sample(min(500, len(curr_df)), random_state=42)
+
+    # GET endpoints never write (persist=False)
+    return mgr.calculate_drift_report(ref_sample, curr_sample, persist=False)
+
+@app.post("/api/v1/monitoring/drift/compute")
+def compute_monitoring_drift(subset: str = Query(default="FD001"), n_cycles: int = Query(default=100)):
     validate_subset(subset)
     if subset not in mlops_managers:
         mlops_managers[subset] = MLOpsManager(subset)
     mgr = mlops_managers[subset]
-    
-    if mgr.drift_history_file.exists():
-        try:
-            with open(mgr.drift_history_file, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-            
+
     train_df = get_dataframe("train", subset)
     test_df = get_dataframe("test", subset)
-    ref_sample = train_df.sample(min(1000, len(train_df)), random_state=42)
-    curr_sample = test_df.sample(min(500, len(test_df)), random_state=42)
-    return mgr.calculate_drift_report(ref_sample, curr_sample)
+    curr_df = test_df.tail(n_cycles * 10) if len(test_df) > n_cycles * 10 else test_df
+    c_min = int(curr_df["cycle"].min())
+    c_max = int(curr_df["cycle"].max())
+    matched_ref = train_df[(train_df["cycle"] >= c_min) & (train_df["cycle"] <= c_max)]
+    if len(matched_ref) < 30:
+        matched_ref = train_df
+    ref_sample = matched_ref.sample(min(1000, len(matched_ref)), random_state=42)
+    curr_sample = curr_df.sample(min(500, len(curr_df)), random_state=42)
+
+    # Persists each computation in SQLite table drift_runs
+    return mgr.calculate_drift_report(ref_sample, curr_sample, persist=True)
 
 # ----------------- Observability & Metrics -----------------
 from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST

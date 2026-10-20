@@ -2,6 +2,7 @@ import os
 import json
 import time
 import hashlib
+import sqlite3
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -9,6 +10,69 @@ from typing import Dict, Any, List, Tuple, Optional, Callable
 import mlflow
 from src.common.utils import get_root_dir, load_yaml, calculate_psi, calculate_ks_drift, calculate_metrics
 from src.models.model_service import ModelService
+
+def get_drift_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
+    if db_path is None:
+        db_path = get_root_dir() / "artifacts" / "drift_monitoring.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS drift_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            subset TEXT NOT NULL,
+            timestamp REAL NOT NULL,
+            window_start INTEGER,
+            window_end INTEGER,
+            n_rows INTEGER,
+            drift_share REAL,
+            monitored_features_count INTEGER,
+            drift_alert INTEGER,
+            sensor_metrics TEXT,
+            report_json TEXT
+        )
+    """)
+    conn.commit()
+    return conn
+
+def record_drift_run(report: Dict[str, Any], window_start: int, window_end: int, n_rows: int, db_path: Optional[Path] = None):
+    conn = get_drift_db(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO drift_runs (subset, timestamp, window_start, window_end, n_rows, drift_share, monitored_features_count, drift_alert, sensor_metrics, report_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                report.get("subset", "FD001"),
+                time.time(),
+                int(window_start),
+                int(window_end),
+                int(n_rows),
+                float(report.get("share_drifting_features", 0.0)),
+                int(report.get("monitored_features_count", 0)),
+                1 if report.get("drift_alert") else 0,
+                json.dumps(report.get("sensor_metrics", {})),
+                json.dumps(report)
+            )
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+def get_latest_drift_run(subset: str, db_path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+    conn = get_drift_db(db_path)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT report_json FROM drift_runs WHERE subset = ? ORDER BY id DESC LIMIT 1",
+            (subset,)
+        )
+        row = cur.fetchone()
+        if row and row[0]:
+            return json.loads(row[0])
+        return None
+    finally:
+        conn.close()
 
 def compute_df_sha256(df: pd.DataFrame) -> str:
     """Computes a deterministic SHA-256 hash of a dataframe's contents."""
@@ -27,7 +91,7 @@ class MLOpsManager:
         self.artifacts_dir = self.root_dir / "artifacts"
         
         self.registry_file = self.artifacts_dir / "reports" / "model_registry.json"
-        self.drift_history_file = self.artifacts_dir / "reports" / "drift_history.json"
+        self.drift_db_path = self.artifacts_dir / "drift_monitoring.db"
         
         self._setup_mlflow()
         self._init_registry()
@@ -434,11 +498,13 @@ class MLOpsManager:
             "model_path": target.get("model_path")
         }
 
-    def calculate_drift_report(self, ref_df: pd.DataFrame, curr_df: pd.DataFrame) -> Dict[str, Any]:
+    def calculate_drift_report(self, ref_df: pd.DataFrame, curr_df: pd.DataFrame, persist: bool = False) -> Dict[str, Any]:
         """
         Calculates PSI and KS drift comparing matched-age windows and residual features.
         Default un-shifted state must not alarm.
         """
+        c_min = 0
+        c_max = 0
         # 1. Match age windows if cycle column is present in both
         if "cycle" in ref_df.columns and "cycle" in curr_df.columns:
             c_min = int(curr_df["cycle"].min())
@@ -446,6 +512,9 @@ class MLOpsManager:
             matched_ref = ref_df[(ref_df["cycle"] >= c_min) & (ref_df["cycle"] <= c_max)]
             if len(matched_ref) >= 30:
                 ref_df = matched_ref
+        elif "cycle" in curr_df.columns:
+            c_min = int(curr_df["cycle"].min())
+            c_max = int(curr_df["cycle"].max())
 
         # 2. Prefer residual features (_dev_base) or normalized features
         sensor_cols = [c for c in ref_df.columns if c.endswith("_dev_base")]
@@ -492,11 +561,14 @@ class MLOpsManager:
             "drifting_features_count": drifting_count,
             "share_drifting_features": round(share_drifting, 3),
             "drift_alert": drift_alert,
-            "sensor_metrics": sensor_metrics
+            "sensor_metrics": sensor_metrics,
+            "window_start": c_min,
+            "window_end": c_max,
+            "n_rows": len(curr_df)
         }
 
-        with open(self.drift_history_file, "w", encoding="utf-8") as f:
-            json.dump(report, f, indent=2)
+        if persist:
+            record_drift_run(report, c_min, c_max, len(curr_df), db_path=self.drift_db_path)
 
         return report
 

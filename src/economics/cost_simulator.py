@@ -1,21 +1,22 @@
-import json
+import hashlib
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import numpy as np
 import pandas as pd
 
 from src.common.utils import get_root_dir
+from src.eval.protocol import sample_truncation, calculate_metrics
 from src.ingest.loader import CMAPSSLoader
 from src.models.model_service import ModelService
 
 DEFAULT_COST_CONFIG = {
-    "cost_catastrophic": 2500000.0,   # Unplanned in-flight shutdown / catastrophic failure / AOG emergency ($)
-    "cost_overhaul": 220000.0,        # Scheduled depot preventive overhaul ($)
-    "cost_wasted_cycle": 1200.0,      # Value of unused remaining useful life depreciation ($/cycle)
-    "cost_inspection": 12500.0,       # Minor borescopic / tarmac line triage ($)
-    "cost_aog_day": 45000.0,          # Daily downtime delay penalty ($/day)
-    "default_threshold": 30,          # Conservative RUL threshold (cycles) to trigger maintenance pull
-    "fixed_interval": 140             # Flight cycles for static hour-based maintenance policy
+    "cost_catastrophic": {"value": 2500000.0, "kind": "assumption", "source": "Aviation unplanned in-flight shutdown AOG emergency cost estimate ($)"},
+    "cost_overhaul": {"value": 220000.0, "kind": "assumption", "source": "Depot scheduled preventive overhaul cost ($)"},
+    "cost_wasted_cycle": {"value": 1200.0, "kind": "assumption", "source": "Unused RUL component depreciation ($/cycle)"},
+    "cost_inspection": {"value": 12500.0, "kind": "assumption", "source": "Tarmac borescope line inspection triage ($)"},
+    "cost_aog_day": {"value": 45000.0, "kind": "assumption", "source": "Daily flight cancellation penalty ($/day)"},
+    "default_threshold": {"value": 30.0, "kind": "policy", "source": "Fleet flight turn-around scheduling window"},
+    "fixed_interval": {"value": 140.0, "kind": "policy", "source": "Fixed cycle OEM depot overhaul interval"}
 }
 
 class FleetCostSimulator:
@@ -28,16 +29,62 @@ class FleetCostSimulator:
     def __init__(self, subset: str = "FD001", cost_params: Optional[Dict[str, float]] = None):
         self.subset = subset
         self.root_dir = get_root_dir()
-        self.cost_cfg = {**DEFAULT_COST_CONFIG, **(cost_params or {})}
+        
+        # Normalize cost_cfg
+        flat_cfg = {}
+        provenance_cfg = {}
+        for k, v in DEFAULT_COST_CONFIG.items():
+            if isinstance(v, dict) and "value" in v:
+                flat_cfg[k] = float(v["value"])
+                provenance_cfg[k] = v
+            else:
+                flat_cfg[k] = float(v)
+                provenance_cfg[k] = {"value": float(v), "kind": "assumption", "source": "Fleet economic parameter"}
+                
+        if cost_params:
+            for k, v in cost_params.items():
+                if isinstance(v, dict) and "value" in v:
+                    flat_cfg[k] = float(v["value"])
+                    provenance_cfg[k] = v
+                elif v is not None:
+                    flat_cfg[k] = float(v)
+                    provenance_cfg[k] = {"value": float(v), "kind": "assumption", "source": "Custom user scenario parameter"}
+                    
+        self.cost_cfg = flat_cfg
+        self.provenance_cfg = provenance_cfg
+        self.is_stale, self.stale_reason = self._check_stale()
         self.eval_data = self._load_evaluation_data()
+
+    def _check_stale(self) -> (bool, str):
+        bundle_file = self.root_dir / "artifacts" / "models" / f"model_bundle_{self.subset}.joblib"
+        manifest_file = self.root_dir / "artifacts" / "run_manifest.json"
+        if not bundle_file.exists():
+            return True, f"Bundle model_bundle_{self.subset}.joblib not found on disk"
+        if not manifest_file.exists():
+            return True, "artifacts/run_manifest.json missing"
+            
+        try:
+            with open(manifest_file, "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+            expected_sha = manifest.get("subsets", {}).get(self.subset, {}).get("bundle_sha256")
+            actual_sha = hashlib.sha256(bundle_file.read_bytes()).hexdigest()
+            if expected_sha and expected_sha != actual_sha:
+                return True, f"Bundle SHA256 mismatch (manifest={expected_sha[:8]}..., disk={actual_sha[:8]}...)"
+        except Exception as e:
+            return True, f"Error validating manifest: {e}"
+        return False, ""
 
     def _load_evaluation_data(self) -> List[Dict[str, Any]]:
         """
         Loads authentic engine-level test predictions and ground truth.
-        Uses cached evaluation report if available, else evaluates on test parquet.
+        Uses cached evaluation report if available, else evaluates live from bundle+data.
         """
+        test_path = self.root_dir / "data" / "processed" / self.subset / "test.parquet"
+        if not test_path.exists():
+            return []
+
         eval_f = self.root_dir / "artifacts" / "reports" / f"evaluation_{self.subset}.json"
-        if eval_f.exists():
+        if eval_f.exists() and not self.is_stale:
             try:
                 with open(eval_f, "r", encoding="utf-8") as f:
                     d = json.load(f)
@@ -47,10 +94,6 @@ class FleetCostSimulator:
             except Exception:
                 pass
 
-        test_path = self.root_dir / "data" / "processed" / self.subset / "test.parquet"
-        if not test_path.exists():
-            return []
-
         test_df = pd.read_parquet(test_path)
         loader = CMAPSSLoader(subset=self.subset)
         _, _, rul_truth = loader.load_raw_data()
@@ -58,21 +101,25 @@ class FleetCostSimulator:
         res = ms.evaluate_test(test_df, rul_truth, save_report=False)
         return res.get("parity_scatter", [])
 
+
     def _load_holdout_lifespans(self) -> List[int]:
         """
-        Loads real run-to-failure lifetimes from persistent holdout engines.
-        Each holdout engine ran continuously until functional failure (max cycle).
+        Loads real run-to-failure lifetimes from persistent holdout engines or train engines.
+        Each engine ran continuously until functional failure (max cycle).
         """
         from src.common.splits import get_persistent_split
         try:
-            split = get_persistent_split(self.subset)
-            holdout_units = set(split.get("lifecycle_holdout_units", []))
             train_path = self.root_dir / "data" / "processed" / self.subset / "train.parquet"
             if not train_path.exists():
                 return []
             df = pd.read_parquet(train_path, columns=["unit", "cycle"])
-            hdf = df[df["unit"].isin(holdout_units)]
-            lifespans = hdf.groupby("unit")["cycle"].max().tolist()
+            split = get_persistent_split(self.subset)
+            holdout_units = set(split.get("lifecycle_holdout_units", []))
+            if holdout_units:
+                hdf = df[df["unit"].isin(holdout_units)]
+                if not hdf.empty:
+                    df = hdf
+            lifespans = df.groupby("unit")["cycle"].max().tolist()
             return [int(x) for x in lifespans] if lifespans else []
         except Exception:
             return []
@@ -100,7 +147,7 @@ class FleetCostSimulator:
 
         n_engines = len(self.eval_data)
         if n_engines == 0:
-            return {"error": "No evaluation data found", "subset": self.subset}
+            return {"error": "No evaluation data found", "subset": self.subset, "stale": self.is_stale, "stale_reason": self.stale_reason}
 
         # -------------------------------------------------------------
         # Policy 1: Reactive Run-to-Failure (No Predictive AI)
@@ -113,9 +160,6 @@ class FleetCostSimulator:
         # Simulated from real run-to-failure holdout engines using cfg fixed_interval
         # -------------------------------------------------------------
         holdout_lifespans = self._load_holdout_lifespans()
-        if not holdout_lifespans:
-            # Fallback based on test actuals if processed train holdout unavailable
-            holdout_lifespans = [int(r.get("actual", 50.0)) + 120 for r in self.eval_data]
 
         h_cat_count = 0
         h_sch_count = 0
@@ -226,10 +270,13 @@ class FleetCostSimulator:
 
         return {
             "subset": self.subset,
+            "stale": self.is_stale,
+            "stale_reason": self.stale_reason,
             "fleet_size": n_engines,
             "threshold": tau,
             "use_conservative": use_conservative,
             "cost_parameters": cfg,
+            "cost_provenance": self.provenance_cfg,
             "summary": {
                 "breakeven_cost_ratio": breakeven_cost_ratio,
                 "current_cost_ratio": current_cost_ratio,

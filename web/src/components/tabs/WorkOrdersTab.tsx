@@ -564,7 +564,10 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Critical RUL Threshold: <span className="text-white font-mono font-bold">{simCrit} cycles</span></label>
+              <label className="text-xs text-slate-400 block mb-1 flex items-center justify-between">
+                <span>Critical RUL Threshold: <span className="text-white font-mono font-bold">{simCrit} cycles</span></span>
+                <span className="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 font-semibold">POLICY</span>
+              </label>
               <input 
                 type="range" 
                 min="5" 
@@ -575,7 +578,10 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
               />
             </div>
             <div>
-              <label className="text-xs text-slate-400 block mb-1">High RUL Threshold: <span className="text-white font-mono font-bold">{simHigh} cycles</span></label>
+              <label className="text-xs text-slate-400 block mb-1 flex items-center justify-between">
+                <span>High RUL Threshold: <span className="text-white font-mono font-bold">{simHigh} cycles</span></span>
+                <span className="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 font-semibold">POLICY</span>
+              </label>
               <input 
                 type="range" 
                 min="20" 

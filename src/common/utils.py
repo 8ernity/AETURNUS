@@ -10,50 +10,27 @@ ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 def get_root_dir() -> Path:
     return ROOT_DIR
 
-def load_yaml(rel_path: str) -> Dict[str, Any]:
+def unwrap_config(node: Any) -> Any:
+    """Recursively unpacks {value: X, kind: ..., source: ...} config nodes to X."""
+    if isinstance(node, dict):
+        if "value" in node and ("kind" in node or "source" in node):
+            return unwrap_config(node["value"])
+        return {k: unwrap_config(v) for k, v in node.items()}
+    elif isinstance(node, list):
+        return [unwrap_config(x) for x in node]
+    return node
+
+def load_yaml(rel_path: str, raw: bool = False) -> Dict[str, Any]:
     file_path = ROOT_DIR / rel_path
     if not file_path.exists():
         raise FileNotFoundError(f"Configuration file not found at: {file_path}")
     with open(file_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        data = yaml.safe_load(f)
+    if raw or data is None:
+        return data
+    return unwrap_config(data)
 
-def calculate_nasa_score(y_true: Union[np.ndarray, list], y_pred: Union[np.ndarray, list]) -> float:
-    """
-    Computes NASA asymmetric evaluation score:
-    d = y_pred - y_true
-    score = sum(exp(-d/13) - 1 for d < 0) + sum(exp(d/10) - 1 for d >= 0)
-    Late predictions (d > 0) are penalized exponentially higher than early predictions (d < 0).
-    """
-    y_true_arr = np.asarray(y_true, dtype=np.float64)
-    y_pred_arr = np.asarray(y_pred, dtype=np.float64)
-    d = y_pred_arr - y_true_arr
-    
-    score = 0.0
-    for diff in d:
-        if diff < 0:
-            score += np.exp(-diff / 13.0) - 1.0
-        else:
-            score += np.exp(diff / 10.0) - 1.0
-    return float(score)
-
-def calculate_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
-    y_true = np.asarray(y_true, dtype=np.float64)
-    y_pred = np.asarray(y_pred, dtype=np.float64)
-    residuals = y_pred - y_true
-    
-    rmse = float(np.sqrt(np.mean(residuals ** 2)))
-    mae = float(np.mean(np.abs(residuals)))
-    nasa_score = calculate_nasa_score(y_true, y_pred)
-    late_rate = float(np.mean(residuals > 0))
-    early_rate = float(np.mean(residuals < 0))
-    
-    return {
-        "rmse": round(rmse, 4),
-        "mae": round(mae, 4),
-        "nasa_score": round(nasa_score, 2),
-        "late_rate": round(late_rate, 4),
-        "early_rate": round(early_rate, 4)
-    }
+from src.eval.protocol import calculate_nasa_score, calculate_metrics
 
 def calculate_psi(expected: np.ndarray, actual: np.ndarray, num_buckets: int = 10) -> float:
     """

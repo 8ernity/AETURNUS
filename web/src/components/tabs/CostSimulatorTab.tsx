@@ -133,6 +133,20 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
 
   return (
     <div className="space-y-6">
+      {/* Stale Artifact Warning Banner */}
+      {simData?.stale && (
+        <div className="bg-amber-500/15 border border-amber-500/30 text-amber-300 p-4 rounded-2xl flex items-center gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+          <div className="text-xs space-y-0.5">
+            <div className="font-bold text-amber-200">Artifact Stale Warning</div>
+            <div>
+              Simulation bundle hash on disk does not match run manifest. Run <code className="bg-black/30 px-1 py-0.5 rounded font-mono">make evaluate</code> to synchronize.
+              {simData?.stale_reason && <span className="ml-1 text-amber-400/80">({simData.stale_reason})</span>}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Top Banner: Financial ROI Overview */}
       <div className="glass-panel p-6 rounded-3xl relative overflow-hidden">
         <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
@@ -459,7 +473,10 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
           {/* Threshold Slider */}
           <div className="space-y-2 bg-slate-900/60 p-4 rounded-2xl border border-slate-800">
             <div className="flex justify-between items-center text-xs">
-              <span className="text-slate-300 font-semibold">Dispatch Threshold (τ)</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-300 font-semibold">Dispatch Threshold (τ)</span>
+                <span className="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 font-semibold">POLICY</span>
+              </div>
               <span className="font-mono text-cyan-300 font-bold text-sm">{threshold} cycles</span>
             </div>
             <input 
@@ -517,7 +534,10 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
           {/* Catastrophic Failure Penalty Slider */}
           <div className="space-y-2 bg-slate-900/60 p-4 rounded-2xl border border-slate-800">
             <div className="flex justify-between items-center text-xs">
-              <span className="text-slate-300 font-semibold">Catastrophic AOG Cost ($)</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-300 font-semibold">Catastrophic AOG Cost ($)</span>
+                <span className="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 font-semibold">ASSUMPTION</span>
+              </div>
               <div className="flex items-center gap-1 font-mono text-rose-400 font-bold text-xs">
                 <span>$</span>
                 <input
@@ -550,7 +570,10 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
           {/* Scheduled Depot Overhaul Cost */}
           <div className="space-y-2 bg-slate-900/60 p-4 rounded-2xl border border-slate-800">
             <div className="flex justify-between items-center text-xs">
-              <span className="text-slate-300 font-semibold">Scheduled Depot Overhaul ($)</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-300 font-semibold">Scheduled Depot Overhaul ($)</span>
+                <span className="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 font-semibold">ASSUMPTION</span>
+              </div>
               <div className="flex items-center gap-1 font-mono text-indigo-300 font-bold text-xs">
                 <span>$</span>
                 <input
@@ -583,7 +606,10 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
           {/* Wasted Depreciation Cost */}
           <div className="space-y-2 bg-slate-900/60 p-4 rounded-2xl border border-slate-800">
             <div className="flex justify-between items-center text-xs">
-              <span className="text-slate-300 font-semibold">Wasted Useful Life ($/cyc)</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-300 font-semibold">Wasted Useful Life ($/cyc)</span>
+                <span className="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 font-semibold">ASSUMPTION</span>
+              </div>
               <div className="flex items-center gap-1 font-mono text-amber-300 font-bold text-xs">
                 <span>$</span>
                 <input
@@ -616,7 +642,10 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
           {/* Line Triage Inspection Cost */}
           <div className="space-y-2 bg-slate-900/60 p-4 rounded-2xl border border-slate-800">
             <div className="flex justify-between items-center text-xs">
-              <span className="text-slate-300 font-semibold">Borescopic Line Inspection ($)</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-300 font-semibold">Borescopic Line Inspection ($)</span>
+                <span className="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 font-semibold">ASSUMPTION</span>
+              </div>
               <div className="flex items-center gap-1 font-mono text-purple-300 font-bold text-xs">
                 <span>$</span>
                 <input

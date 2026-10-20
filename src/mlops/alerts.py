@@ -392,50 +392,63 @@ class AlertManager:
         alerts: List[Dict[str, Any]] = []
 
         # 1. Rule: Elevated Drift on Key Sensors
+        sub = ctx.get("subset", "FD001")
         drift_firing = False
         max_psi = 0.0
         drift_sensor = ""
-        # Check context or drift_history.json
+
         if "drift_metrics" in ctx:
             for s, psi in ctx["drift_metrics"].items():
-                if any(k in s for k in self.key_sensors) and psi > max_psi:
-                    max_psi = psi
+                val = psi.get("psi", 0.0) if isinstance(psi, dict) else float(psi)
+                if any(k in s for k in self.key_sensors) and val > max_psi:
+                    max_psi = val
                     drift_sensor = s
+            drift_firing = max_psi >= self.psi_thresh
+            alerts.append({
+                "alert_id": "ALERT-DRIFT-001",
+                "rule_name": "RULE_ELEVATED_FEATURE_DRIFT",
+                "severity": "WARNING",
+                "status": "firing" if drift_firing else "nominal",
+                "firing": drift_firing,
+                "metric_value": round(float(max_psi), 3),
+                "threshold": self.psi_thresh,
+                "message": f"Elevated drift detected on {drift_sensor or 'key sensors'} (PSI={max_psi:.3f} >= {self.psi_thresh})" if drift_firing else "Telemetry distributions stable across fleet regimes.",
+                "timestamp": now
+            })
         else:
-            # Compute alerts from LIVE drift, not drift_history.json
-            try:
-                from src.mlops.drift_and_retrain import MLOpsManager
-                sub = ctx.get("subset", "FD001")
-                mgr = MLOpsManager(subset=sub)
-                train_p = self.root_dir / "data" / "processed" / sub / "train.parquet"
-                test_p = self.root_dir / "data" / "processed" / sub / "test.parquet"
-                if train_p.exists() and test_p.exists():
-                    import pandas as pd
-                    tr_df = pd.read_parquet(train_p)
-                    te_df = pd.read_parquet(test_p)
-                    ref_sample = tr_df.sample(min(400, len(tr_df)), random_state=42)
-                    curr_sample = te_df.sample(min(200, len(te_df)), random_state=42)
-                    live_report = mgr.calculate_drift_report(ref_sample, curr_sample)
-                    for feat, psi_val in live_report.get("feature_psi", {}).items():
-                        if any(k in feat for k in self.key_sensors) and psi_val > max_psi:
-                            max_psi = psi_val
-                            drift_sensor = feat
-            except Exception:
-                pass
-
-        if max_psi >= self.psi_thresh:
-            drift_firing = True
-
-        alerts.append({
-            "alert_id": "ALERT-DRIFT-001",
-            "rule_name": "RULE_ELEVATED_FEATURE_DRIFT",
-            "severity": "WARNING",
-            "firing": drift_firing,
-            "metric_value": round(float(max_psi), 3),
-            "threshold": self.psi_thresh,
-            "message": f"Elevated drift detected on {drift_sensor or 'key sensors'} (PSI={max_psi:.3f} >= {self.psi_thresh})" if drift_firing else "Telemetry distributions stable across fleet regimes.",
-            "timestamp": now
-        })
+            from src.mlops.drift_and_retrain import get_latest_drift_run
+            latest_drift = get_latest_drift_run(sub)
+            if latest_drift is None:
+                alerts.append({
+                    "alert_id": "ALERT-DRIFT-001",
+                    "rule_name": "RULE_ELEVATED_FEATURE_DRIFT",
+                    "severity": "WARNING",
+                    "status": "no data",
+                    "firing": None,
+                    "metric_value": None,
+                    "threshold": self.psi_thresh,
+                    "message": "no data",
+                    "timestamp": now
+                })
+            else:
+                sensor_metrics = latest_drift.get("sensor_metrics", {})
+                for s, s_data in sensor_metrics.items():
+                    psi = s_data.get("psi", 0.0) if isinstance(s_data, dict) else float(s_data)
+                    if any(k in s for k in self.key_sensors) and psi > max_psi:
+                        max_psi = psi
+                        drift_sensor = s
+                drift_firing = max_psi >= self.psi_thresh
+                alerts.append({
+                    "alert_id": "ALERT-DRIFT-001",
+                    "rule_name": "RULE_ELEVATED_FEATURE_DRIFT",
+                    "severity": "WARNING",
+                    "status": "firing" if drift_firing else "nominal",
+                    "firing": drift_firing,
+                    "metric_value": round(float(max_psi), 3),
+                    "threshold": self.psi_thresh,
+                    "message": f"Elevated drift detected on {drift_sensor or 'key sensors'} (PSI={max_psi:.3f} >= {self.psi_thresh})" if drift_firing else "Telemetry distributions stable across fleet regimes.",
+                    "timestamp": now
+                })
 
         # 2. Rule: Work Order Backlog Spike
         backlog_count = 0
