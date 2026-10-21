@@ -70,7 +70,7 @@ def run_model_gate() -> bool:
         reported_rmse = float(eval_report["rmse"])
         reported_mae = float(eval_report["mae"])
         reported_nasa = float(eval_report["nasa_score"])
-        reported_cov = float(eval_report.get("interval_coverage", 0.0))
+        reported_cov = float(eval_report["interval_coverage"])
 
         # 1. Load active model bundle
         ms = ModelService(subset=sub).load()
@@ -91,7 +91,7 @@ def run_model_gate() -> bool:
         live_metrics = ms.evaluate_test(test_df, rul_truth, save_report=False)
         live_rmse = float(live_metrics["rmse"])
         live_mae = float(live_metrics["mae"])
-        live_cov = float(live_metrics.get("interval_coverage", 0.0))
+        live_cov = float(live_metrics["interval_coverage"])
 
         rmse_diff = abs(live_rmse - reported_rmse)
         rmse_gate_passed = rmse_diff <= TOLERANCE_RMSE

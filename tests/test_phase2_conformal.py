@@ -56,12 +56,11 @@ def test_interval_non_inversion_and_non_negativity():
             assert p50 <= p90, f"p50 ({p50}) must be <= p90 ({p90})"
 
 def test_test_set_coverage_matches_evaluation_report():
-    """Verify interval coverage calculated directly on test data matches evaluation report."""
+    """Verify interval coverage calculated directly on test data matches manifest."""
+    from tests.helpers import load_manifest
+    manifest = load_manifest()
     for sub in ["FD001", "FD002", "FD003", "FD004"]:
-        report_file = root_dir / "artifacts" / "reports" / f"evaluation_{sub}.json"
-        assert report_file.exists(), f"Evaluation report for {sub} must exist"
-        with open(report_file, "r", encoding="utf-8") as f:
-            report = json.load(f)
+        reported_cov = manifest["subsets"][sub]["metrics"]["interval_coverage"]
         
         ms = ModelService(sub).load()
         test_df = pd.read_parquet(root_dir / "data" / "processed" / sub / "test.parquet")
@@ -69,21 +68,25 @@ def test_test_set_coverage_matches_evaluation_report():
         _, _, rul_truth = loader.load_raw_data()
         
         eval_res = ms.evaluate_test(test_df, rul_truth, save_report=False)
-        reported_cov = report["interval_coverage"]
         computed_cov = eval_res["interval_coverage"]
         assert abs(reported_cov - computed_cov) < 0.01, (
-            f"{sub}: Reported coverage {reported_cov} differs from computed {computed_cov}"
+            f"{sub}: Manifest coverage {reported_cov} differs from computed {computed_cov}"
         )
 
 def test_wilson_ci_mathematical_properties():
-    """Verify Wilson score confidence interval correctness."""
+    """Verify Wilson score confidence interval correctness recomputed from bundle + manifest."""
+    from tests.helpers import load_manifest
+    manifest = load_manifest()
     for sub in ["FD001", "FD002", "FD003", "FD004"]:
-        report_file = root_dir / "artifacts" / "reports" / f"evaluation_{sub}.json"
-        with open(report_file, "r", encoding="utf-8") as f:
-            report = json.load(f)
+        assert sub in manifest["subsets"]
+        ms = ModelService(sub).load()
+        test_df = pd.read_parquet(root_dir / "data" / "processed" / sub / "test.parquet")
+        loader = CMAPSSLoader(sub)
+        _, _, rul_truth = loader.load_raw_data()
+        eval_res = ms.evaluate_test(test_df, rul_truth, save_report=False)
         
-        cov = report["interval_coverage"]
-        ci = report.get("coverage_wilson_ci_95")
+        cov = eval_res["interval_coverage"]
+        ci = eval_res.get("coverage_wilson_ci_95")
         assert ci is not None and len(ci) == 2, f"Wilson CI must exist for {sub}"
         lower, upper = ci[0], ci[1]
         
@@ -94,7 +97,7 @@ def test_wilson_ci_mathematical_properties():
             f"Point estimate {cov} not contained in [{lower}, {upper}]"
         )
         
-        ci_excludes_80 = report.get("coverage_ci_excludes_80")
+        ci_excludes_80 = eval_res.get("coverage_ci_excludes_80")
         expected_excludes = (lower > 0.80) or (upper < 0.80)
         assert ci_excludes_80 == expected_excludes, f"{sub}: ci_excludes_80 mismatch"
 

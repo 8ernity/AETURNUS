@@ -172,24 +172,24 @@ sequenceDiagram
 
 > [!NOTE]
 > **Canonical Run Provenance**  
-> **Run ID**: `run_1792497391_538e785a` | **Git SHA**: `538e785ad6` | **Config Hash**: `ec8828aaf4`  
+> **Run ID**: `run_1792571110_9c961822` | **Git SHA**: `9c9618226d` | **Config Hash**: `7652d98d86`  
 > *All figures are derived directly from model bundles and authentic C-MAPSS evaluation parquets at run time.*
 
 | Dataset Subset | Operating Conditions | Fault Modes | Test Engines | Champion Model | Test RMSE | Test MAE | NASA Asymmetric Score | PR-AUC (Fail $\le 30$) | Conformal Coverage | Target Status |
 |:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **FD001** | Single (Sea Level) | HPC Degradation | 100 | **LIGHTGBM** | **13.30** | 9.40 | **245.3** | 0.966 | 79.0% | <span style="color:#22c55e;font-weight:bold;">TARGET MET</span> |
-| **FD002** | Six Regimes (Multi) | HPC Degradation | 259 | **LIGHTGBM** | **25.03** | 16.16 | **6,839.1** | 0.998 | 62.5% | <span style="color:#22c55e;font-weight:bold;">TARGET MET</span> |
-| **FD003** | Single (Sea Level) | HPC + Fan Degradation | 100 | **HIST_GB** | **13.79** | 9.93 | **338.7** | 0.980 | 57.0% | <span style="color:#22c55e;font-weight:bold;">TARGET MET</span> |
-| **FD004** | Six Regimes (Multi) | HPC + Fan Degradation | 248 | **HIST_GB** | **25.79** | 17.63 | **4,413.7** | 0.970 | 62.9% | <span style="color:#22c55e;font-weight:bold;">TARGET MET</span> |
+| **FD001** | 1 (Sea Level) | 1 (HPC Degradation) | 100 | **LIGHTGBM** | **13.30** | 9.40 | **245.3** | 0.966 | 79.0% | <span style="color:#22c55e;font-weight:bold;">TARGET REACHED</span> |
+| **FD002** | 6 (Full Envelope) | 1 (HPC Degradation) | 259 | **RIDGE** | **25.07** | 16.35 | **6,449.9** | 0.998 | 80.3% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
+| **FD003** | 1 (Sea Level) | 2 (HPC + Fan Degradation) | 100 | **LIGHTGBM** | **13.79** | 9.93 | **338.7** | 0.980 | 57.0% | <span style="color:#22c55e;font-weight:bold;">TARGET REACHED</span> |
+| **FD004** | 6 (Full Envelope) | 2 (HPC + Fan Degradation) | 248 | **RIDGE** | **25.79** | 17.63 | **4,413.7** | 0.970 | 62.9% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
 
 ### 🔬 5-Fold GroupKFold Cross-Validation (Persistent Engines)
 
 | Subset | RMSE ($mean \pm std$) | NASA Score ($mean \pm std$) | Algorithm | Protocol ID |
 |:---:|:---:|:---:|:---:|:---:|
-| **FD001** | $12.62 \pm 0.81$ | $8,117.5 \pm 1913.1$ | `lightgbm` | `protocol_cmapss_nasa_phm08_cap125_seed42` |
-| **FD002** | $12.72 \pm 0.17$ | $22,550.0 \pm 981.1$ | `lightgbm` | `protocol_cmapss_nasa_phm08_cap125_seed42` |
-| **FD003** | $10.93 \pm 1.17$ | $7,208.5 \pm 1998.0$ | `hist_gb` | `protocol_cmapss_nasa_phm08_cap125_seed42` |
-| **FD004** | $12.57 \pm 1.25$ | $55,349.0 \pm 62051.9$ | `hist_gb` | `protocol_cmapss_nasa_phm08_cap125_seed42` |
+| **FD001** | $2.66 \pm 0.80$ | $3.7 \pm 1.3$ | `lightgbm` | `43ddc1669083ecc7fec59c5fd2967fe9d16a2a881434c001771eea26f303f15c` |
+| **FD002** | $4.52 \pm 0.45$ | $19.4 \pm 2.4$ | `ridge` | `43ddc1669083ecc7fec59c5fd2967fe9d16a2a881434c001771eea26f303f15c` |
+| **FD003** | $3.10 \pm 0.18$ | $4.7 \pm 0.3$ | `lightgbm` | `43ddc1669083ecc7fec59c5fd2967fe9d16a2a881434c001771eea26f303f15c` |
+| **FD004** | $5.41 \pm 0.36$ | $23.2 \pm 1.7$ | `ridge` | `43ddc1669083ecc7fec59c5fd2967fe9d16a2a881434c001771eea26f303f15c` |
 
 <!-- AUTO-METRICS-END -->
 

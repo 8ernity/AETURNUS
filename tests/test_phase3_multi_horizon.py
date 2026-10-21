@@ -5,6 +5,7 @@ import pandas as pd
 from pathlib import Path
 
 from src.models.model_service import ModelService
+from src.ingest.loader import CMAPSSLoader
 from src.agent.triage_agent import TriageAgent
 from src.common.utils import get_root_dir
 
@@ -92,17 +93,21 @@ def test_triage_rule_m3_fires_critical_on_imminent_failure():
     assert order["severity"] == "CRITICAL"
 
 def test_multi_horizon_metrics_reported_in_all_subsets():
-    """Verify evaluation reports contain complete multi-horizon metrics."""
+    """Verify multi-horizon metrics recomputed from bundle + manifest."""
+    from tests.helpers import load_manifest
+    manifest = load_manifest()
     for sub in ["FD001", "FD002", "FD003", "FD004"]:
-        report_file = root_dir / "artifacts" / "reports" / f"evaluation_{sub}.json"
-        assert report_file.exists()
-        with open(report_file, "r", encoding="utf-8") as f:
-            d = json.load(f)
-        
-        mhm = d.get("multi_horizon_metrics")
-        assert mhm is not None, f"multi_horizon_metrics missing in evaluation_{sub}.json"
+        assert sub in manifest["subsets"]
+        ms = ModelService(subset=sub).load()
+        test_path = root_dir / "data" / "processed" / sub / "test.parquet"
+        test_df = pd.read_parquet(test_path)
+        loader = CMAPSSLoader(subset=sub)
+        _, _, rul_truth = loader.load_raw_data()
+        eval_res = ms.evaluate_test(test_df, rul_truth, save_report=False)
+        mhm = eval_res.get("multi_horizon_metrics")
+        assert mhm is not None, f"multi_horizon_metrics missing for {sub}"
         for h_str in ["10", "30", "60"]:
-            assert h_str in mhm, f"Horizon {h_str} missing in evaluation_{sub}.json"
+            assert h_str in mhm, f"Horizon {h_str} missing for {sub}"
             h_data = mhm[h_str]
             assert "pr_auc" in h_data
             assert "threshold" in h_data

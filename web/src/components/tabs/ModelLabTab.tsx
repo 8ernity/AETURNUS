@@ -67,7 +67,7 @@ export const ModelLabTab: React.FC = () => {
       });
   }, [selectedSub]);
 
-  const targetsMetCount = benchmarks.filter((b) => b.status === "Target Met").length;
+  const targetsMetCount = benchmarks.filter((b) => b.target_met === true || b.status === "Target Met").length;
   const bucketErrors = modelDetails?.bucket_errors || [];
   const featureImportances = modelDetails?.feature_importance || [];
   const comparisonModels = comparison?.models || [];
@@ -181,11 +181,11 @@ export const ModelLabTab: React.FC = () => {
                   <td className="p-3.5 text-slate-400">{row.train_time_sec}s</td>
                   <td className="p-3.5 text-center">
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
-                      row.status === "Target Met"
+                      row.target_met || row.status === "Target Met"
                         ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
                         : "bg-amber-500/20 text-amber-300 border-amber-500/30"
                     }`}>
-                      {row.status}
+                      {row.target_met ? "Target Met" : (row.status || "Target Missed")}
                     </span>
                   </td>
                 </tr>
