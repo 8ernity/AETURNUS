@@ -4,16 +4,39 @@ Single canonical evaluation protocol for AETURNUS.
 Defines truncation sampling (seeded), RUL target cap, NASA PHM'08 score,
 and standard metric computation.
 """
-from typing import Dict, Any, Union, Optional
+import json
+import hashlib
+from typing import Dict, Any, Union, Optional, List
 import numpy as np
 import pandas as pd
 
 DEFAULT_RUL_CAP = 125.0
 DEFAULT_SEED = 42
 
-def get_protocol_id(rul_cap: float = DEFAULT_RUL_CAP, metric_name: str = "nasa_phm08", seed: int = DEFAULT_SEED) -> str:
-    """Returns unique, deterministic protocol ID used across CV, test, and champion selection."""
-    return f"protocol_cmapss_{metric_name}_cap{int(rul_cap)}_seed{seed}"
+def get_protocol_id(
+    cap: float = DEFAULT_RUL_CAP,
+    mode: str = "last",
+    seed: int = DEFAULT_SEED,
+    n_draws: int = 1,
+    metric: str = "nasa_phm08",
+    rul_cap: Optional[float] = None,
+    metric_name: Optional[str] = None
+) -> str:
+    """
+    Returns unique, deterministic protocol ID: sha256 of {cap, mode, seed, n_draws, metric}.
+    Supports backward compatibility for rul_cap / metric_name keyword arguments.
+    """
+    c = float(rul_cap if rul_cap is not None else cap)
+    m = str(metric_name if metric_name is not None else metric)
+    payload = {
+        "cap": c,
+        "mode": str(mode),
+        "seed": int(seed),
+        "n_draws": int(n_draws),
+        "metric": m
+    }
+    raw = json.dumps(payload, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
 
 def cap_rul(rul: Union[np.ndarray, pd.Series, float, list], max_rul: float = DEFAULT_RUL_CAP) -> np.ndarray:
     """Caps piecewise linear RUL target to suppress steady-state noise."""
@@ -117,3 +140,23 @@ def sample_truncation(
 
     else:
         raise ValueError(f"Unknown truncation mode '{mode}'. Choose 'last' or 'random'.")
+
+def eval_frames(
+    df: pd.DataFrame,
+    mode: str = "last",
+    seed: int = DEFAULT_SEED,
+    n_draws: int = 1
+) -> List[pd.DataFrame]:
+    """
+    Protocol evaluation frame generator used by BOTH evaluate_cv and evaluate_test.
+    Returns a list of sampled DataFrame frames based on truncation mode and draws.
+    """
+    frames: List[pd.DataFrame] = []
+    if mode == "last":
+        frames.append(sample_truncation(df, seed=seed, mode="last"))
+    elif mode == "random":
+        for i in range(max(1, int(n_draws))):
+            frames.append(sample_truncation(df, seed=seed + i, mode="random"))
+    else:
+        frames.append(sample_truncation(df, seed=seed, mode=mode))
+    return frames

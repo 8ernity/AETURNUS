@@ -60,3 +60,17 @@ def test_economics_api_endpoints():
     assert resp3.status_code == 200
     data3 = resp3.json()
     assert data3["policies"]["reactive"]["total_cost"] == 3500000.0 * data3["fleet_size"]
+
+def test_cost_simulator_stale_detection():
+    sim = FleetCostSimulator("FD001")
+    assert sim.is_stale is False, f"Expected is_stale to be False on shipped manifest, got reason: {sim.stale_reason}"
+
+    bundle_path = sim.root_dir / "artifacts" / "models" / f"model_bundle_{sim.subset}.joblib"
+    orig_bytes = bundle_path.read_bytes()
+    try:
+        bundle_path.write_bytes(orig_bytes + b"\x00tampered")
+        sim_tampered = FleetCostSimulator("FD001")
+        assert sim_tampered.is_stale is True
+        assert "Bundle SHA256 mismatch" in sim_tampered.stale_reason
+    finally:
+        bundle_path.write_bytes(orig_bytes)

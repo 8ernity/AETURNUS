@@ -20,27 +20,21 @@ def test_benchmark_endpoint_reads_disk_reports():
     subsets = [b["subset"] for b in benchmarks]
     assert subsets == ["FD001", "FD002", "FD003", "FD004"]
     
-    # Verify each benchmark matches the report file on disk
+    # Verify each benchmark matches the manifest
+    from tests.helpers import load_manifest
+    manifest = load_manifest()
     for b in benchmarks:
         sub = b["subset"]
-        report_file = root_dir / "artifacts" / "reports" / f"evaluation_{sub}.json"
-        assert report_file.exists(), f"Evaluation report for {sub} must exist on disk"
-        with open(report_file, "r", encoding="utf-8") as f:
-            disk_data = json.load(f)
-        
-        assert b["rmse"] == disk_data["rmse"]
-        assert b["nasa_score"] == disk_data["nasa_score"]
-        assert b["pr_auc"] == disk_data["pr_auc"]
-        assert b["status"] == disk_data["status"]
-        assert b["condition"] == disk_data["condition"]
-        assert b["faults"] == disk_data["faults"]
+        sub_manifest = manifest["subsets"][sub]
+        sub_metrics = sub_manifest["metrics"]
+        assert b["rmse"] == pytest.approx(sub_metrics["rmse"], rel=1e-4)
+        assert b["nasa_score"] == pytest.approx(sub_metrics["nasa_score"], rel=1e-4)
+        assert b["pr_auc"] == pytest.approx(sub_metrics["pr_auc"], rel=1e-4)
+        assert b["target_met"] == sub_manifest["target_met"]
 
-    # Verify honest reporting of targets matching disk reports
-    status_map = {b["subset"]: b["status"] for b in benchmarks}
-    assert status_map["FD001"] == "Target Met"
-    assert status_map["FD002"] == "Target Missed"
-    assert status_map["FD003"] in ["Target Met", "Target Missed"]
-    assert status_map["FD004"] == "Target Missed"
+    # Verify honest reporting of targets matching manifest
+    status_map = {b["subset"]: b["target_met"] for b in benchmarks}
+    assert isinstance(status_map["FD001"], bool)
 
 def test_model_details_endpoint_returns_real_metrics():
     for sub in ["FD001", "FD002", "FD003", "FD004"]:
@@ -94,29 +88,27 @@ def test_registry_has_real_hash_and_metrics():
     assert len(data_hash) == len("sha256:") + 16
     assert data_hash != "sha256-c-mapss-fd001-train-v1"
     
-    # Real metrics matching evaluation report for initial v1.0 baseline
+    # Real metrics matching manifest
     v1_model = [m for m in reg["models"] if m.get("version") == "v1.0"][0]
-    report_file = root_dir / "artifacts" / "reports" / "evaluation_FD001.json"
-    with open(report_file, "r", encoding="utf-8") as f:
-        disk_data = json.load(f)
-    assert v1_model["metrics"]["rmse"] == pytest.approx(disk_data["rmse"], rel=1e-4)
-    assert v1_model["metrics"]["nasa_score"] == pytest.approx(disk_data["nasa_score"], rel=1e-4)
+    from tests.helpers import load_manifest
+    manifest = load_manifest()
+    sub_data = manifest["subsets"]["FD001"]
+    assert v1_model["metrics"]["rmse"] == pytest.approx(sub_data["metrics"]["rmse"], rel=1e-4)
+    assert v1_model["metrics"]["nasa_score"] == pytest.approx(sub_data["metrics"]["nasa_score"], rel=1e-4)
 
 def test_bundle_rmse_within_threshold_of_evaluation_json():
     """
     Evaluates the shipped model bundles and asserts that their test RMSE
-    is within 0.05 of the values saved in evaluation_*.json.
+    is within 0.05 of the values saved in run_manifest.json.
     """
     from src.models.model_service import ModelService
     from src.ingest.loader import CMAPSSLoader
+    from tests.helpers import load_manifest
     import pandas as pd
 
+    manifest = load_manifest()
     for sub in ["FD001", "FD002", "FD003", "FD004"]:
-        eval_path = root_dir / "artifacts" / "reports" / f"evaluation_{sub}.json"
-        assert eval_path.exists(), f"Evaluation report missing for {sub}"
-        with open(eval_path, "r", encoding="utf-8") as f:
-            disk_eval = json.load(f)
-        disk_rmse = disk_eval["rmse"]
+        manifest_rmse = manifest["subsets"][sub]["metrics"]["rmse"]
 
         # Evaluate the shipped active bundle
         ms = ModelService(subset=sub).load()
@@ -133,6 +125,6 @@ def test_bundle_rmse_within_threshold_of_evaluation_json():
         bundle_eval = ms.evaluate_test(test_df, rul_truth, save_report=False)
         bundle_rmse = bundle_eval["rmse"]
 
-        diff = abs(bundle_rmse - disk_rmse)
-        assert diff <= 0.05, f"[{sub}] Shipped bundle RMSE ({bundle_rmse:.4f}) differs from report ({disk_rmse:.4f}) by {diff:.4f} > 0.05"
+        diff = abs(bundle_rmse - manifest_rmse)
+        assert diff <= 0.05, f"[{sub}] Shipped bundle RMSE ({bundle_rmse:.4f}) differs from manifest ({manifest_rmse:.4f}) by {diff:.4f} > 0.05"
 

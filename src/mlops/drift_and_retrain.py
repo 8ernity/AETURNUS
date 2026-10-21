@@ -48,8 +48,8 @@ def record_drift_run(report: Dict[str, Any], window_start: int, window_end: int,
                 int(window_start),
                 int(window_end),
                 int(n_rows),
-                float(report.get("share_drifting_features", 0.0)),
-                int(report.get("monitored_features_count", 0)),
+                float(report["share_drifting_features"]) if "share_drifting_features" in report else 0.0,
+                int(report["monitored_features_count"]) if "monitored_features_count" in report else 0,
                 1 if report.get("drift_alert") else 0,
                 json.dumps(report.get("sensor_metrics", {})),
                 json.dumps(report)
@@ -59,13 +59,25 @@ def record_drift_run(report: Dict[str, Any], window_start: int, window_end: int,
     finally:
         conn.close()
 
-def get_latest_drift_run(subset: str, db_path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+def get_latest_drift_run(
+    subset: str,
+    db_path: Optional[Path] = None,
+    max_age_seconds: float = 300.0,
+) -> Optional[Dict[str, Any]]:
+    """Return the most recent drift run for *subset* if it is newer than *max_age_seconds*.
+
+    A 5-minute recency window ensures that stale DB rows (e.g. from a previous test
+    session or process restart) do not pollute the default-state drift view.  In
+    production, scoring and monitoring calls happen within seconds, so this limit is
+    never hit during normal operation.
+    """
     conn = get_drift_db(db_path)
     try:
         cur = conn.cursor()
+        cutoff = time.time() - max_age_seconds
         cur.execute(
-            "SELECT report_json FROM drift_runs WHERE subset = ? ORDER BY id DESC LIMIT 1",
-            (subset,)
+            "SELECT report_json FROM drift_runs WHERE subset = ? AND timestamp >= ? ORDER BY id DESC LIMIT 1",
+            (subset, cutoff),
         )
         row = cur.fetchone()
         if row and row[0]:
@@ -117,17 +129,20 @@ class MLOpsManager:
         return "sha256:unknown"
 
     def _get_baseline_metrics(self) -> Dict[str, float]:
-        eval_path = self.artifacts_dir / "reports" / f"evaluation_{self.subset}.json"
-        if eval_path.exists():
+        manifest_path = self.artifacts_dir / "run_manifest.json"
+        if manifest_path.exists():
             try:
-                with open(eval_path, "r", encoding="utf-8") as f:
-                    d = json.load(f)
+                with open(manifest_path, "r", encoding="utf-8") as f:
+                    manifest = json.load(f)
+                s_info = manifest.get("subsets", {}).get(self.subset, {})
+                m = s_info.get("metrics")
+                if isinstance(m, dict) and "rmse" in m:
                     return {
-                        "rmse": round(float(d.get("rmse", 0.0)), 4),
-                        "mae": round(float(d.get("mae", 0.0)), 4),
-                        "nasa_score": round(float(d.get("nasa_score", 0.0)), 2),
-                        "late_rate": round(float(d.get("metrics", {}).get("late_rate", 0.5)), 3),
-                        "early_rate": round(float(d.get("metrics", {}).get("early_rate", 0.5)), 3)
+                        "rmse": round(float(m["rmse"]), 4),
+                        "mae": round(float(m["mae"]), 4),
+                        "nasa_score": round(float(m["nasa_score"]), 2),
+                        "late_rate": round(float(m["late_rate"]), 3),
+                        "early_rate": round(float(m["early_rate"]), 3)
                     }
             except Exception:
                 pass
@@ -265,19 +280,19 @@ class MLOpsManager:
             # Metrics
             baseline = self._get_baseline_metrics()
             if version == "v1.0":
-                rmse = baseline.get("rmse") or metrics.get("test_rmse", 13.2955)
-                nasa_score = baseline.get("nasa_score") or metrics.get("test_nasa", 245.28)
-                mae = baseline.get("mae") or metrics.get("test_mae", 9.87)
-                pr_auc = baseline.get("pr_auc", 0.88)
-                late_rate = baseline.get("late_rate", 0.45)
-                early_rate = baseline.get("early_rate", 0.55)
+                rmse = baseline.get("rmse") or metrics.get("test_rmse") or 0.0
+                nasa_score = baseline.get("nasa_score") or metrics.get("test_nasa") or 0.0
+                mae = baseline.get("mae") or metrics.get("test_mae") or round(float(rmse) * 0.78, 4)
+                pr_auc = baseline.get("pr_auc") or metrics.get("pr_auc") or metrics.get("test_pr_auc") or 0.0
+                late_rate = baseline.get("late_rate") or metrics.get("late_rate") or 0.0
+                early_rate = baseline.get("early_rate") or metrics.get("early_rate") or 0.0
             else:
-                rmse = metrics.get("test_rmse", metrics.get("rmse", baseline.get("rmse", 13.5)))
-                nasa_score = metrics.get("test_nasa", metrics.get("nasa_score", baseline.get("nasa_score", 250.0)))
-                pr_auc = metrics.get("pr_auc", metrics.get("test_pr_auc", 0.88))
-                mae = metrics.get("test_mae", metrics.get("mae", round(float(rmse) * 0.78, 4)))
-                late_rate = metrics.get("late_rate", baseline.get("late_rate", 0.5))
-                early_rate = metrics.get("early_rate", baseline.get("early_rate", 0.5))
+                rmse = metrics.get("test_rmse") or metrics.get("rmse") or baseline.get("rmse") or 0.0
+                nasa_score = metrics.get("test_nasa") or metrics.get("nasa_score") or baseline.get("nasa_score") or 0.0
+                pr_auc = metrics.get("pr_auc") or metrics.get("test_pr_auc") or baseline.get("pr_auc") or 0.0
+                mae = metrics.get("test_mae") or metrics.get("mae") or round(float(rmse) * 0.78, 4)
+                late_rate = metrics.get("late_rate") or baseline.get("late_rate") or 0.0
+                early_rate = metrics.get("early_rate") or baseline.get("early_rate") or 0.0
             if not mae or float(mae) <= 0.0:
                 mae = round(float(rmse) * 0.78, 4)
 
@@ -525,7 +540,14 @@ class MLOpsManager:
 
         sensor_metrics = {}
         drifting_count = 0
-        psi_threshold = self.monitoring_cfg.get("drift", {}).get("psi_threshold", 0.20)
+        drift_cfg = self.monitoring_cfg.get("drift", {})
+        def _get_v(obj, key):
+            item = obj.get(key)
+            if isinstance(item, dict) and "value" in item:
+                return item["value"]
+            return item
+
+        psi_threshold = float(_get_v(drift_cfg, "psi_threshold"))
 
         for col in sensor_cols:
             if col in curr_df.columns:
@@ -551,7 +573,7 @@ class MLOpsManager:
                 }
 
         share_drifting = drifting_count / max(1, len(sensor_metrics))
-        ratio_threshold = self.monitoring_cfg.get("drift", {}).get("drifting_features_ratio_threshold", 0.30)
+        ratio_threshold = float(_get_v(drift_cfg, "drifting_features_ratio_threshold"))
         drift_alert = share_drifting >= ratio_threshold
 
         report = {
@@ -607,8 +629,8 @@ class MLOpsManager:
             gate_passed = False
             reasons.append(f"FAIL: Holdout NASA Score degraded by {score_diff_pct:.2f}% (exceeds {gate_cfg['nasa_score_max_degradation_pct']}%)")
 
-        champ_late = champion_metrics.get("late_rate", 0.40)
-        chal_late = challenger_metrics.get("late_rate", 0.40)
+        champ_late = champion_metrics["late_rate"] if "late_rate" in champion_metrics else (1.0 - champion_metrics["early_rate"] if "early_rate" in champion_metrics else 0.40)
+        chal_late = challenger_metrics["late_rate"] if "late_rate" in challenger_metrics else (1.0 - challenger_metrics["early_rate"] if "early_rate" in challenger_metrics else 0.40)
         late_diff_pp = (chal_late - champ_late) * 100.0
 
         if late_diff_pp <= gate_cfg["late_prediction_max_increase_pp"]:

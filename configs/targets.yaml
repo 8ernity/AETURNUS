@@ -1,0 +1,23 @@
+# configs/targets.yaml
+# Operational target thresholds with full provenance metadata
+subsets:
+  FD001:
+    target_rmse:
+      value: 14.0
+      kind: policy
+      source: "PHM08 empirical threshold for single operating condition (sea level)"
+  FD002:
+    target_rmse:
+      value: 22.0
+      kind: policy
+      source: "PHM08 empirical threshold for six complex operating regimes"
+  FD003:
+    target_rmse:
+      value: 15.0
+      kind: policy
+      source: "PHM08 empirical threshold for single condition with multi-fault degradation"
+  FD004:
+    target_rmse:
+      value: 22.0
+      kind: policy
+      source: "PHM08 empirical threshold for six regimes with multi-fault degradation"

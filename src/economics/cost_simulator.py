@@ -1,3 +1,4 @@
+import json
 import hashlib
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -70,7 +71,7 @@ class FleetCostSimulator:
             actual_sha = hashlib.sha256(bundle_file.read_bytes()).hexdigest()
             if expected_sha and expected_sha != actual_sha:
                 return True, f"Bundle SHA256 mismatch (manifest={expected_sha[:8]}..., disk={actual_sha[:8]}...)"
-        except Exception as e:
+        except (json.JSONDecodeError, KeyError, OSError) as e:
             return True, f"Error validating manifest: {e}"
         return False, ""
 
@@ -91,7 +92,7 @@ class FleetCostSimulator:
                     scatter = d.get("parity_scatter", [])
                     if len(scatter) > 0:
                         return scatter
-            except Exception:
+            except (json.JSONDecodeError, OSError, KeyError):
                 pass
 
         test_df = pd.read_parquet(test_path)
@@ -197,10 +198,10 @@ class FleetCostSimulator:
         engine_ledger = []
 
         for row in self.eval_data:
-            u = row.get("unit", 1)
-            act = float(row.get("actual", 0.0))
-            pred = float(row.get("predicted", 0.0))
-            p10 = float(row.get("p10", pred))
+            u = row["unit"] if "unit" in row else 1
+            act = float(row["actual"])
+            pred = float(row["predicted"])
+            p10 = float(row["p10"]) if "p10" in row else pred
 
             # Selected decision metric: conservative p10 or point prediction
             if use_conservative:
@@ -381,9 +382,9 @@ class FleetCostSimulator:
             insp_cost = 0.0
 
             for row in self.eval_data:
-                act = float(row.get("actual", 0.0))
-                pred = float(row.get("predicted", 0.0))
-                p10 = float(row.get("p10", pred))
+                act = float(row["actual"])
+                pred = float(row["predicted"])
+                p10 = float(row["p10"]) if "p10" in row else pred
 
                 if use_conservative:
                     d_err = p10 - act

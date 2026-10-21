@@ -49,8 +49,8 @@ class WebhookDispatcher:
             
         self.url = os.getenv("ALERT_WEBHOOK_URL", wh_cfg.get("url", ""))
         self.service = os.getenv("ALERT_WEBHOOK_SERVICE", wh_cfg.get("service", "slack")).lower()
-        self.timeout_sec = float(wh_cfg.get("timeout_sec", 5.0))
-        self.retry_count = int(wh_cfg.get("retry_count", 2))
+        self.timeout_sec = float(wh_cfg.get("timeout_sec") or 5.0)
+        self.retry_count = int(wh_cfg.get("retry_count") or 2)
         self.notify_rules = [r.upper() for r in wh_cfg.get("notify_rules", ["M1", "M2", "M3"])]
         self.recent_dispatches: List[Dict[str, Any]] = []
 
@@ -328,11 +328,17 @@ class AlertManager:
             cfg = {}
         
         self.alerts_cfg = cfg.get("alerts", {})
-        self.psi_thresh = float(self.alerts_cfg.get("drift_psi_threshold", 0.25))
-        self.key_sensors = self.alerts_cfg.get("key_drift_sensors", ["s3", "s7", "s11"])
-        self.backlog_thresh = int(self.alerts_cfg.get("backlog_critical_high_threshold", 10))
-        self.cov_min_thresh = float(self.alerts_cfg.get("coverage_min_threshold", 0.75))
-        self.latency_thresh_ms = float(self.alerts_cfg.get("latency_p95_ms_threshold", 100.0))
+        def _get_val(obj, key):
+            item = obj.get(key)
+            if isinstance(item, dict) and "value" in item:
+                return item["value"]
+            return item
+
+        self.psi_thresh = float(_get_val(self.alerts_cfg, "drift_psi_threshold"))
+        self.key_sensors = self.alerts_cfg.get("key_drift_sensors") or ["s3", "s7", "s11"]
+        self.backlog_thresh = int(_get_val(self.alerts_cfg, "backlog_critical_high_threshold"))
+        self.cov_min_thresh = float(_get_val(self.alerts_cfg, "coverage_min_threshold"))
+        self.latency_thresh_ms = float(_get_val(self.alerts_cfg, "latency_p95_ms_threshold"))
 
         # External Alert Webhook Dispatcher
         self.webhook_dispatcher = WebhookDispatcher(self.alerts_cfg)
@@ -399,7 +405,7 @@ class AlertManager:
 
         if "drift_metrics" in ctx:
             for s, psi in ctx["drift_metrics"].items():
-                val = psi.get("psi", 0.0) if isinstance(psi, dict) else float(psi)
+                val = float(psi["psi"]) if isinstance(psi, dict) and "psi" in psi else float(psi)
                 if any(k in s for k in self.key_sensors) and val > max_psi:
                     max_psi = val
                     drift_sensor = s
@@ -433,7 +439,7 @@ class AlertManager:
             else:
                 sensor_metrics = latest_drift.get("sensor_metrics", {})
                 for s, s_data in sensor_metrics.items():
-                    psi = s_data.get("psi", 0.0) if isinstance(s_data, dict) else float(s_data)
+                    psi = float(s_data["psi"]) if isinstance(s_data, dict) and "psi" in s_data else float(s_data)
                     if any(k in s for k in self.key_sensors) and psi > max_psi:
                         max_psi = psi
                         drift_sensor = s
@@ -472,52 +478,77 @@ class AlertManager:
             "timestamp": now
         })
 
-        # 3. Rule: Conformal Coverage Dip
-        min_cov = 1.0
-        lowest_sub = "FD001"
+        # 3. Rule: Conformal Coverage Dip (read strictly from manifest subsets.*.metrics.interval_coverage)
+        cov_map: Dict[str, float] = {}
         if "coverage_metrics" in ctx:
-            for sub, cov in ctx["coverage_metrics"].items():
-                if cov < min_cov:
-                    min_cov = cov
-                    lowest_sub = sub
+            cov_map = ctx["coverage_metrics"]
         else:
-            for sub in ["FD001", "FD002", "FD003", "FD004"]:
-                eval_file = self.root_dir / "artifacts" / "reports" / f"evaluation_{sub}.json"
-                if eval_file.exists():
-                    try:
-                        with open(eval_file, "r", encoding="utf-8") as f:
-                            d = json.load(f)
-                        cov = d.get("interval_coverage", 0.80)
-                        if cov < min_cov:
-                            min_cov = cov
-                            lowest_sub = sub
-                    except Exception:
-                        pass
+            manifest_file = self.root_dir / "artifacts" / "run_manifest.json"
+            if manifest_file.exists():
+                try:
+                    with open(manifest_file, "r", encoding="utf-8") as f:
+                        m_data = json.load(f)
+                    for s_k, s_v in m_data.get("subsets", {}).items():
+                        m_obj = s_v.get("metrics")
+                        if isinstance(m_obj, dict) and "interval_coverage" in m_obj:
+                            cov_map[s_k] = float(m_obj["interval_coverage"])
+                except Exception:
+                    cov_map = {}
 
-        cov_firing = min_cov < self.cov_min_thresh
-        alerts.append({
-            "alert_id": "ALERT-COVERAGE-003",
-            "rule_name": "RULE_CONFORMAL_COVERAGE_DIP",
-            "severity": "WARNING",
-            "firing": cov_firing,
-            "metric_value": round(float(min_cov), 3),
-            "threshold": self.cov_min_thresh,
-            "message": f"Interval coverage for {lowest_sub} ({min_cov*100:.1f}%) dropped below nominal threshold ({self.cov_min_thresh*100:.1f}%)" if cov_firing else "Conformal prediction intervals meet empirical coverage targets.",
-            "timestamp": now
-        })
+        if not cov_map:
+            alerts.append({
+                "alert_id": "ALERT-COVERAGE-003",
+                "rule_name": "RULE_CONFORMAL_COVERAGE_DIP",
+                "severity": "INFO",
+                "status": "no data",
+                "state": "no data",
+                "firing": None,
+                "metric_value": None,
+                "threshold": self.cov_min_thresh,
+                "message": "no data",
+                "timestamp": now
+            })
+        else:
+            lowest_sub = min(cov_map, key=cov_map.get)
+            min_cov = cov_map[lowest_sub]
+            cov_firing = min_cov < self.cov_min_thresh
+            alerts.append({
+                "alert_id": "ALERT-COVERAGE-003",
+                "rule_name": "RULE_CONFORMAL_COVERAGE_DIP",
+                "severity": "WARNING",
+                "status": "firing" if cov_firing else "nominal",
+                "state": "firing" if cov_firing else "passing",
+                "firing": cov_firing,
+                "metric_value": round(float(min_cov), 3),
+                "threshold": self.cov_min_thresh,
+                "message": f"Interval coverage for {lowest_sub} ({min_cov*100:.1f}%) dropped below nominal threshold ({self.cov_min_thresh*100:.1f}%)" if cov_firing else "Conformal prediction intervals meet empirical coverage targets.",
+                "timestamp": now
+            })
 
         # 4. Rule: Latency Spike
-        lat_ms = ctx.get("latency_p95_ms", 12.5)
-        lat_firing = lat_ms > self.latency_thresh_ms
-        alerts.append({
-            "alert_id": "ALERT-LATENCY-004",
-            "rule_name": "RULE_INFERENCE_LATENCY_SPIKE",
-            "severity": "WARNING",
-            "firing": lat_firing,
-            "metric_value": round(float(lat_ms), 1),
-            "threshold": self.latency_thresh_ms,
-            "message": f"P95 prediction latency ({lat_ms:.1f}ms) exceeds SLO threshold ({self.latency_thresh_ms:.1f}ms)" if lat_firing else "Inference latency satisfies real-time flight replay SLO (<100ms).",
-            "timestamp": now
-        })
+        if "latency_p95_ms" not in ctx:
+            alerts.append({
+                "alert_id": "ALERT-LATENCY-004",
+                "rule_name": "RULE_INFERENCE_LATENCY_SPIKE",
+                "severity": "INFO",
+                "firing": None,
+                "metric_value": None,
+                "threshold": self.latency_thresh_ms,
+                "message": "no data",
+                "timestamp": now
+            })
+        else:
+            lat_ms = float(ctx["latency_p95_ms"])
+            lat_firing = lat_ms > self.latency_thresh_ms
+            alerts.append({
+                "alert_id": "ALERT-LATENCY-004",
+                "rule_name": "RULE_INFERENCE_LATENCY_SPIKE",
+                "severity": "WARNING",
+                "firing": lat_firing,
+                "metric_value": round(float(lat_ms), 1),
+                "threshold": self.latency_thresh_ms,
+                "message": f"P95 prediction latency ({lat_ms:.1f}ms) exceeds SLO threshold ({self.latency_thresh_ms:.1f}ms)" if lat_firing else "Inference latency satisfies real-time flight replay SLO (<100ms).",
+                "timestamp": now
+            })
 
         return alerts

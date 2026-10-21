@@ -21,18 +21,12 @@ from src.eval.protocol import (
     calculate_metrics,
     calculate_nasa_score,
     sample_truncation,
+    eval_frames,
     cap_rul,
     get_protocol_id,
 )
 
 SENSOR_REGEX = re.compile(r"^s\d+$")
-
-TARGET_THRESHOLDS = {
-    "FD001": 14.0,
-    "FD002": 22.0,
-    "FD003": 15.0,
-    "FD004": 22.0
-}
 
 CONDITIONS_MAP = {
     "FD001": ("Single (Sea Level)", "1 (HPC Degradation)"),
@@ -248,11 +242,17 @@ class ModelService:
                 f"(expected >20). Training data may be too small."
             )
 
-        # Guard 2: permutation importances must be non-trivially positive
-        perm = permutation_importance(
-            self.rul_p50_model, X_val, y_rul_val, n_repeats=3, random_state=42
-        )
-        imp_sum = float(np.sum(np.maximum(0, perm.importances_mean)))
+        # Guard 2: feature importances must be non-trivially positive
+        if hasattr(self.rul_p50_model, "feature_importances_"):
+            imp_sum = float(np.sum(np.maximum(0, self.rul_p50_model.feature_importances_)))
+        else:
+            # Subsample X_val to avoid excessive memory allocations
+            n_sub = min(200, len(X_val))
+            sub_idx = np.random.RandomState(42).choice(len(X_val), n_sub, replace=False)
+            perm = permutation_importance(
+                self.rul_p50_model, X_val[sub_idx], y_rul_val[sub_idx], n_repeats=2, random_state=42
+            )
+            imp_sum = float(np.sum(np.maximum(0, perm.importances_mean)))
         assert imp_sum > 0, (
             f"[{self.subset}] All feature importances are zero — "
             f"the model learned nothing useful from the training data."
@@ -396,37 +396,65 @@ class ModelService:
         split = get_persistent_split(self.subset, all_units=all_units)
         train_units = split["train_units"]
 
-        train_only_df = train_df[train_df["unit"].isin(train_units)].copy().reset_index(drop=True)
+        mask = train_df["unit"].isin(train_units)
         if not self.feature_cols:
-            self.feature_cols = self._select_features(train_only_df)
+            self.feature_cols = self._select_features(train_df)
 
-        X = train_only_df[self.feature_cols].values
-        y = train_only_df["rul_capped"].values
-        groups = train_only_df["unit"].values
+        cols_needed = ["unit", "cycle", "rul_capped"] + [c for c in self.feature_cols if c not in ("unit", "cycle", "rul_capped")]
+        train_only_df = train_df.loc[mask, cols_needed].reset_index(drop=True)
+
+        X = train_only_df[self.feature_cols].to_numpy(dtype=np.float32)
+        y = train_only_df["rul_capped"].to_numpy(dtype=np.float32)
+        groups = train_only_df["unit"].to_numpy(dtype=np.int32)
+
+        # Dynamically load hyperparameters from configs / best_params without literals
+        models_cfg = load_yaml(self.root_dir / "configs" / "models.yaml")
+        if self.algorithm == "lightgbm":
+            best_params_path = self.root_dir / "configs" / f"best_params_{self.subset}.json"
+            if best_params_path.exists():
+                with open(best_params_path, "r", encoding="utf-8") as f:
+                    params = json.load(f)
+            else:
+                lgb_cfg = models_cfg["baselines"]["lightgbm"]
+                params = {k: v["value"] if isinstance(v, dict) and "value" in v else v for k, v in lgb_cfg.items()}
+            params["objective"] = "regression"
+            params["verbose"] = -1
+            reg_builder = lambda: lgb.LGBMRegressor(**params)
+        elif self.algorithm in ("hist_gb", "hist_gradient_boosting"):
+            hgb_cfg = models_cfg["baselines"]["hist_gb"]
+            params = {k: v["value"] if isinstance(v, dict) and "value" in v else v for k, v in hgb_cfg.items()}
+            params["loss"] = "squared_error"
+            reg_builder = lambda: HistGradientBoostingRegressor(**params)
+        elif self.algorithm == "ridge":
+            ridge_cfg = models_cfg["baselines"]["ridge"]
+            params = {k: v["value"] if isinstance(v, dict) and "value" in v else v for k, v in ridge_cfg.items()}
+            reg_builder = lambda: Ridge(**params)
+        else:
+            reg_builder = lambda: lgb.LGBMRegressor(objective="regression", verbose=-1)
 
         gkf = GroupKFold(n_splits=k)
         fold_results = []
         rmses, nasas, train_rmses = [], [], []
 
         for f_idx, (tr_idx, val_idx) in enumerate(gkf.split(X, y, groups=groups), start=1):
-            if self.algorithm == "lightgbm":
-                reg = lgb.LGBMRegressor(
-                    objective="regression",
-                    n_estimators=150, learning_rate=0.05,
-                    num_leaves=31, min_child_samples=20,
-                    random_state=42, verbose=-1
-                )
-            else:
-                reg = HistGradientBoostingRegressor(
-                    loss="squared_error",
-                    max_iter=150, learning_rate=0.05,
-                    random_state=42
-                )
+            reg = reg_builder()
             reg.fit(X[tr_idx], y[tr_idx])
-            pred_val = np.maximum(0.0, reg.predict(X[val_idx]))
-            pred_tr = np.maximum(0.0, reg.predict(X[tr_idx]))
-            m = calculate_metrics(y[val_idx], pred_val)
-            m_tr = calculate_metrics(y[tr_idx], pred_tr)
+
+            # Validation evaluation uses canonical eval_frames
+            val_df_fold = train_only_df.iloc[val_idx]
+            val_frame = eval_frames(val_df_fold, mode="last", seed=42, n_draws=1)[0]
+            val_X = val_frame[self.feature_cols].values
+            val_y = val_frame["rul_capped"].values
+
+            tr_df_fold = train_only_df.iloc[tr_idx]
+            tr_frame = eval_frames(tr_df_fold, mode="last", seed=42, n_draws=1)[0]
+            tr_X = tr_frame[self.feature_cols].values
+            tr_y = tr_frame["rul_capped"].values
+
+            pred_val = np.maximum(0.0, reg.predict(val_X))
+            pred_tr = np.maximum(0.0, reg.predict(tr_X))
+            m = calculate_metrics(val_y, pred_val)
+            m_tr = calculate_metrics(tr_y, pred_tr)
             rmses.append(m["rmse"])
             nasas.append(m["nasa_score"])
             train_rmses.append(m_tr["rmse"])
@@ -466,7 +494,7 @@ class ModelService:
         - Split-conformal coverage, mean width, Wilson 95% CI
         - Multi-horizon classification (PR-AUC, precision, recall at tuned threshold)
         """
-        eval_rows = sample_truncation(test_df, mode="last")
+        eval_rows = eval_frames(test_df, mode="last", seed=42, n_draws=1)[0]
 
         for c in self.feature_cols:
             if c not in eval_rows.columns:
@@ -591,9 +619,12 @@ class ModelService:
                 "color": colors[i % len(colors)]
             })
 
-        target_rmse = TARGET_THRESHOLDS.get(self.subset, 14.0)
+        targets_cfg = load_yaml(self.root_dir / "configs" / "targets.yaml")
+        raw_target = targets_cfg["subsets"][self.subset]["target_rmse"]
+        target_rmse = float(raw_target["value"]) if isinstance(raw_target, dict) and "value" in raw_target else float(raw_target)
+        target_met = bool(metrics["rmse"] <= target_rmse)
         cond, faults = CONDITIONS_MAP.get(self.subset, ("Standard", "1 Fault"))
-        status = "Target Met" if metrics["rmse"] <= target_rmse else "Target Missed"
+        status = "Target Met" if target_met else "Target Missed"
 
         # Parity Scatter points for held-out test engines
         parity_scatter = []
@@ -669,6 +700,7 @@ class ModelService:
             "generalization_gap": generalization_gap,
             "pr_auc": round(pr_auc_30, 3),
             "target_rmse": target_rmse,
+            "target_met": target_met,
             "status": status,
             "interval_coverage": round(interval_coverage, 4),
             "mean_interval_width": round(mean_interval_width, 2),
@@ -999,6 +1031,9 @@ class ModelService:
             else:
                 praucs.append(float(np.mean(y_true_cls == (probs >= 0.5))))
 
+            import gc
+            gc.collect()
+
         multi_seed_report = {
             "seeds": seeds,
             "rmse_mean": round(float(np.mean(rmses)), 2),
@@ -1032,8 +1067,7 @@ class ModelService:
         Saves to artifacts/reports/model_comparison_{subset}.json.
         """
         print(f"[{self.subset}] Benchmarking Ridge, HistGB, LightGBM, and Deep Learning models...")
-        last_indices = test_df.groupby("unit")["cycle"].idxmax()
-        eval_rows = test_df.loc[last_indices].sort_values("unit")
+        eval_rows = eval_frames(test_df, mode="last", seed=42, n_draws=1)[0]
         
         X_train = train_df[self.feature_cols].values
         y_train = train_df["rul_capped"].values
@@ -1053,80 +1087,70 @@ class ModelService:
         gkf = GroupKFold(n_splits=5)
         splits_list = list(gkf.split(X_tr_cv, y_tr_cv, groups=groups_cv))
 
-        # Protocol matching champion training path (evaluate_cv): GroupKFold-5 on persistent train engines, capped RUL target
+        # Protocol matching champion training path (evaluate_cv): GroupKFold-5 on persistent train engines using eval_frames
         def get_cv_metrics(model_fn):
             fold_rmses, fold_nasas = [], []
             for tr_i, val_i in splits_list:
                 m = model_fn()
                 m.fit(X_tr_cv[tr_i], y_tr_cv[tr_i])
-                preds = np.maximum(0.0, m.predict(X_tr_cv[val_i]))
-                met = calculate_metrics(y_tr_cv[val_i], preds)
+                val_df_fold = train_only_df.iloc[val_i]
+                val_frame = eval_frames(val_df_fold, mode="last", seed=42, n_draws=1)[0]
+                preds = np.maximum(0.0, m.predict(val_frame[self.feature_cols].values))
+                met = calculate_metrics(val_frame["rul_capped"].values, preds)
                 fold_rmses.append(met["rmse"])
                 fold_nasas.append(met["nasa_score"])
-            return float(np.mean(fold_rmses)), float(np.mean(fold_nasas))
+            return (
+                float(np.mean(fold_rmses)),
+                float(np.std(fold_rmses)),
+                float(np.mean(fold_nasas)),
+                float(np.std(fold_nasas))
+            )
+
+        # Load hyperparameters dynamically from configs/models.yaml
+        models_cfg = load_yaml(self.root_dir / "configs" / "models.yaml")
+        ridge_p = {k: v["value"] if isinstance(v, dict) and "value" in v else v for k, v in models_cfg["baselines"]["ridge"].items()}
+        hgb_p = {k: v["value"] if isinstance(v, dict) and "value" in v else v for k, v in models_cfg["baselines"]["hist_gb"].items()}
+        hgb_p["loss"] = "squared_error"
+        lgb_def_p = {k: v["value"] if isinstance(v, dict) and "value" in v else v for k, v in models_cfg["baselines"]["lightgbm"].items()}
+        lgb_def_p["objective"] = "regression"
+        lgb_def_p["verbose"] = -1
 
         # 1. Ridge Baseline
         t0 = time.time()
-        ridge_cv_rmse, ridge_cv_nasa = get_cv_metrics(lambda: Ridge(alpha=1.0, random_state=42))
-        ridge_model = Ridge(alpha=1.0, random_state=42).fit(X_train, y_train)
+        ridge_cv_rmse, ridge_cv_std, ridge_cv_nasa, ridge_cv_std_nasa = get_cv_metrics(lambda: Ridge(**ridge_p))
+        ridge_model = Ridge(**ridge_p).fit(X_train, y_train)
         ridge_pred = np.maximum(0.0, ridge_model.predict(X_test))
         ridge_met = calculate_metrics(y_test, ridge_pred)
         ridge_time = round(time.time() - t0, 2)
 
         # 2. HistGradientBoosting Baseline
         t0 = time.time()
-        hgb_cv_rmse, hgb_cv_nasa = get_cv_metrics(
-            lambda: HistGradientBoostingRegressor(loss="squared_error", max_iter=150, learning_rate=0.05, random_state=42)
+        hgb_cv_rmse, hgb_cv_std, hgb_cv_nasa, hgb_cv_std_nasa = get_cv_metrics(
+            lambda: HistGradientBoostingRegressor(**hgb_p)
         )
-        hgb_model = HistGradientBoostingRegressor(loss="squared_error", max_iter=150, learning_rate=0.05, random_state=42).fit(X_train, y_train)
+        hgb_model = HistGradientBoostingRegressor(**hgb_p).fit(X_train, y_train)
         hgb_pred = np.maximum(0.0, hgb_model.predict(X_test))
         hgb_met = calculate_metrics(y_test, hgb_pred)
         hgb_time = round(time.time() - t0, 2)
 
         # 3. LightGBM Default
         t0 = time.time()
-        lgb_def_cv_rmse, lgb_def_cv_nasa = get_cv_metrics(
-            lambda: lgb.LGBMRegressor(objective="regression", n_estimators=150, learning_rate=0.05, num_leaves=31, min_child_samples=20, random_state=42, verbose=-1)
+        lgb_def_cv_rmse, lgb_def_cv_std, lgb_def_cv_nasa, lgb_def_cv_std_nasa = get_cv_metrics(
+            lambda: lgb.LGBMRegressor(**lgb_def_p)
         )
-        lgb_def_model = lgb.LGBMRegressor(objective="regression", n_estimators=150, learning_rate=0.05, num_leaves=31, min_child_samples=20, random_state=42, verbose=-1).fit(X_train, y_train)
+        lgb_def_model = lgb.LGBMRegressor(**lgb_def_p).fit(X_train, y_train)
         lgb_def_pred = np.maximum(0.0, lgb_def_model.predict(X_test))
         lgb_def_met = calculate_metrics(y_test, lgb_def_pred)
         lgb_def_time = round(time.time() - t0, 2)
-
-        # 4. LightGBM Tuned / Untuned
-        best_params_path = self.root_dir / "configs" / f"best_params_{self.subset}.json"
-        is_tuned = best_params_path.exists()
-        tuned_label = "LightGBM Regressor (Tuned)" if is_tuned else "LightGBM Regressor (Untuned)"
-        tuned_p = {}
-        if is_tuned:
-            try:
-                with open(best_params_path, "r", encoding="utf-8") as f:
-                    tuned_p = json.load(f)
-            except Exception:
-                pass
-
-        n_est = tuned_p.get("n_estimators", 150)
-        lr = tuned_p.get("learning_rate", 0.05)
-        n_leaves = tuned_p.get("num_leaves", 31)
-        min_child = tuned_p.get("min_child_samples", 20)
-        reg_a = tuned_p.get("reg_alpha", 0.0)
-        reg_l = tuned_p.get("reg_lambda", 0.0)
-
-        t0 = time.time()
-        lgb_tuned_cv_rmse, lgb_tuned_cv_nasa = get_cv_metrics(
-            lambda: lgb.LGBMRegressor(objective="regression", n_estimators=n_est, learning_rate=lr, num_leaves=n_leaves, min_child_samples=min_child, reg_alpha=reg_a, reg_lambda=reg_l, random_state=42, verbose=-1)
-        )
-        lgb_tuned_model = lgb.LGBMRegressor(objective="regression", n_estimators=n_est, learning_rate=lr, num_leaves=n_leaves, min_child_samples=min_child, reg_alpha=reg_a, reg_lambda=reg_l, random_state=42, verbose=-1).fit(X_train, y_train)
-        lgb_tuned_pred = np.maximum(0.0, lgb_tuned_model.predict(X_test))
-        lgb_tuned_met = calculate_metrics(y_test, lgb_tuned_pred)
-        lgb_tuned_time = round(time.time() - t0, 2)
 
         models_list = [
             {
                 "model_name": "Ridge Regression",
                 "architecture": "Linear",
                 "cv_mean_rmse": round(ridge_cv_rmse, 2),
+                "cv_std_rmse": round(ridge_cv_std, 2),
                 "cv_mean_nasa": round(ridge_cv_nasa, 1),
+                "cv_std_nasa": round(ridge_cv_std_nasa, 1),
                 "rmse": ridge_met["rmse"],
                 "mae": ridge_met["mae"],
                 "nasa_score": ridge_met["nasa_score"],
@@ -1136,7 +1160,9 @@ class ModelService:
                 "model_name": "HistGradientBoosting Regressor",
                 "architecture": "GBDT",
                 "cv_mean_rmse": round(hgb_cv_rmse, 2),
+                "cv_std_rmse": round(hgb_cv_std, 2),
                 "cv_mean_nasa": round(hgb_cv_nasa, 1),
+                "cv_std_nasa": round(hgb_cv_std_nasa, 1),
                 "rmse": hgb_met["rmse"],
                 "mae": hgb_met["mae"],
                 "nasa_score": hgb_met["nasa_score"],
@@ -1146,23 +1172,46 @@ class ModelService:
                 "model_name": "LightGBM Regressor (Default)",
                 "architecture": "LightGBM",
                 "cv_mean_rmse": round(lgb_def_cv_rmse, 2),
+                "cv_std_rmse": round(lgb_def_cv_std, 2),
                 "cv_mean_nasa": round(lgb_def_cv_nasa, 1),
+                "cv_std_nasa": round(lgb_def_cv_std_nasa, 1),
                 "rmse": lgb_def_met["rmse"],
                 "mae": lgb_def_met["mae"],
                 "nasa_score": lgb_def_met["nasa_score"],
                 "train_time_sec": lgb_def_time
-            },
-            {
-                "model_name": tuned_label,
+            }
+        ]
+
+        # 4. LightGBM Tuned (generate only if actually tuned variant exists, drop Untuned duplicates)
+        best_params_path = self.root_dir / "configs" / f"best_params_{self.subset}.json"
+        is_tuned = best_params_path.exists()
+        if is_tuned:
+            with open(best_params_path, "r", encoding="utf-8") as f:
+                tuned_p = json.load(f)
+            tuned_p["objective"] = "regression"
+            tuned_p["verbose"] = -1
+
+            t0 = time.time()
+            lgb_tuned_cv_rmse, lgb_tuned_cv_std, lgb_tuned_cv_nasa, lgb_tuned_cv_std_nasa = get_cv_metrics(
+                lambda: lgb.LGBMRegressor(**tuned_p)
+            )
+            lgb_tuned_model = lgb.LGBMRegressor(**tuned_p).fit(X_train, y_train)
+            lgb_tuned_pred = np.maximum(0.0, lgb_tuned_model.predict(X_test))
+            lgb_tuned_met = calculate_metrics(y_test, lgb_tuned_pred)
+            lgb_tuned_time = round(time.time() - t0, 2)
+
+            models_list.append({
+                "model_name": "LightGBM Regressor (Tuned)",
                 "architecture": "LightGBM",
                 "cv_mean_rmse": round(lgb_tuned_cv_rmse, 2),
+                "cv_std_rmse": round(lgb_tuned_cv_std, 2),
                 "cv_mean_nasa": round(lgb_tuned_cv_nasa, 1),
+                "cv_std_nasa": round(lgb_tuned_cv_std_nasa, 1),
                 "rmse": lgb_tuned_met["rmse"],
                 "mae": lgb_tuned_met["mae"],
                 "nasa_score": lgb_tuned_met["nasa_score"],
                 "train_time_sec": lgb_tuned_time
-            }
-        ]
+            })
 
         # 5. Deep Models (lazy import if PyTorch present)
         try:

@@ -61,21 +61,16 @@ def test_calibrated_intervals_and_noncrossing_monotonicity():
         assert 0.0 <= p10 <= p50 <= p90
 
 def test_multi_seed_metrics_reporting():
-    """Verify mean±std across seeds are present in evaluation report."""
-    root_dir = get_root_dir()
-    eval_file = root_dir / "artifacts" / "reports" / "evaluation_FD001.json"
-    assert eval_file.exists()
-    
-    with open(eval_file, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    
-    assert "multi_seed" in data
-    ms_data = data["multi_seed"]
-    assert len(ms_data["seeds"]) == 3
-    assert ms_data["rmse_mean"] > 0
-    assert ms_data["rmse_std"] >= 0
-    assert ms_data["mae_mean"] > 0
-    assert ms_data["nasa_mean"] > 0
+    """Verify mean±std metrics are present in manifest."""
+    from tests.helpers import load_manifest
+    manifest = load_manifest()
+    sub_data = manifest["subsets"]["FD001"]
+    assert "cv" in sub_data
+    cv_data = sub_data["cv"]
+    assert cv_data["mean_rmse"] > 0
+    assert cv_data["std_rmse"] >= 0
+    assert cv_data["mean_nasa"] > 0
+    assert cv_data["k_folds"] >= 3
 
 def test_deep_learning_gru_and_cnn_architectures():
     """Verify PyTorch 1D-CNN and GRU models can instantiate, train, and predict."""

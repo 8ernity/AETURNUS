@@ -93,6 +93,30 @@ def test_alert_manager_synthetic_triggers():
     lat_alert = next(a for a in lat_alerts if a["rule_name"] == "RULE_INFERENCE_LATENCY_SPIKE")
     assert lat_alert["firing"] is True
 
+def test_conformal_coverage_alert_manifest():
+    mgr = AlertManager()
+    mgr.cov_min_thresh = 0.75
+
+    # 1. With coverage 0.63 and threshold 0.75, the alert fires
+    alerts_firing = mgr.evaluate_alerts(context={"coverage_metrics": {"FD001": 0.63}})
+    cov_alert = next(a for a in alerts_firing if a["rule_name"] == "RULE_CONFORMAL_COVERAGE_DIP")
+    assert cov_alert["firing"] is True
+    assert cov_alert["metric_value"] == 0.63
+    assert cov_alert["state"] == "firing"
+
+    # 2. With manifest removed, says 'no data' (not firing, not passing)
+    manifest_path = mgr.root_dir / "artifacts" / "run_manifest.json"
+    manifest_bytes = manifest_path.read_bytes()
+    try:
+        manifest_path.unlink()
+        alerts_nodata = mgr.evaluate_alerts(context={})
+        nodata_alert = next(a for a in alerts_nodata if a["rule_name"] == "RULE_CONFORMAL_COVERAGE_DIP")
+        assert nodata_alert["state"] == "no data"
+        assert nodata_alert["status"] == "no data"
+        assert nodata_alert["firing"] is False
+    finally:
+        manifest_path.write_bytes(manifest_bytes)
+
 
 def test_webhook_dispatcher_payload_formatting():
     """Verify webhook dispatcher formats payloads correctly for Slack, Teams, PagerDuty, and Generic schemas."""

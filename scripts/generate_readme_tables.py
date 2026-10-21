@@ -30,14 +30,14 @@ def generate_subset_table(reports_dir: Path) -> str:
         if eval_file.exists():
             with open(eval_file, "r", encoding="utf-8") as f:
                 d = json.load(f)
-            rmse = f"**{d.get('rmse', 0.0):.2f}**"
-            nasa = f"**{d.get('nasa_score', 0.0):,.1f}**"
-            pr_auc = f"**{d.get('pr_auc', 0.0):.3f}**"
-            cov = f"{d.get('interval_coverage', 0.80) * 100:.1f}%"
-            n_engines = d.get("test_engines_count", 100)
-            status_text = d.get("status", "Target Met").upper()
+            rmse = f"**{d['rmse']:.2f}**" if "rmse" in d else "N/A"
+            nasa = f"**{d['nasa_score']:,.1f}**" if "nasa_score" in d else "N/A"
+            pr_auc = f"**{d['pr_auc']:.3f}**" if "pr_auc" in d else "N/A"
+            cov = f"{d['interval_coverage'] * 100:.1f}%" if "interval_coverage" in d else "N/A"
+            n_engines = d["test_engines_count"] if "test_engines_count" in d else "N/A"
+            status_text = d.get("status", "").upper()
             if "MET" in status_text and "MISSED" not in status_text:
-                status_html = '<span style="color:#22c55e;font-weight:bold;">TARGET MET</span>'
+                status_html = '<span style="color:#22c55e;font-weight:bold;">TARGET REACHED</span>'
             else:
                 status_html = '<span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span>'
         else:
@@ -63,15 +63,15 @@ def generate_multi_seed_table(reports_dir: Path) -> str:
                 d = json.load(f)
             ms = d.get("multi_seed", {})
             if ms:
-                rmse = f"${ms.get('rmse_mean', 0.0):.2f} \\pm {ms.get('rmse_std', 0.0):.2f}$"
-                mae = f"${ms.get('mae_mean', 0.0):.2f} \\pm {ms.get('mae_std', 0.0):.2f}$"
-                nasa = f"${ms.get('nasa_mean', 0.0):,.1f} \\pm {ms.get('nasa_std', 0.0):.1f}$"
-                prauc = f"${ms.get('pr_auc_mean', 0.0):.3f} \\pm {ms.get('pr_auc_std', 0.0):.3f}$"
+                rmse = f"${ms['rmse_mean']:.2f} \\pm {ms['rmse_std']:.2f}$" if "rmse_mean" in ms else "N/A"
+                mae = f"${ms['mae_mean']:.2f} \\pm {ms['mae_std']:.2f}$" if "mae_mean" in ms else "N/A"
+                nasa = f"${ms['nasa_mean']:,.1f} \\pm {ms['nasa_std']:.1f}$" if "nasa_mean" in ms else "N/A"
+                prauc = f"${ms['pr_auc_mean']:.3f} \\pm {ms['pr_auc_std']:.3f}$" if "pr_auc_mean" in ms else "N/A"
             else:
-                rmse = f"${d.get('rmse', 0.0):.2f}$"
-                mae = f"${d.get('mae', 0.0):.2f}$"
-                nasa = f"${d.get('nasa_score', 0.0):,.1f}$"
-                prauc = f"${d.get('pr_auc', 0.0):.3f}$"
+                rmse = f"${d['rmse']:.2f}$" if "rmse" in d else "N/A"
+                mae = f"${d['mae']:.2f}$" if "mae" in d else "N/A"
+                nasa = f"${d['nasa_score']:,.1f}$" if "nasa_score" in d else "N/A"
+                prauc = f"${d['pr_auc']:.3f}$" if "pr_auc" in d else "N/A"
         else:
             rmse, mae, nasa, prauc = "N/A", "N/A", "N/A", "N/A"
 
@@ -96,10 +96,10 @@ def generate_model_comparison_table(reports_dir: Path) -> str:
             for m in d.get("models", []):
                 name = m.get("model_name", "Model")
                 arch = m.get("architecture", "")
-                cv_rmse = f"{m.get('cv_mean_rmse', 0.0):.2f}" if "cv_mean_rmse" in m else "N/A"
-                rmse = f"{m.get('rmse', 0.0):.2f}"
-                mae = f"{m.get('mae', 0.0):.2f}"
-                time_s = m.get("train_time_sec", 0.0)
+                cv_rmse = f"{m['cv_mean_rmse']:.2f}" if "cv_mean_rmse" in m else "N/A"
+                rmse = f"{m['rmse']:.2f}" if "rmse" in m else "N/A"
+                mae = f"{m['mae']:.2f}" if "mae" in m else "N/A"
+                time_s = m["train_time_sec"] if "train_time_sec" in m else 0.0
                 speed = f"~{time_s:.1f}s" if time_s > 0 else "N/A"
                 is_champ = (name == champ_name) or ("Champion" in name)
                 if is_champ:

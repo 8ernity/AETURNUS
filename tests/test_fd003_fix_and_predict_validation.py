@@ -70,15 +70,25 @@ class TestFD003RegressionObjective:
 
         if hasattr(ms.rul_p10_model, "get_params"):
             p10_params = ms.rul_p10_model.get_params()
-            assert p10_params.get("objective") == "quantile", (
-                f"[{subset}] p10 model should use quantile objective"
-            )
+            if getattr(ms, "algorithm", "") == "histgb" or "HistGradient" in type(ms.rul_p10_model).__name__:
+                assert p10_params.get("loss") == "quantile", (
+                    f"[{subset}] HistGB p10 model should use loss=='quantile'"
+                )
+            else:
+                assert p10_params.get("objective") == "quantile" or p10_params.get("loss") == "quantile", (
+                    f"[{subset}] p10 model should use quantile objective"
+                )
 
         if hasattr(ms.rul_p90_model, "get_params"):
             p90_params = ms.rul_p90_model.get_params()
-            assert p90_params.get("objective") == "quantile", (
-                f"[{subset}] p90 model should use quantile objective"
-            )
+            if getattr(ms, "algorithm", "") == "histgb" or "HistGradient" in type(ms.rul_p90_model).__name__:
+                assert p90_params.get("loss") == "quantile", (
+                    f"[{subset}] HistGB p90 model should use loss=='quantile'"
+                )
+            else:
+                assert p90_params.get("objective") == "quantile" or p90_params.get("loss") == "quantile", (
+                    f"[{subset}] p90 model should use quantile objective"
+                )
 
 
 class TestShippedBundleQuality:

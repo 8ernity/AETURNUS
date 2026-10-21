@@ -14,6 +14,18 @@ class CMAPSSLoader:
         self.data_dir = data_dir or (self.root_dir / "data" / "raw")
         self.columns = self.config["dataset"]["columns"]
 
+    @property
+    def operating_conditions(self) -> str:
+        if self.subset in ("FD001", "FD003"):
+            return "1 (Sea Level)"
+        return "6 (Full Envelope)"
+
+    @property
+    def fault_modes(self) -> str:
+        if self.subset in ("FD001", "FD002"):
+            return "1 (HPC Degradation)"
+        return "2 (HPC + Fan Degradation)"
+
     def load_raw_data(self) -> Tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
         """
         Loads raw train, test, and RUL truth arrays for the specified subset.
