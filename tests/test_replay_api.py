@@ -2,9 +2,24 @@ import pytest
 from io import BytesIO
 from fastapi.testclient import TestClient
 from src.api.server import app, replay_state, current_subset
+from src.common.utils import get_root_dir
 from src.features.streaming import StreamingEnginePipeline
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def restore_shipped_model_artifacts():
+    """Promote/rollback endpoints mutate the served bundle and registry; restore them after each test."""
+    root = get_root_dir()
+    bundle = root / "artifacts" / "models" / "model_bundle_FD001.joblib"
+    registry = root / "artifacts" / "reports" / "model_registry.json"
+    bundle_bytes = bundle.read_bytes()
+    registry_text = registry.read_text(encoding="utf-8") if registry.exists() else None
+    yield
+    bundle.write_bytes(bundle_bytes)
+    if registry_text is not None:
+        registry.write_text(registry_text, encoding="utf-8")
 
 def test_fleet_endpoint_non_mutating_and_all_engines():
     """Verify GET /fleet returns all engines, does not mutate server state, and handles subsets."""

@@ -1,4 +1,4 @@
-.PHONY: setup data train evaluate demo test ci-smoke lint
+.PHONY: setup data train evaluate render-readme demo test ci-smoke lint archive check-readme
 
 PYTHON ?= python
 
@@ -17,6 +17,9 @@ evaluate:
 	$(PYTHON) -m scripts.evaluate_all_models
 	$(PYTHON) scripts/render_readme.py
 
+render-readme:
+	$(PYTHON) scripts/render_readme.py
+
 check-readme:
 	$(PYTHON) scripts/render_readme.py --check
 
@@ -28,4 +31,10 @@ test:
 
 ci-smoke:
 	$(PYTHON) scripts/ci_smoke_test.py
+
+# Ship only tracked source: git archive cannot include untracked DB/runtime state.
+archive:
+	git archive --format=zip --prefix=AETURNUS/ -o AETURNUS_source.zip HEAD
+	@$(PYTHON) -c "import sys, zipfile; names = zipfile.ZipFile('AETURNUS_source.zip').namelist(); bad = [n for n in names if n.endswith(('.db', '.db-wal', '.db-shm', '.db-journal'))]; sys.exit(f'Archive contains DB state: {bad}') if bad else print(f'Archive OK: {len(names)} tracked files, no DB state')"
+
 

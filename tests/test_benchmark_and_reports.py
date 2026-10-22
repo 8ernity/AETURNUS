@@ -82,17 +82,16 @@ def test_registry_has_real_hash_and_metrics():
     assert "models" in reg
     champion = [m for m in reg["models"] if m.get("alias") == "champion"][0]
     
-    # Real SHA-256 data hash
-    data_hash = champion["data_hash"]
-    assert data_hash.startswith("sha256:")
-    assert len(data_hash) == len("sha256:") + 16
-    assert data_hash != "sha256-c-mapss-fd001-train-v1"
-    
-    # Real metrics matching manifest
-    v1_model = [m for m in reg["models"] if m.get("version") == "v1.0"][0]
     from tests.helpers import load_manifest
     manifest = load_manifest()
     sub_data = manifest["subsets"]["FD001"]
+
+    bundle_sha256 = champion["bundle_sha256"]
+    assert len(bundle_sha256) == 64
+    assert bundle_sha256 == sub_data["bundle_sha256"]
+
+    # Real metrics matching manifest
+    v1_model = [m for m in reg["models"] if m.get("version") == "v1.0"][0]
     assert v1_model["metrics"]["rmse"] == pytest.approx(sub_data["metrics"]["rmse"], rel=1e-4)
     assert v1_model["metrics"]["nasa_score"] == pytest.approx(sub_data["metrics"]["nasa_score"], rel=1e-4)
 

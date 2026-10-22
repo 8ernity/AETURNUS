@@ -122,7 +122,7 @@ class FleetCostSimulator:
                     df = hdf
             lifespans = df.groupby("unit")["cycle"].max().tolist()
             return [int(x) for x in lifespans] if lifespans else []
-        except Exception:
+        except (FileNotFoundError, KeyError, ValueError, OSError):
             return []
 
     def simulate_fleet(

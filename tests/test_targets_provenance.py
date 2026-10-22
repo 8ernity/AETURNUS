@@ -22,6 +22,10 @@ def test_change_target_in_yaml_propagates_without_code_edits():
     targets_orig = targets_file.read_text(encoding="utf-8")
     manifest_orig = manifest_file.read_text(encoding="utf-8")
     readme_orig = readme_file.read_text(encoding="utf-8") if readme_file.exists() else ""
+    active_bundle = root_dir / "artifacts" / "models" / "model_bundle_FD001.joblib"
+    versioned_bundle = root_dir / "artifacts" / "models" / "model_bundle_FD001_v1.0.joblib"
+    active_orig = active_bundle.read_bytes() if active_bundle.exists() else None
+    versioned_orig = versioned_bundle.read_bytes() if versioned_bundle.exists() else None
 
     try:
         # Load targets
@@ -61,5 +65,9 @@ def test_change_target_in_yaml_propagates_without_code_edits():
         # Restore files to pristine state
         targets_file.write_text(targets_orig, encoding="utf-8")
         manifest_file.write_text(manifest_orig, encoding="utf-8")
+        if active_orig is not None:
+            active_bundle.write_bytes(active_orig)
+        if versioned_orig is not None:
+            versioned_bundle.write_bytes(versioned_orig)
         if readme_orig:
             readme_file.write_text(readme_orig, encoding="utf-8")

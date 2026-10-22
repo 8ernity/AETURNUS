@@ -70,20 +70,22 @@ def test_retrain_demo_fixed_holdout_and_no_fake_multipliers():
         ratio = chal_holdout["rmse"] / champ_holdout["rmse"]
         assert abs(ratio - 0.96) > 1e-4 or abs(ratio - 0.94) > 1e-4
 
-        # Check registry updated with real data hashes and aliases
+        # Check registry updated with minimal rows and derived provenance
         reg = mgr.get_registry()
         models = reg["models"]
         assert len(models) >= 2
-        
-        # Check aliases
+
         aliases = [m["alias"] for m in models]
-        assert "champion" in aliases
+        assert aliases.count("champion") == 1
         assert any("previous" in a or "challenger" in a for a in aliases)
 
-        # Check data hash of all models are sha256 hex
         for m in models:
-            assert m["data_hash"].startswith("sha256:")
-            assert len(m["data_hash"]) == len("sha256:") + 16
+            assert len(m["bundle_sha256"]) == 64
+            assert m["model_path"].endswith(".joblib")
+            assert "manifest_run_id" in m
+
+        champion = [m for m in models if m["alias"] == "champion"][0]
+        assert champion["metrics"]["rmse"] > 0
 
         # Verify versioned model file exists on disk
         target_version = result.get("promoted_version") or result.get("challenger_version")

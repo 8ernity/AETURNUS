@@ -107,11 +107,6 @@ def run_model_gate() -> bool:
 
         monotonic_passed = (monotonic_violations == 0)
 
-        # 5. Check Registry SHA-256 fingerprint
-        reg_models = registry_data.get("models", [])
-        sub_models = [m for m in reg_models if m.get("version", "").startswith(f"v_{sub}") or (sub == "FD001" and m.get("alias") == "champion")]
-        data_hash = sub_models[0].get("data_hash", "N/A") if sub_models else "sha256:verified"
-
         status_flag = "PASS" if (rmse_gate_passed and monotonic_passed) else "FAIL"
         if status_flag == "FAIL":
             all_passed = False

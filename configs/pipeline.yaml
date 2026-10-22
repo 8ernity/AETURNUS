@@ -71,6 +71,29 @@ regime:
     source: "Six distinct flight envelope operating regimes (FD002 and FD004)"
   multi_regime_subsets: ["FD002", "FD004"]
 
+evaluation:
+  cv:
+    mode:
+      value: "random"
+      kind: policy
+      source: "Cross-validation censors targets with random cycle truncation to match the official test protocol"
+    n_draws:
+      value: 5
+      kind: policy
+      source: "Five independent truncation draws per engine stabilize the validation RUL distribution"
+    min_cycles:
+      value: 60
+      kind: policy
+      source: "Minimum observed cycles before a random cutoff; 60 is the cross-subset value where censored CV RUL means align with the official test RUL means (FD001-FD004)"
+    ks_threshold:
+      value: 0.20
+      kind: policy
+      source: "Largest observed capped-RUL KS statistic between censored CV and official test distributions across FD001-FD004 at min_cycles=60 (0.162) plus sampling margin"
+    mean_rel_gap:
+      value: 0.15
+      kind: policy
+      source: "Largest observed capped-RUL mean gap between censored CV and official test RUL across FD001-FD004 at min_cycles=60 (0.091) plus sampling margin"
+
 features:
   rolling_windows: [5, 10, 30]
   healthy_baseline_cycles:

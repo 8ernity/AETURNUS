@@ -1,5 +1,6 @@
 import os
 import re
+import gc
 import json
 import time
 import joblib
@@ -17,6 +18,7 @@ from sklearn.model_selection import GroupKFold
 import lightgbm as lgb
 
 from src.common.utils import get_root_dir, load_yaml
+from src.ingest.loader import CMAPSSLoader
 from src.eval.protocol import (
     calculate_metrics,
     calculate_nasa_score,
@@ -24,23 +26,62 @@ from src.eval.protocol import (
     eval_frames,
     cap_rul,
     get_protocol_id,
+    DEFAULT_SEED,
+    DEFAULT_CV_FOLDS,
 )
 
 SENSOR_REGEX = re.compile(r"^s\d+$")
 
-CONDITIONS_MAP = {
-    "FD001": ("Single (Sea Level)", "1 (HPC Degradation)"),
-    "FD002": ("Six Regimes", "1 (HPC Degradation)"),
-    "FD003": ("Single", "2 (HPC + Fan)"),
-    "FD004": ("Six Regimes", "2 (HPC + Fan)")
+# Canonical mapping from the served p50 regressor class to the algorithm key stored
+# in manifests and registry rows. Provenance is derived from the bundle, never typed.
+P50_MODEL_CLASS_TO_ALGORITHM = {
+    "LGBMRegressor": "lightgbm",
+    "HistGradientBoostingRegressor": "hist_gb",
+    "Ridge": "ridge",
 }
 
-CALIBRATION_OFFSETS_80_PCT = {
-    "FD001": 4.90,
-    "FD002": 16.00,
-    "FD003": 6.00,
-    "FD004": 20.00
-}
+ALGORITHM_TO_P50_MODEL_CLASS = {v: k for k, v in P50_MODEL_CLASS_TO_ALGORITHM.items()}
+
+
+def algorithm_for_p50_model(p50_model: Any) -> str:
+    """Returns the canonical algorithm key for a fitted p50 regressor instance."""
+    class_name = type(p50_model).__name__
+    if class_name not in P50_MODEL_CLASS_TO_ALGORITHM:
+        raise ValueError(
+            f"Unsupported p50 regressor class '{class_name}'; cannot derive algorithm provenance. "
+            f"Known classes: {sorted(P50_MODEL_CLASS_TO_ALGORITHM)}"
+        )
+    return P50_MODEL_CLASS_TO_ALGORITHM[class_name]
+
+def load_cv_protocol() -> Dict[str, Any]:
+    """Loads the canonical CV censoring protocol from configs/pipeline.yaml.
+
+    CV must censor targets like the official test protocol: random truncation with
+    at least five draws. Refusing other configurations prevents a silent switch back
+    to last-cycle validation, whose RUL distribution is degenerate on train engines.
+    """
+    cfg = load_yaml("configs/pipeline.yaml")
+    cv_cfg = cfg["evaluation"]["cv"]
+    mode = str(cv_cfg["mode"])
+    n_draws = int(cv_cfg["n_draws"])
+    min_cycles = int(cv_cfg["min_cycles"])
+    if mode != "random":
+        raise ValueError(
+            f"CV mode must be 'random' to censor validation targets like the test set; got '{mode}'."
+        )
+    if n_draws < 5:
+        raise ValueError(
+            f"CV n_draws must be >= 5 to stabilize the censored RUL distribution; got {n_draws}."
+        )
+    if min_cycles <= 0:
+        raise ValueError(f"CV min_cycles must be positive; got {min_cycles}.")
+    return {
+        "mode": mode,
+        "n_draws": n_draws,
+        "min_cycles": min_cycles,
+        "ks_threshold": float(cv_cfg["ks_threshold"]),
+        "mean_rel_gap": float(cv_cfg["mean_rel_gap"]),
+    }
 
 def wilson_ci(p: float, n: int, confidence: float = 0.95) -> Tuple[float, float]:
     """Calculates Wilson score interval for binomial proportion."""
@@ -86,8 +127,9 @@ class ModelService:
         self.classifiers: Dict[int, Any] = {}
         self.horizon_thresholds: Dict[int, float] = {10: 0.50, 30: 0.70, 60: 0.50}
         self.classifier_threshold_30: float = 0.70
-        self.interval_calibration_offset: float = CALIBRATION_OFFSETS_80_PCT.get(subset, 5.0)
-        self.conformal_q: float = CALIBRATION_OFFSETS_80_PCT.get(subset, 5.0)
+        # Calibration is derived from the bundle (or set by train/calibrate_intervals); never defaulted.
+        self.interval_calibration_offset: Optional[float] = None
+        self.conformal_q: Optional[float] = None
         self.training_time_sec: float = 0.0
         self.version: str = "v1.0"
         self._shap_explainer: Optional[Any] = None
@@ -141,16 +183,16 @@ class ModelService:
             train_mask = ~train_df["unit"].isin(val_units)
             val_mask = train_df["unit"].isin(val_units)
 
-        X_train = train_df.loc[train_mask, self.feature_cols].values
+        X_train = train_df.loc[train_mask, self.feature_cols].to_numpy(dtype=np.float32)
         y_rul_train = train_df.loc[train_mask, "rul_capped"].values
 
-        X_val = train_df.loc[val_mask, self.feature_cols].values
+        X_val = train_df.loc[val_mask, self.feature_cols].to_numpy(dtype=np.float32)
         y_rul_val = train_df.loc[val_mask, "rul_capped"].values
 
         # 1. Anomaly Detector on early healthy cycles
         print(f"[{self.subset}] Training Isolation Forest on early healthy cycles...")
         early_mask = train_df["cycle"] <= train_df.groupby("unit")["cycle"].transform("max") * 0.40
-        X_healthy = train_df.loc[early_mask, self.feature_cols].values
+        X_healthy = train_df.loc[early_mask, self.feature_cols].to_numpy(dtype=np.float32)
 
         ad_cfg = self.models_cfg["anomaly_detector"]
         self.anomaly_detector = IsolationForest(
@@ -159,6 +201,8 @@ class ModelService:
             random_state=random_state
         )
         self.anomaly_detector.fit(X_healthy)
+        del X_healthy
+        gc.collect()
 
         # 2. Check for tuned hyperparameters from Optuna
         best_params_path = self.root_dir / "configs" / f"best_params_{self.subset}.json"
@@ -283,7 +327,7 @@ class ModelService:
 
         if val_trunc_indices:
             sub_val = train_df.loc[val_trunc_indices]
-            X_val_trunc = sub_val[self.feature_cols].values
+            X_val_trunc = sub_val[self.feature_cols].to_numpy(dtype=np.float32)
             y_val_trunc = sub_val["rul_capped"].values
         else:
             X_val_trunc = X_val
@@ -302,6 +346,8 @@ class ModelService:
         q_quantile = min(1.0, np.ceil((n_val + 1) * (1.0 - alpha)) / n_val)
         self.conformal_q = float(np.quantile(scores, q_quantile))
         self.interval_calibration_offset = self.conformal_q
+        del val_df
+        gc.collect()
 
         # 5. Multi-horizon Classifiers [10, 30, 60] with Validation-Tuned Thresholds
         horizons = self.models_cfg.get("classifier", {}).get("horizons", [10, 30, 60])
@@ -312,6 +358,7 @@ class ModelService:
         self.horizon_thresholds = {}
 
         for h in horizons:
+            gc.collect()
             target_col = f"fails_within_{h}"
             if target_col not in train_df.columns:
                 rul_col = "rul_raw" if "rul_raw" in train_df.columns else "rul_capped"
@@ -377,12 +424,12 @@ class ModelService:
             "train_time_sec": self.training_time_sec,
             "train_engines": int(train_df.loc[train_mask, "unit"].nunique()),
             "val_engines": int(train_df.loc[val_mask, "unit"].nunique()),
-            "calibration_offset": round(self.interval_calibration_offset, 3),
-            "conformal_q": round(self.conformal_q, 3),
+            "calibration_offset": None if self.interval_calibration_offset is None else round(self.interval_calibration_offset, 3),
+            "conformal_q": None if self.conformal_q is None else round(self.conformal_q, 3),
             "horizon_thresholds": self.horizon_thresholds
         }
 
-    def evaluate_cv(self, k: int = 5, train_df: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
+    def evaluate_cv(self, k: int = DEFAULT_CV_FOLDS, train_df: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
         """
         Evaluates model over GroupKFold(k=5, groups=engine) on TRAIN engines only.
         Writes artifacts/reports/cv_{subset}.json with per-fold and mean+-std RMSE, NASA.
@@ -430,7 +477,26 @@ class ModelService:
             params = {k: v["value"] if isinstance(v, dict) and "value" in v else v for k, v in ridge_cfg.items()}
             reg_builder = lambda: Ridge(**params)
         else:
-            reg_builder = lambda: lgb.LGBMRegressor(objective="regression", verbose=-1)
+            raise ValueError(
+                f"Unsupported algorithm '{self.algorithm}' for evaluate_cv; "
+                "expected one of lightgbm, hist_gb, ridge."
+            )
+
+        cv_proto = load_cv_protocol()
+        cv_mode = cv_proto["mode"]
+        cv_draws = cv_proto["n_draws"]
+        cv_min_cycles = cv_proto["min_cycles"]
+        cv_protocol_id = get_protocol_id(mode=cv_mode, seed=DEFAULT_SEED, n_draws=cv_draws)
+
+        def _censored_frame(fold_df: pd.DataFrame) -> pd.DataFrame:
+            frames = eval_frames(
+                fold_df,
+                mode=cv_mode,
+                seed=DEFAULT_SEED,
+                n_draws=cv_draws,
+                min_cycles=cv_min_cycles,
+            )
+            return pd.concat(frames, ignore_index=True)
 
         gkf = GroupKFold(n_splits=k)
         fold_results = []
@@ -440,14 +506,13 @@ class ModelService:
             reg = reg_builder()
             reg.fit(X[tr_idx], y[tr_idx])
 
-            # Validation evaluation uses canonical eval_frames
-            val_df_fold = train_only_df.iloc[val_idx]
-            val_frame = eval_frames(val_df_fold, mode="last", seed=42, n_draws=1)[0]
+            # Validation targets are censored with the same random truncation protocol
+            # used to build the official test set, so CV metrics are test-like.
+            val_frame = _censored_frame(train_only_df.iloc[val_idx])
             val_X = val_frame[self.feature_cols].values
             val_y = val_frame["rul_capped"].values
 
-            tr_df_fold = train_only_df.iloc[tr_idx]
-            tr_frame = eval_frames(tr_df_fold, mode="last", seed=42, n_draws=1)[0]
+            tr_frame = _censored_frame(train_only_df.iloc[tr_idx])
             tr_X = tr_frame[self.feature_cols].values
             tr_y = tr_frame["rul_capped"].values
 
@@ -471,9 +536,12 @@ class ModelService:
             "subset": self.subset,
             "k_folds": k,
             "algorithm": self.algorithm,
-            "protocol_id": get_protocol_id(),
+            "protocol_id": cv_protocol_id,
+            "evaluation_mode": cv_mode,
+            "n_draws": cv_draws,
+            "min_cycles": cv_min_cycles,
             "folds": fold_results,
-            "mean_train_rmse": round(float(np.mean(train_rmses)), 2) if train_rmses else 0.0,
+            "mean_train_rmse": round(float(np.mean(train_rmses)), 2),
             "mean_rmse": round(float(np.mean(rmses)), 2),
             "std_rmse": round(float(np.std(rmses)), 2),
             "mean_nasa": round(float(np.mean(nasas)), 1),
@@ -494,7 +562,7 @@ class ModelService:
         - Split-conformal coverage, mean width, Wilson 95% CI
         - Multi-horizon classification (PR-AUC, precision, recall at tuned threshold)
         """
-        eval_rows = eval_frames(test_df, mode="last", seed=42, n_draws=1)[0]
+        eval_rows = eval_frames(test_df, mode="last", seed=DEFAULT_SEED, n_draws=1)[0]
 
         for c in self.feature_cols:
             if c not in eval_rows.columns:
@@ -512,7 +580,7 @@ class ModelService:
         raw_p90 = self.rul_p90_model.predict(X_test)
 
         # Enforce non-crossing quantile monotonicity: p10 <= p50 <= p90 with conformal q
-        cal_offset = getattr(self, "interval_calibration_offset", getattr(self, "conformal_q", 0.0))
+        cal_offset = self._require_calibration_offset()
         pred_p10 = np.maximum(0.0, np.minimum(raw_p10, pred_p50) - cal_offset)
         pred_p90 = np.maximum(pred_p50, np.maximum(raw_p90, pred_p50) + cal_offset)
 
@@ -520,7 +588,7 @@ class ModelService:
         metrics = calculate_metrics(y_true, pred_p50)
         
         # 1000-resample bootstrap 95% CI for last-window test RMSE
-        boot_lower, boot_upper = bootstrap_rmse_ci(y_true, pred_p50, n_boot=1000, seed=42)
+        boot_lower, boot_upper = bootstrap_rmse_ci(y_true, pred_p50, n_boot=1000, seed=DEFAULT_SEED)
 
         # Coverage rate and Wilson 95% CI
         covered = (y_true >= pred_p10) & (y_true <= pred_p90)
@@ -619,11 +687,12 @@ class ModelService:
                 "color": colors[i % len(colors)]
             })
 
-        targets_cfg = load_yaml(self.root_dir / "configs" / "targets.yaml")
+        targets_cfg = load_yaml(self.root_dir / "configs" / "targets.yaml", raw=True)
         raw_target = targets_cfg["subsets"][self.subset]["target_rmse"]
-        target_rmse = float(raw_target["value"]) if isinstance(raw_target, dict) and "value" in raw_target else float(raw_target)
+        target_rmse = float(raw_target["value"])
         target_met = bool(metrics["rmse"] <= target_rmse)
-        cond, faults = CONDITIONS_MAP.get(self.subset, ("Standard", "1 Fault"))
+        loader = CMAPSSLoader(subset=self.subset)
+        cond, faults = loader.operating_conditions, loader.fault_modes
         status = "Target Met" if target_met else "Target Missed"
 
         # Parity Scatter points for held-out test engines
@@ -724,7 +793,7 @@ class ModelService:
                 try:
                     with open(report_file, "r", encoding="utf-8") as f_prev:
                         prev = json.load(f_prev)
-                        if "multi_seed" in prev:
+                        if prev.get("algorithm") == self.algorithm and "multi_seed" in prev:
                             results["multi_seed"] = prev["multi_seed"]
                 except Exception:
                     pass
@@ -783,9 +852,14 @@ class ModelService:
         rul_p50 = float(np.maximum(0.0, self.rul_p50_model.predict(feats)[0]))
         raw_p90 = float(self.rul_p90_model.predict(feats)[0])
 
-        cal_offset = getattr(self, "interval_calibration_offset", getattr(self, "conformal_q", 0.0))
-        rul_p10 = float(np.maximum(0.0, min(raw_p10, rul_p50) - cal_offset))
-        rul_p90 = float(max(rul_p50, max(raw_p90, rul_p50) + cal_offset))
+        cal_offset = self.interval_calibration_offset
+        if cal_offset is None:
+            # Uncalibrated model (e.g. hand-built unit model): report a degenerate interval
+            # rather than inventing an offset.
+            rul_p10, rul_p90 = rul_p50, rul_p50
+        else:
+            rul_p10 = float(np.maximum(0.0, min(raw_p10, rul_p50) - cal_offset))
+            rul_p90 = float(max(rul_p50, max(raw_p90, rul_p50) + cal_offset))
 
         # Multi-horizon probabilities [10, 30, 60]
         horizons = [10, 30, 60]
@@ -935,9 +1009,13 @@ class ModelService:
         rul_p50 = np.maximum(0.0, self.rul_p50_model.predict(feats)) if self.rul_p50_model else np.zeros(n)
         raw_p90 = self.rul_p90_model.predict(feats) if self.rul_p90_model else np.zeros(n)
 
-        cal_offset = getattr(self, "interval_calibration_offset", getattr(self, "conformal_q", 0.0))
-        rul_p10 = np.maximum(0.0, np.minimum(raw_p10, rul_p50) - cal_offset)
-        rul_p90 = np.maximum(rul_p50, np.maximum(raw_p90, rul_p50) + cal_offset)
+        cal_offset = self.interval_calibration_offset
+        if cal_offset is None:
+            # Uncalibrated model: degenerate intervals instead of a typed default offset.
+            rul_p10, rul_p90 = rul_p50, rul_p50
+        else:
+            rul_p10 = np.maximum(0.0, np.minimum(raw_p10, rul_p50) - cal_offset)
+            rul_p90 = np.maximum(rul_p50, np.maximum(raw_p90, rul_p50) + cal_offset)
 
         # Multi-horizon probabilities [10, 30, 60]
         fail_prob_10 = np.zeros(n, dtype=np.float32)
@@ -1004,6 +1082,7 @@ class ModelService:
 
         for s in seeds:
             eval_ms = ModelService(self.subset)
+            eval_ms.algorithm = self.algorithm
             if s != 42 or self.rul_p50_model is None:
                 eval_ms.train(train_df, random_state=s)
             else:
@@ -1018,7 +1097,7 @@ class ModelService:
 
             raw_p10 = eval_ms.rul_p10_model.predict(X_test)
             raw_p90 = eval_ms.rul_p90_model.predict(X_test)
-            cal_offset = getattr(eval_ms, "interval_calibration_offset", 0.0)
+            cal_offset = eval_ms._require_calibration_offset()
             cal_p10 = np.maximum(0.0, np.minimum(raw_p10, pred_p50) - cal_offset)
             cal_p90 = np.maximum(pred_p50, np.maximum(raw_p90, pred_p50) + cal_offset)
             cov = float(np.mean((y_true >= cal_p10) & (y_true <= cal_p90)))
@@ -1035,6 +1114,7 @@ class ModelService:
             gc.collect()
 
         multi_seed_report = {
+            "algorithm": self.algorithm,
             "seeds": seeds,
             "rmse_mean": round(float(np.mean(rmses)), 2),
             "rmse_std": round(float(np.std(rmses)), 2),
@@ -1067,7 +1147,7 @@ class ModelService:
         Saves to artifacts/reports/model_comparison_{subset}.json.
         """
         print(f"[{self.subset}] Benchmarking Ridge, HistGB, LightGBM, and Deep Learning models...")
-        eval_rows = eval_frames(test_df, mode="last", seed=42, n_draws=1)[0]
+        eval_rows = eval_frames(test_df, mode="last", seed=DEFAULT_SEED, n_draws=1)[0]
         
         X_train = train_df[self.feature_cols].values
         y_train = train_df["rul_capped"].values
@@ -1084,17 +1164,30 @@ class ModelService:
         y_tr_cv = train_only_df["rul_capped"].values
         groups_cv = train_only_df["unit"].values
 
-        gkf = GroupKFold(n_splits=5)
+        gkf = GroupKFold(n_splits=DEFAULT_CV_FOLDS)
         splits_list = list(gkf.split(X_tr_cv, y_tr_cv, groups=groups_cv))
 
-        # Protocol matching champion training path (evaluate_cv): GroupKFold-5 on persistent train engines using eval_frames
+        # Protocol matching evaluate_cv: GroupKFold-5 on persistent train engines with
+        # randomly censored validation targets, so comparison CV is test-like.
+        cv_proto = load_cv_protocol()
+        cv_mode = cv_proto["mode"]
+        cv_draws = cv_proto["n_draws"]
+        cv_min_cycles = cv_proto["min_cycles"]
+        cv_protocol_id = get_protocol_id(mode=cv_mode, seed=DEFAULT_SEED, n_draws=cv_draws)
+
         def get_cv_metrics(model_fn):
             fold_rmses, fold_nasas = [], []
             for tr_i, val_i in splits_list:
                 m = model_fn()
                 m.fit(X_tr_cv[tr_i], y_tr_cv[tr_i])
-                val_df_fold = train_only_df.iloc[val_i]
-                val_frame = eval_frames(val_df_fold, mode="last", seed=42, n_draws=1)[0]
+                val_frames = eval_frames(
+                    train_only_df.iloc[val_i],
+                    mode=cv_mode,
+                    seed=DEFAULT_SEED,
+                    n_draws=cv_draws,
+                    min_cycles=cv_min_cycles,
+                )
+                val_frame = pd.concat(val_frames, ignore_index=True)
                 preds = np.maximum(0.0, m.predict(val_frame[self.feature_cols].values))
                 met = calculate_metrics(val_frame["rul_capped"].values, preds)
                 fold_rmses.append(met["rmse"])
@@ -1147,6 +1240,7 @@ class ModelService:
             {
                 "model_name": "Ridge Regression",
                 "architecture": "Linear",
+                "servable": True,
                 "cv_mean_rmse": round(ridge_cv_rmse, 2),
                 "cv_std_rmse": round(ridge_cv_std, 2),
                 "cv_mean_nasa": round(ridge_cv_nasa, 1),
@@ -1159,6 +1253,7 @@ class ModelService:
             {
                 "model_name": "HistGradientBoosting Regressor",
                 "architecture": "GBDT",
+                "servable": True,
                 "cv_mean_rmse": round(hgb_cv_rmse, 2),
                 "cv_std_rmse": round(hgb_cv_std, 2),
                 "cv_mean_nasa": round(hgb_cv_nasa, 1),
@@ -1171,6 +1266,7 @@ class ModelService:
             {
                 "model_name": "LightGBM Regressor (Default)",
                 "architecture": "LightGBM",
+                "servable": True,
                 "cv_mean_rmse": round(lgb_def_cv_rmse, 2),
                 "cv_std_rmse": round(lgb_def_cv_std, 2),
                 "cv_mean_nasa": round(lgb_def_cv_nasa, 1),
@@ -1203,6 +1299,7 @@ class ModelService:
             models_list.append({
                 "model_name": "LightGBM Regressor (Tuned)",
                 "architecture": "LightGBM",
+                "servable": True,
                 "cv_mean_rmse": round(lgb_tuned_cv_rmse, 2),
                 "cv_std_rmse": round(lgb_tuned_cv_std, 2),
                 "cv_mean_nasa": round(lgb_tuned_cv_nasa, 1),
@@ -1216,28 +1313,59 @@ class ModelService:
         # 5. Deep Models (lazy import if PyTorch present)
         try:
             from src.models.neural_baseline import NeuralRULBenchmark
-            bench = NeuralRULBenchmark(feature_cols=self.feature_cols, window_size=30, seed=42)
+            window_len = int(load_yaml(self.root_dir / "configs" / "pipeline.yaml")["features"]["sequence_window_len"])
+            bench = NeuralRULBenchmark(feature_cols=self.feature_cols, window_size=window_len, seed=DEFAULT_SEED)
             cnn_res = bench.evaluate_architecture("cnn", train_df, test_df, y_test)
             gru_res = bench.evaluate_architecture("gru", train_df, test_df, y_test)
-            models_list.append(cnn_res)
-            models_list.append(gru_res)
+            # Deep benchmarks are reported but not servable by ModelService and do not
+            # implement the censored CV protocol, so they are ineligible for champion.
+            for deep_res in (cnn_res, gru_res):
+                deep_res["servable"] = False
+                deep_res["cv_protocol_id"] = None
+                models_list.append(deep_res)
+            # Release torch/benchmark objects before the caller retrains the champion;
+            # otherwise the deep graphs and reference/copy tensors stay resident.
+            del bench, cnn_res, gru_res
+            gc.collect()
         except Exception as e:
-            print(f"[{self.subset}] Skipping PyTorch deep benchmarks: {e}")
+            # Never silently drop comparison rows: record that deep models were not run
+            # and why, so the manifest keeps the full candidate set.
+            print(f"[{self.subset}] PyTorch deep benchmarks not run: {e}")
+            for arch, name in (
+                ("CNN", "1D-CNN PyTorch (30-Cycle Window)"),
+                ("GRU", "GRU PyTorch (30-Cycle Sequence)"),
+            ):
+                models_list.append({
+                    "model_name": name,
+                    "architecture": arch,
+                    "servable": False,
+                    "cv_mean_rmse": None,
+                    "cv_std_rmse": None,
+                    "cv_mean_nasa": None,
+                    "cv_std_nasa": None,
+                    "rmse": None,
+                    "mae": None,
+                    "nasa_score": None,
+                    "train_time_sec": None,
+                    "status": "not_run",
+                    "not_run_reason": f"deep models: not run ({e})",
+                })
 
-        # Champion selected dynamically via lowest mean CV RMSE
-        champion_candidate = min(models_list, key=lambda m: (m.get("cv_mean_rmse", 999.0), m.get("cv_mean_nasa", 99999.0)))
+        # Best CV candidate for comparison reporting. The served champion is decided by
+        # the canonical protocol (scripts/evaluate_all_models.select_champion), which also
+        # records the CV margin and tie-break in the run manifest.
+        missing_cv = [
+            m["model_name"]
+            for m in models_list
+            if m.get("servable", True) and (m.get("cv_mean_rmse") is None or m.get("cv_std_rmse") is None)
+        ]
+        if missing_cv:
+            raise ValueError(f"[{self.subset}] Servable candidates missing CV mean/std: {missing_cv}")
+        servable_candidates = [m for m in models_list if m.get("servable", True)]
+        if not servable_candidates:
+            raise ValueError(f"[{self.subset}] No servable candidate has CV metrics.")
+        champion_candidate = min(servable_candidates, key=lambda m: float(m["cv_mean_rmse"]))
         champion_name = champion_candidate["model_name"]
-        
-        # Train and serve the selected algorithm
-        selected_arch = champion_candidate.get("architecture", "LightGBM")
-        if selected_arch == "GBDT":
-            self.algorithm = "histgb"
-        elif selected_arch == "LightGBM":
-            self.algorithm = "lightgbm"
-        elif selected_arch in ("CNN", "GRU"):
-            self.algorithm = selected_arch.lower()
-        else:
-            self.algorithm = "lightgbm"
 
         champion_rule = (
             f"Selected {champion_name} via lowest mean CV RMSE ({champion_candidate['cv_mean_rmse']:.2f}) "
@@ -1247,6 +1375,10 @@ class ModelService:
 
         comparison = {
             "subset": self.subset,
+            "cv_protocol_id": cv_protocol_id,
+            "cv_evaluation_mode": cv_mode,
+            "cv_n_draws": cv_draws,
+            "cv_min_cycles": cv_min_cycles,
             "champion_selection_rule": champion_rule,
             "champion": champion_name,
             "models": models_list
@@ -1276,8 +1408,8 @@ class ModelService:
             "classifiers": getattr(self, "classifiers", {}),
             "horizon_thresholds": getattr(self, "horizon_thresholds", {10: 0.50, 30: 0.70, 60: 0.50}),
             "classifier_threshold_30": getattr(self, "classifier_threshold_30", 0.70),
-            "conformal_q": getattr(self, "conformal_q", getattr(self, "interval_calibration_offset", 0.0)),
-            "interval_calibration_offset": getattr(self, "interval_calibration_offset", 0.0),
+            "conformal_q": self.conformal_q,
+            "interval_calibration_offset": self.interval_calibration_offset,
             "training_time_sec": self.training_time_sec
         }
         if hasattr(self, "bundle_metadata") and isinstance(self.bundle_metadata, dict):
@@ -1355,8 +1487,10 @@ class ModelService:
         self.horizon_thresholds = bundle.get("horizon_thresholds", {10: 0.50, 30: 0.70, 60: 0.50})
         self.classifier_threshold_30 = bundle.get("classifier_threshold_30", self.horizon_thresholds.get(30, 0.70))
         
-        loaded_q = bundle.get("conformal_q", bundle.get("interval_calibration_offset", 0.0))
-        self.conformal_q = loaded_q if loaded_q > 0.0 else CALIBRATION_OFFSETS_80_PCT.get(self.subset, 5.0)
+        loaded_q = bundle.get("conformal_q", bundle.get("interval_calibration_offset"))
+        # Absence is preserved as None (never replaced by a typed default) and surfaces
+        # as an explicit error from the methods that need the calibrated offset.
+        self.conformal_q = None if loaded_q is None else float(loaded_q)
         self.interval_calibration_offset = self.conformal_q
 
         self.training_time_sec = bundle.get("training_time_sec", 0.0)
@@ -1367,6 +1501,16 @@ class ModelService:
         }
         self._shap_explainer = None
         return self
+
+    def _require_calibration_offset(self) -> float:
+        """Returns the bundle-calibrated interval offset or raises if it was never derived."""
+        offset = self.interval_calibration_offset
+        if offset is None:
+            raise ValueError(
+                f"[{self.subset}] No calibration offset in the model bundle. "
+                "Train or load a bundle produced by calibration on validation engines."
+            )
+        return float(offset)
 
     def calibrate_intervals(
         self,
@@ -1390,6 +1534,8 @@ class ModelService:
             self.interval_calibration_offset = round(offset, 2)
             self.conformal_q = self.interval_calibration_offset
         else:
-            self.interval_calibration_offset = CALIBRATION_OFFSETS_80_PCT.get(self.subset, 5.0)
-            self.conformal_q = self.interval_calibration_offset
+            raise ValueError(
+                "calibrate_intervals requires held-out test/validation frames to derive the offset; "
+                "refusing to fall back to a typed default."
+            )
         return self.interval_calibration_offset

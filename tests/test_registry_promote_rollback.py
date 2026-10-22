@@ -104,18 +104,8 @@ def test_rollback_and_promote_swaps_bundle_and_reloads_cached_modelservice(tmp_p
         joblib.dump(bundle_b, path_b)
 
         # Register both in registry
-        mgr.register_model(
-            version=v_a,
-            metrics={"rmse": 12.0, "mae": 8.0, "nasa_score": 200.0},
-            model_path=f"artifacts/models/model_bundle_{subset}_{v_a}.joblib",
-            alias="challenger"
-        )
-        mgr.register_model(
-            version=v_b,
-            metrics={"rmse": 11.5, "mae": 7.5, "nasa_score": 180.0},
-            model_path=f"artifacts/models/model_bundle_{subset}_{v_b}.joblib",
-            alias="challenger"
-        )
+        mgr.register_model(version=v_a, alias="challenger")
+        mgr.register_model(version=v_b, alias="challenger")
 
         # Step 1: Promote v_a
         resp_promote_a = client.post(f"/api/v1/models/{v_a}/promote?subset={subset}")
