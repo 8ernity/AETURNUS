@@ -32,6 +32,18 @@ def test_manifest_and_provenance():
         calculate_metrics,
         get_protocol_id,
         sample_truncation,
+        DEFAULT_SEED,
+    )
+    from src.models.model_service import (
+        algorithm_for_p50_model,
+        load_cv_protocol,
+    )
+
+    cv_protocol = load_cv_protocol()
+    expected_cv_protocol_id = get_protocol_id(
+        mode=cv_protocol["mode"],
+        seed=DEFAULT_SEED,
+        n_draws=cv_protocol["n_draws"],
     )
 
     subsets = manifest["subsets"]
@@ -40,7 +52,10 @@ def test_manifest_and_provenance():
         sub_info = subsets[sub]
         
         # Verify subset fields
-        for field in ["bundle_sha256", "algorithm", "protocol_id", "n_engines", "metrics", "cv", "comparison_rows", "champion"]:
+        for field in [
+            "bundle_sha256", "algorithm", "p50_model_class", "protocol_id",
+            "cv_protocol_id", "n_engines", "metrics", "cv", "comparison_rows", "champion",
+        ]:
             assert field in sub_info, f"Subset {sub} missing field: {field}"
 
         bundle_path = ROOT_DIR / "artifacts" / "models" / f"model_bundle_{sub}.joblib"
@@ -54,17 +69,47 @@ def test_manifest_and_provenance():
         )
 
         bundle = joblib.load(bundle_path)
-        served_algo = bundle.get("algorithm", bundle.get("model_name", ""))
+        p50_model = bundle["rul_p50_model"]
+        served_algo = algorithm_for_p50_model(p50_model)
         champ_algo = sub_info["champion"]["selected_algorithm"]
-        assert champ_algo == served_algo, (
-            f"Champion in manifest ({champ_algo}) != served bundle algorithm ({served_algo}) for {sub}"
+        assert champ_algo == served_algo == sub_info["algorithm"], (
+            f"Champion ({champ_algo}), manifest algorithm ({sub_info['algorithm']}), and "
+            f"served bundle class ({type(p50_model).__name__} -> {served_algo}) disagree for {sub}"
+        )
+        assert sub_info["p50_model_class"] == type(p50_model).__name__
+
+        # CV uses the censored test-like protocol; test metrics use the canonical last-cycle protocol.
+        cv_protocol_id = sub_info["cv"]["protocol_id"]
+        test_protocol_id = sub_info["protocol_id"]
+        assert cv_protocol_id == sub_info["cv_protocol_id"] == expected_cv_protocol_id, (
+            f"CV protocol_id {cv_protocol_id} does not match the configured censored protocol "
+            f"{expected_cv_protocol_id} for {sub}"
+        )
+        assert sub_info["cv"]["evaluation_mode"] == cv_protocol["mode"]
+        assert sub_info["cv"]["n_draws"] == cv_protocol["n_draws"]
+        assert sub_info["cv"]["min_cycles"] == cv_protocol["min_cycles"]
+        assert cv_protocol_id != test_protocol_id, (
+            f"CV and test protocols must differ for {sub}; CV was not censored"
         )
 
-        # Assert cv and test protocols resolve to the same protocol_id
-        cv_protocol_id = sub_info["cv"].get("protocol_id")
-        test_protocol_id = sub_info.get("protocol_id")
-        assert cv_protocol_id == test_protocol_id, (
-            f"CV protocol_id ({cv_protocol_id}) != test protocol_id ({test_protocol_id}) for {sub}"
+        # Censored CV must be in the same plausible band as the held-out test RMSE.
+        cv_rmse = float(sub_info["cv"]["mean_rmse"])
+        test_rmse = float(sub_info["metrics"]["rmse"])
+        assert 0.4 <= cv_rmse / test_rmse <= 2.5, (
+            f"CV RMSE {cv_rmse:.2f} is implausibly far from test RMSE {test_rmse:.2f} for {sub}"
+        )
+
+        # Champion must be the lowest-CV servable candidate.
+        servable_cv = {
+            row["model_name"]: float(row["cv_mean_rmse"])
+            for row in sub_info["comparison_rows"]
+            if row.get("servable", True) and row.get("cv_mean_rmse") is not None
+        }
+        selected_name = sub_info["champion"]["model_name"]
+        assert selected_name in servable_cv
+        assert servable_cv[selected_name] == pytest.approx(min(servable_cv.values())), (
+            f"Champion {selected_name} has CV {servable_cv[selected_name]}, "
+            f"not the minimum servable CV {min(servable_cv.values())} for {sub}"
         )
 
         # Recompute test metrics from processed data using protocol.py and assert equality (atol 1e-6)
@@ -78,8 +123,7 @@ def test_manifest_and_provenance():
         feature_cols = bundle["feature_cols"]
         X_test = eval_rows[feature_cols].values
         
-        # Predict using bundle model
-        p50_model = bundle.get("rul_regressor") or bundle.get("rul_p50_model") or bundle.get("model")
+        # Predict using the served p50 bundle model
         y_pred = np.maximum(0.0, p50_model.predict(X_test))
         recomputed = calculate_metrics(rul_truth, y_pred)
 

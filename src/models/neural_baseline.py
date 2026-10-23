@@ -178,7 +178,9 @@ class NeuralRULBenchmark:
         optimizer = torch.optim.AdamW(model.parameters(), lr=0.003, weight_decay=1e-4)
 
         dataset = TensorDataset(torch.from_numpy(X_seq), torch.from_numpy(y_seq))
-        loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        # drop_last avoids a trailing batch of size 1, which BatchNorm1d cannot process
+        # in training mode and which would otherwise abort the deep benchmark.
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=len(dataset) > batch_size)
 
         for epoch in range(epochs):
             for batch_x, batch_y in loader:
@@ -207,7 +209,9 @@ class NeuralRULBenchmark:
 
         units = np.unique(train_df["unit"].values)
         if len(units) < k:
-            return 14.5, 300.0
+            raise ValueError(
+                f"Deep CV requires at least {k} train engines for GroupKFold; got {len(units)}."
+            )
 
         # Build unit-level sequences once
         unit_seqs = {}
@@ -261,9 +265,9 @@ class NeuralRULBenchmark:
             fold_rmses.append(m["rmse"])
             fold_nasas.append(m["nasa_score"])
 
-        mean_rmse = float(np.mean(fold_rmses)) if fold_rmses else 14.5
-        mean_nasa = float(np.mean(fold_nasas)) if fold_nasas else 300.0
-        return mean_rmse, mean_nasa
+        if not fold_rmses:
+            raise ValueError("Deep CV produced no evaluable folds; refusing to report a placeholder score.")
+        return float(np.mean(fold_rmses)), float(np.mean(fold_nasas))
 
     def evaluate_architecture(
         self,

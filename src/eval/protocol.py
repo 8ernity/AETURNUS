@@ -12,6 +12,7 @@ import pandas as pd
 
 DEFAULT_RUL_CAP = 125.0
 DEFAULT_SEED = 42
+DEFAULT_CV_FOLDS = 5
 
 def get_protocol_id(
     cap: float = DEFAULT_RUL_CAP,
@@ -145,7 +146,8 @@ def eval_frames(
     df: pd.DataFrame,
     mode: str = "last",
     seed: int = DEFAULT_SEED,
-    n_draws: int = 1
+    n_draws: int = 1,
+    min_cycles: int = 15
 ) -> List[pd.DataFrame]:
     """
     Protocol evaluation frame generator used by BOTH evaluate_cv and evaluate_test.
@@ -156,7 +158,14 @@ def eval_frames(
         frames.append(sample_truncation(df, seed=seed, mode="last"))
     elif mode == "random":
         for i in range(max(1, int(n_draws))):
-            frames.append(sample_truncation(df, seed=seed + i, mode="random"))
+            frames.append(
+                sample_truncation(
+                    df,
+                    seed=seed + i,
+                    mode="random",
+                    min_cycles=min_cycles,
+                )
+            )
     else:
-        frames.append(sample_truncation(df, seed=seed, mode=mode))
+        frames.append(sample_truncation(df, seed=seed, mode=mode, min_cycles=min_cycles))
     return frames

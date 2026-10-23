@@ -67,7 +67,7 @@ export const ModelLabTab: React.FC = () => {
       });
   }, [selectedSub]);
 
-  const targetsMetCount = benchmarks.filter((b) => b.target_met === true || b.status === "Target Met").length;
+  const targetsMetCount = benchmarks.filter((b) => b.target_met === true).length;
   const bucketErrors = modelDetails?.bucket_errors || [];
   const featureImportances = modelDetails?.feature_importance || [];
   const comparisonModels = comparison?.models || [];
@@ -181,11 +181,11 @@ export const ModelLabTab: React.FC = () => {
                   <td className="p-3.5 text-slate-400">{row.train_time_sec}s</td>
                   <td className="p-3.5 text-center">
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
-                      row.target_met || row.status === "Target Met"
+                      row.target_met === true
                         ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
                         : "bg-amber-500/20 text-amber-300 border-amber-500/30"
                     }`}>
-                      {row.target_met ? "Target Met" : (row.status || "Target Missed")}
+                      {row.target_met === true ? "Target Met" : row.target_met === false ? "Target Missed" : "No Data"}
                     </span>
                   </td>
                 </tr>
@@ -372,7 +372,7 @@ export const ModelLabTab: React.FC = () => {
           <div className="flex items-center gap-2 self-start md:self-auto">
             <span className="px-3 py-1 rounded-full text-xs font-semibold font-mono border bg-emerald-500/15 text-emerald-300 border-emerald-500/30 flex items-center gap-1.5 shadow-sm">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              {genGap?.overfitting_status || "Low Overfitting"} (Gap: {genGap?.train_test_gap !== undefined ? (genGap.train_test_gap >= 0 ? `+${genGap.train_test_gap}` : genGap.train_test_gap) : "+1.90"} cyc)
+              {genGap?.overfitting_status ?? "N/A"} (Gap: {genGap?.train_test_gap !== undefined ? (genGap.train_test_gap >= 0 ? `+${genGap.train_test_gap}` : genGap.train_test_gap) : "N/A"} cyc)
             </span>
           </div>
         </div>

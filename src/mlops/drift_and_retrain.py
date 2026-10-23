@@ -48,8 +48,8 @@ def record_drift_run(report: Dict[str, Any], window_start: int, window_end: int,
                 int(window_start),
                 int(window_end),
                 int(n_rows),
-                float(report["share_drifting_features"]) if "share_drifting_features" in report else 0.0,
-                int(report["monitored_features_count"]) if "monitored_features_count" in report else 0,
+                float(report["share_drifting_features"]),
+                int(report["monitored_features_count"]),
                 1 if report.get("drift_alert") else 0,
                 json.dumps(report.get("sensor_metrics", {})),
                 json.dumps(report)
@@ -70,8 +70,14 @@ def get_latest_drift_run(
     session or process restart) do not pollute the default-state drift view.  In
     production, scoring and monitoring calls happen within seconds, so this limit is
     never hit during normal operation.
+
+    Read-only: when no drift DB exists yet nothing is created or written, so a GET
+    requests on a fresh install never produces database state.
     """
-    conn = get_drift_db(db_path)
+    resolved = db_path if db_path is not None else get_root_dir() / "artifacts" / "drift_monitoring.db"
+    if not Path(resolved).exists():
+        return None
+    conn = get_drift_db(resolved)
     try:
         cur = conn.cursor()
         cutoff = time.time() - max_age_seconds
@@ -116,401 +122,225 @@ class MLOpsManager:
         mlflow.set_tracking_uri(f"sqlite:///{db_path.as_posix()}")
         mlflow.set_experiment(f"cmapss_{self.subset}")
 
-    def _compute_data_hash(self) -> str:
-        train_path = self.root_dir / "data" / "processed" / self.subset / "train.parquet"
-        if not train_path.exists():
-            train_path = self.root_dir / "data" / "raw" / self.subset / f"train_{self.subset}.txt"
-        if train_path.exists():
-            sha = hashlib.sha256()
-            with open(train_path, "rb") as f:
-                while chunk := f.read(65536):
-                    sha.update(chunk)
-            return f"sha256:{sha.hexdigest()[:16]}"
-        return "sha256:unknown"
-
-    def _get_baseline_metrics(self) -> Dict[str, float]:
+    def _load_manifest(self) -> Optional[Dict[str, Any]]:
         manifest_path = self.artifacts_dir / "run_manifest.json"
-        if manifest_path.exists():
-            try:
-                with open(manifest_path, "r", encoding="utf-8") as f:
-                    manifest = json.load(f)
-                s_info = manifest.get("subsets", {}).get(self.subset, {})
-                m = s_info.get("metrics")
-                if isinstance(m, dict) and "rmse" in m:
-                    return {
-                        "rmse": round(float(m["rmse"]), 4),
-                        "mae": round(float(m["mae"]), 4),
-                        "nasa_score": round(float(m["nasa_score"]), 2),
-                        "late_rate": round(float(m["late_rate"]), 3),
-                        "early_rate": round(float(m["early_rate"]), 3)
-                    }
-            except Exception:
-                pass
-        return {"rmse": 0.0, "mae": 0.0, "nasa_score": 0.0, "late_rate": 0.0, "early_rate": 0.0}
-
-    def _init_registry(self):
-        self.registry_file.parent.mkdir(parents=True, exist_ok=True)
-        rebuild = False
-        if not self.registry_file.exists():
-            rebuild = True
-        else:
-            try:
-                with open(self.registry_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                first_model = data.get("models", [{}])[0]
-                if "sha256-c-mapss" in first_model.get("data_hash", "") or first_model.get("metrics", {}).get("rmse") == 12.49:
-                    rebuild = True
-            except Exception:
-                rebuild = True
-
-        if rebuild:
-            data_hash = self._compute_data_hash()
-            metrics = self._get_baseline_metrics()
-            default_reg = {
-                "models": [
-                    {
-                        "version": "v1.0",
-                        "subset": self.subset,
-                        "alias": "champion",
-                        "algorithm": "HistGradientBoosting Quantile (p10/p50/p90) + Isolation Forest",
-                        "metrics": metrics,
-                        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "data_hash": data_hash,
-                        "model_path": f"artifacts/models/model_bundle_{self.subset}.joblib"
-                    }
-                ],
-                "active_champion": "v1.0"
-            }
-            with open(self.registry_file, "w", encoding="utf-8") as f:
-                json.dump(default_reg, f, indent=2)
-        else:
-            # At init time, ensure any registered models have model_path populated
-            try:
-                with open(self.registry_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                updated = False
-                for m in data.get("models", []):
-                    sub = m.get("subset", self.subset)
-                    curr_path = m.get("model_path", "")
-                    if not curr_path or not (self.root_dir / curr_path).exists():
-                        v = m.get("version", "v1.0")
-                        ver_file = self.artifacts_dir / "models" / f"model_bundle_{sub}_{v}.joblib"
-                        m["model_path"] = f"artifacts/models/model_bundle_{sub}_{v}.joblib" if ver_file.exists() else f"artifacts/models/model_bundle_{sub}.joblib"
-                        updated = True
-                if updated:
-                    with open(self.registry_file, "w", encoding="utf-8") as f:
-                        json.dump(data, f, indent=2)
-            except Exception:
-                pass
-
-    def get_mlflow_registry(self) -> Optional[Dict[str, Any]]:
-        """
-        Queries the local MLflow tracking server (prioritizing artifacts/mlflow.db SQLite store)
-        to retrieve real model runs and metrics for champion, challenger, and previous aliases.
-        """
-        os.environ["MLFLOW_ALLOW_FILE_STORE"] = "true"
-        os.environ["MLFLOW_DISABLE_AGENT_HINT"] = "1"
-        import re
-        from mlflow.tracking import MlflowClient
-
-        clients = []
-        # 1. Primary: Check artifacts/mlflow.db SQLite tracking store
-        mlflow_db = self.artifacts_dir / "mlflow.db"
-        if mlflow_db.exists():
-            try:
-                clients.append(MlflowClient(f"sqlite:///{mlflow_db.resolve().as_posix()}"))
-            except Exception:
-                pass
-
-        # 2. Secondary fallback: Check mlruns directory only if no SQLite store exists
-        if not clients:
-            mlruns_dir = self.root_dir / "mlruns"
-            if mlruns_dir.exists():
-                try:
-                    clients.append(MlflowClient(mlruns_dir.as_uri()))
-                except Exception:
-                    pass
-
-        target_exps = [f"cmapss_{self.subset}", self.subset, f"AETURNUS-Tuning-{self.subset}"]
-        found_runs = []
-        for client in clients:
-            try:
-                for exp in client.search_experiments():
-                    if exp.name in target_exps or any(t in exp.name for t in target_exps):
-                        runs = client.search_runs(exp.experiment_id, order_by=["attribute.start_time DESC"])
-                        if runs:
-                            found_runs.extend(runs)
-            except Exception:
-                continue
-
-        if not found_runs:
+        if not manifest_path.exists():
             return None
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            return json.load(f)
 
-        models = []
-        active_champ = "v1.0"
-        seen_versions = set()
+    def _manifest_subset_info(self, subset: Optional[str] = None) -> Tuple[Dict[str, Any], Optional[str]]:
+        manifest = self._load_manifest() or {}
+        subset_info = manifest.get("subsets", {}).get(subset or self.subset, {})
+        return subset_info, manifest.get("run_id")
 
-        for r in found_runs:
-            tags = r.data.tags or {}
-            metrics = r.data.metrics or {}
-            params = r.data.params or {}
+    def _active_bundle_path(self, subset: Optional[str] = None) -> Path:
+        return self.artifacts_dir / "models" / f"model_bundle_{subset or self.subset}.joblib"
 
-            run_name = r.info.run_name or ""
-            alias = tags.get("alias", "")
-            if not alias:
-                if "champion" in run_name.lower():
-                    alias = "champion"
-                elif "challenger" in run_name.lower():
-                    alias = "challenger"
-                else:
-                    alias = "candidate"
+    def _versioned_bundle_path(self, version: str, subset: Optional[str] = None) -> Path:
+        return self.artifacts_dir / "models" / f"model_bundle_{subset or self.subset}_{version}.joblib"
 
-            version = tags.get("version", "")
-            if not version:
-                m = re.search(r"v\d+\.\d+", run_name)
-                version = m.group(0) if m else f"v{len(models) + 1}.0"
+    def _bundle_path_for(self, version: str, subset: Optional[str] = None, alias: Optional[str] = None) -> Path:
+        if alias == "champion":
+            return self._active_bundle_path(subset)
+        versioned = self._versioned_bundle_path(version, subset)
+        return versioned if versioned.exists() else self._active_bundle_path(subset)
 
-            if version in seen_versions:
-                continue
-            seen_versions.add(version)
-
-            if "champion" in alias.lower() and active_champ == "v1.0":
-                active_champ = version
-
-            # Metrics
-            baseline = self._get_baseline_metrics()
-            if version == "v1.0":
-                rmse = baseline.get("rmse") or metrics.get("test_rmse") or 0.0
-                nasa_score = baseline.get("nasa_score") or metrics.get("test_nasa") or 0.0
-                mae = baseline.get("mae") or metrics.get("test_mae") or round(float(rmse) * 0.78, 4)
-                pr_auc = baseline.get("pr_auc") or metrics.get("pr_auc") or metrics.get("test_pr_auc") or 0.0
-                late_rate = baseline.get("late_rate") or metrics.get("late_rate") or 0.0
-                early_rate = baseline.get("early_rate") or metrics.get("early_rate") or 0.0
-            else:
-                rmse = metrics.get("test_rmse") or metrics.get("rmse") or baseline.get("rmse") or 0.0
-                nasa_score = metrics.get("test_nasa") or metrics.get("nasa_score") or baseline.get("nasa_score") or 0.0
-                pr_auc = metrics.get("pr_auc") or metrics.get("test_pr_auc") or baseline.get("pr_auc") or 0.0
-                mae = metrics.get("test_mae") or metrics.get("mae") or round(float(rmse) * 0.78, 4)
-                late_rate = metrics.get("late_rate") or baseline.get("late_rate") or 0.0
-                early_rate = metrics.get("early_rate") or baseline.get("early_rate") or 0.0
-            if not mae or float(mae) <= 0.0:
-                mae = round(float(rmse) * 0.78, 4)
-
-            holdout_rmse = metrics.get("holdout_rmse", rmse)
-            holdout_nasa = metrics.get("holdout_nasa", nasa_score)
-
-            start_ms = r.info.start_time
-            created_at = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start_ms / 1000.0)) if start_ms else time.strftime("%Y-%m-%d %H:%M:%S")
-
-            algo = tags.get("algorithm", params.get("model_family", "LightGBM Quantile (p10/p50/p90) + Isolation Forest"))
-
-            models.append({
-                "version": version,
-                "subset": self.subset,
-                "alias": alias,
-                "algorithm": algo,
-                "metrics": {
-                    "rmse": round(float(rmse), 4),
-                    "mae": round(float(mae), 4),
-                    "nasa_score": round(float(nasa_score), 2),
-                    "pr_auc": round(float(pr_auc), 4),
-                    "late_rate": round(float(late_rate), 3),
-                    "early_rate": round(float(early_rate), 3),
-                },
-                "holdout_metrics": {
-                    "rmse": round(float(holdout_rmse), 4),
-                    "mae": round(float(mae), 4),
-                    "nasa_score": round(float(holdout_nasa), 2),
-                    "late_rate": round(float(late_rate), 3),
-                    "early_rate": round(float(early_rate), 3),
-                },
-                "created_at": created_at,
-                "data_hash": params.get("data_hash", self._compute_data_hash()),
-                "model_path": (
-                    f"artifacts/models/model_bundle_{self.subset}_{version}.joblib"
-                    if (self.artifacts_dir / "models" / f"model_bundle_{self.subset}_{version}.joblib").exists()
-                    else f"artifacts/models/model_bundle_{self.subset}.joblib"
-                )
-            })
-
-        # Merge with static models from json so historical versions remain accessible
-        if self.registry_file.exists():
-            try:
-                with open(self.registry_file, "r", encoding="utf-8") as f:
-                    static_data = json.load(f)
-                for sm in static_data.get("models", []):
-                    if sm.get("version") not in seen_versions:
-                        seen_versions.add(sm.get("version"))
-                        models.append(sm)
-            except Exception:
-                pass
-
-        if not models:
+    def _bundle_sha256(self, version: str, subset: Optional[str] = None, alias: Optional[str] = None) -> Optional[str]:
+        bundle_path = self._bundle_path_for(version, subset, alias)
+        if not bundle_path.exists():
             return None
+        return hashlib.sha256(bundle_path.read_bytes()).hexdigest()
 
-        def version_sort_key(m):
-            v_str = m.get("version", "")
-            nums = [int(n) for n in re.findall(r"\d+", v_str)]
-            # champion first (0), then other aliases (1), then natural numerical version sort
-            return (0 if m.get("alias") == "champion" else 1, nums or [0])
+    def _model_path_for(self, version: str, subset: Optional[str] = None, alias: Optional[str] = None) -> str:
+        bundle_path = self._bundle_path_for(version, subset, alias)
+        try:
+            return str(bundle_path.relative_to(self.root_dir))
+        except ValueError:
+            return str(bundle_path)
 
-        models.sort(key=version_sort_key)
-
+    def _default_registry_row(self, subset: Optional[str] = None) -> Dict[str, Any]:
+        sub = subset or self.subset
+        _, run_id = self._manifest_subset_info(sub)
         return {
-            "models": models,
-            "active_champion": active_champ,
-            "source": "mlflow_live"
+            "version": "v1.0",
+            "subset": sub,
+            "alias": "champion",
+            "manifest_run_id": run_id,
+            "bundle_sha256": self._bundle_sha256("v1.0", sub, alias="champion"),
         }
 
-    def get_registry(self) -> Dict[str, Any]:
-        """Read-only view of the model registry. Queries live MLflow data with static fallback."""
-        try:
-            live_reg = self.get_mlflow_registry()
-            if live_reg and live_reg.get("models"):
-                return live_reg
-        except Exception as e:
-            print(f"MLflow live registry query notice: {e}")
-
+    def _read_registry_rows(self) -> List[Dict[str, Any]]:
         if not self.registry_file.exists():
-            self._init_registry()
+            return []
         with open(self.registry_file, "r", encoding="utf-8") as f:
-            return json.load(f)
+            return json.load(f).get("models", [])
+
+    def _write_registry_rows(self, rows: List[Dict[str, Any]]):
+        self.registry_file.parent.mkdir(parents=True, exist_ok=True)
+        champions = [r.get("version") for r in rows if r.get("alias") == "champion"]
+        payload = {
+            "models": rows,
+            "active_champion": champions[0] if champions else None,
+        }
+        with open(self.registry_file, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+
+    def _init_registry(self):
+        if self.registry_file.exists():
+            return
+        self._write_registry_rows([self._default_registry_row()])
+
+    def _enrich_registry_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        subset = row.get("subset") or self.subset
+        version = row.get("version") or "v1.0"
+        alias = row.get("alias") or "candidate"
+        enriched = dict(row)
+        enriched["model_path"] = self._model_path_for(version, subset, alias)
+        if alias == "champion":
+            subset_info, run_id = self._manifest_subset_info(subset)
+            metrics = subset_info.get("metrics")
+            if isinstance(metrics, dict):
+                enriched["metrics"] = metrics
+            cv_report = subset_info.get("cv")
+            if isinstance(cv_report, dict):
+                enriched["cv"] = cv_report
+            for key in ("algorithm", "p50_model_class", "bundle_sha256", "protocol_id", "cv_protocol_id"):
+                if subset_info.get(key) is not None:
+                    enriched[key] = subset_info[key]
+            if enriched.get("manifest_run_id") is None and run_id is not None:
+                enriched["manifest_run_id"] = run_id
+        if enriched.get("bundle_sha256") is None:
+            enriched["bundle_sha256"] = self._bundle_sha256(version, subset, alias)
+        return enriched
+
+    def get_registry(self) -> Dict[str, Any]:
+        """Read-only registry view enriched from the run manifest and bundle files."""
+        rows = [
+            r for r in self._read_registry_rows()
+            if (r.get("subset") or self.subset) == self.subset
+        ]
+        if not rows:
+            rows = [self._default_registry_row()]
+        enriched = [self._enrich_registry_row(r) for r in rows]
+
+        def sort_key(model):
+            return (0 if model.get("alias") == "champion" else 1, model.get("version", ""))
+
+        enriched.sort(key=sort_key)
+        champion = next((m.get("version") for m in enriched if m.get("alias") == "champion"), None)
+        return {
+            "models": enriched,
+            "active_champion": champion,
+            "source": "manifest",
+        }
 
     def register_model(
         self,
         version: str,
-        metrics: Dict[str, float],
-        model_path: str,
-        holdout_metrics: Optional[Dict[str, float]] = None,
-        algorithm: str = "HistGradientBoosting",
+        model_path: Optional[str] = None,
         alias: str = "challenger",
-        data_hash: Optional[str] = None
     ) -> Dict[str, Any]:
-        """
-        Saves a model entry with real metrics and model_path to the registry at save time.
-        """
-        reg = self.get_registry()
-        models = reg.get("models", [])
+        """Registers a minimal model row; metrics and paths are derived on read."""
+        rows = self._read_registry_rows()
+        if alias == "champion":
+            for row in rows:
+                if (row.get("subset") or self.subset) == self.subset and row.get("alias") == "champion":
+                    row["alias"] = "previous"
+        _, run_id = self._manifest_subset_info()
         entry = {
             "version": version,
             "subset": self.subset,
             "alias": alias,
-            "algorithm": algorithm,
-            "metrics": metrics,
-            "holdout_metrics": holdout_metrics or {},
-            "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "data_hash": data_hash or self._compute_data_hash(),
-            "model_path": model_path
+            "manifest_run_id": run_id,
+            "bundle_sha256": self._bundle_sha256(version, self.subset, alias),
         }
-        existing = next((m for m in models if m.get("version") == version), None)
-        if existing:
+        existing = next(
+            (r for r in rows if r.get("version") == version and (r.get("subset") or self.subset) == self.subset),
+            None,
+        )
+        if existing is not None:
+            existing.clear()
             existing.update(entry)
         else:
-            models.append(entry)
+            rows.append(entry)
+        self._write_registry_rows(rows)
+        return self._enrich_registry_row(entry)
 
-        with open(self.registry_file, "w", encoding="utf-8") as f:
-            json.dump(reg, f, indent=2)
-        return entry
+    def _find_subset_row(self, rows: List[Dict[str, Any]], version: str) -> Optional[Dict[str, Any]]:
+        for row in rows:
+            if (row.get("subset") or self.subset) != self.subset:
+                continue
+            if row.get("version") == version or row.get("alias") == version:
+                return row
+        return None
 
     def promote_version(self, version: str) -> Dict[str, Any]:
-        """
-        Promotes specified version to champion, swaps served bundle, and updates registry.
-        """
-        reg = self.get_registry()
-        models = reg.get("models", [])
-        target = None
-        for m in models:
-            if m.get("version") == version or m.get("alias") == version:
-                target = m
-                break
+        """Promotes a registered version to its subset's champion and swaps the served bundle."""
+        rows = self._read_registry_rows()
+        target = self._find_subset_row(rows, version)
         if not target:
             raise ValueError(f"Version '{version}' not found in registry for subset {self.subset}")
 
-        # Check that physical model bundle exists on disk
         target_version = target.get("version")
-        target_path = Path(target.get("model_path", ""))
-        if not target_path.is_absolute():
-            target_path = self.root_dir / target_path
-        bundle_file = self.artifacts_dir / "models" / f"model_bundle_{self.subset}_{target_version}.joblib"
-        default_file = self.artifacts_dir / "models" / f"model_bundle_{self.subset}.joblib"
-        if not target_path.exists() and not bundle_file.exists() and not (target_version == "v1.0" and default_file.exists()):
-            raise FileNotFoundError(f"Model bundle file for version '{target_version}' is missing on disk: {target_path}")
+        bundle_file = self._bundle_path_for(target_version, self.subset, target.get("alias"))
+        if not bundle_file.exists():
+            raise FileNotFoundError(f"Model bundle file for version '{target_version}' is missing on disk: {bundle_file}")
 
-        # Update aliases
-        for m in models:
-            if m.get("alias") == "champion":
-                m["alias"] = "previous"
+        for row in rows:
+            if (row.get("subset") or self.subset) == self.subset and row.get("alias") == "champion":
+                row["alias"] = "previous"
         target["alias"] = "champion"
-        reg["active_champion"] = target.get("version")
 
-        with open(self.registry_file, "w", encoding="utf-8") as f:
-            json.dump(reg, f, indent=2)
-
-        # Swap served bundle
         ms = ModelService(self.subset)
-        ms.promote(version=target.get("version"))
+        ms.promote(version=target_version)
+        target["bundle_sha256"] = self._bundle_sha256(target_version, self.subset, alias="champion")
+        self._write_registry_rows(rows)
 
         return {
             "status": "promoted",
-            "version": target.get("version"),
+            "version": target_version,
             "alias": "champion",
             "subset": self.subset,
-            "model_path": target.get("model_path")
+            "model_path": self._model_path_for(target_version, self.subset, alias="champion"),
         }
 
     def rollback(self, target_version: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Rolls back active champion to target_version (or previous champion), swaps served bundle, and updates registry.
-        """
-        reg = self.get_registry()
-        models = reg.get("models", [])
+        """Rolls back the active champion to a previous version and swaps the served bundle."""
+        rows = self._read_registry_rows()
+        subset_rows = [
+            r for r in rows if (r.get("subset") or self.subset) == self.subset
+        ]
         target = None
         if target_version and target_version not in ["rollback", "default"]:
-            for m in models:
-                if m.get("version") == target_version or m.get("alias") == target_version:
-                    target = m
-                    break
+            target = self._find_subset_row(rows, target_version)
         else:
-            for m in models:
-                if m.get("alias") == "previous":
-                    target = m
-                    break
+            target = next((r for r in subset_rows if r.get("alias") == "previous"), None)
 
         if not target:
-            if len(models) > 1:
-                target = models[0]
-            else:
-                raise ValueError("No previous or target model available to rollback to.")
+            raise ValueError("No previous or target model available to rollback to.")
 
-        # Check that physical model bundle exists on disk
         target_ver = target.get("version")
-        target_path = Path(target.get("model_path", ""))
-        if not target_path.is_absolute():
-            target_path = self.root_dir / target_path
-        bundle_file = self.artifacts_dir / "models" / f"model_bundle_{self.subset}_{target_ver}.joblib"
-        default_file = self.artifacts_dir / "models" / f"model_bundle_{self.subset}.joblib"
-        if not target_path.exists() and not bundle_file.exists() and not (target_ver == "v1.0" and default_file.exists()):
-            raise FileNotFoundError(f"Model bundle file for rollback version '{target_ver}' is missing on disk: {target_path}")
+        bundle_file = self._bundle_path_for(target_ver, self.subset, target.get("alias"))
+        if not bundle_file.exists():
+            raise FileNotFoundError(f"Model bundle file for rollback version '{target_ver}' is missing on disk: {bundle_file}")
 
-        for m in models:
-            if m.get("alias") == "champion":
-                m["alias"] = "rolled_back"
+        for row in rows:
+            if (row.get("subset") or self.subset) == self.subset and row.get("alias") == "champion":
+                row["alias"] = "rolled_back"
         target["alias"] = "champion"
-        reg["active_champion"] = target.get("version")
 
-        with open(self.registry_file, "w", encoding="utf-8") as f:
-            json.dump(reg, f, indent=2)
-
-        # Swap served bundle
         ms = ModelService(self.subset)
-        ms.promote(version=target.get("version"))
+        ms.promote(version=target_ver)
+        target["bundle_sha256"] = self._bundle_sha256(target_ver, self.subset, alias="champion")
+        self._write_registry_rows(rows)
 
         return {
             "status": "rolled_back",
-            "version": target.get("version"),
+            "version": target_ver,
             "alias": "champion",
             "subset": self.subset,
-            "model_path": target.get("model_path")
+            "model_path": self._model_path_for(target_ver, self.subset, alias="champion"),
         }
 
     def calculate_drift_report(self, ref_df: pd.DataFrame, curr_df: pd.DataFrame, persist: bool = False) -> Dict[str, Any]:
@@ -572,13 +402,29 @@ class MLOpsManager:
                     "is_drifting": is_drifting
                 }
 
-        share_drifting = drifting_count / max(1, len(sensor_metrics))
+        if not sensor_metrics:
+            return {
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "subset": self.subset,
+                "status": "no_data",
+                "monitored_features_count": 0,
+                "drifting_features_count": 0,
+                "share_drifting_features": None,
+                "drift_alert": False,
+                "sensor_metrics": {},
+                "window_start": c_min,
+                "window_end": c_max,
+                "n_rows": len(curr_df),
+            }
+
+        share_drifting = drifting_count / len(sensor_metrics)
         ratio_threshold = float(_get_v(drift_cfg, "drifting_features_ratio_threshold"))
         drift_alert = share_drifting >= ratio_threshold
 
         report = {
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             "subset": self.subset,
+            "status": "ok",
             "monitored_features_count": len(sensor_metrics),
             "drifting_features_count": drifting_count,
             "share_drifting_features": round(share_drifting, 3),
@@ -629,8 +475,8 @@ class MLOpsManager:
             gate_passed = False
             reasons.append(f"FAIL: Holdout NASA Score degraded by {score_diff_pct:.2f}% (exceeds {gate_cfg['nasa_score_max_degradation_pct']}%)")
 
-        champ_late = champion_metrics["late_rate"] if "late_rate" in champion_metrics else (1.0 - champion_metrics["early_rate"] if "early_rate" in champion_metrics else 0.40)
-        chal_late = challenger_metrics["late_rate"] if "late_rate" in challenger_metrics else (1.0 - challenger_metrics["early_rate"] if "early_rate" in challenger_metrics else 0.40)
+        champ_late = champion_metrics["late_rate"]
+        chal_late = challenger_metrics["late_rate"]
         late_diff_pp = (chal_late - champ_late) * 100.0
 
         if late_diff_pp <= gate_cfg["late_prediction_max_increase_pp"]:
@@ -775,41 +621,13 @@ class MLOpsManager:
         except Exception as e:
             print(f"MLflow challenger run logging note: {e}")
 
-        # Update Registry JSON
+        # Update Registry JSON with minimal rows; metrics are read from manifests/bundles.
+        self.register_model(
+            version=chal_version,
+            alias="challenger",
+        )
         if gate_passed:
-            for m in registry["models"]:
-                if m.get("alias") == "champion":
-                    m["alias"] = "previous"
-
-            registry["models"].append({
-                "version": chal_version,
-                "subset": self.subset,
-                "alias": "champion",
-                "algorithm": "HistGradientBoosting Challenger (Promoted)",
-                "metrics": chal_metrics,
-                "holdout_metrics": chal_holdout_metrics,
-                "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "data_hash": chal_data_hash,
-                "model_path": f"artifacts/models/model_bundle_{self.subset}_{chal_version}.joblib"
-            })
-            registry["active_champion"] = chal_version
-            # Set promoted challenger as the active serving bundle via promote()
-            chal_service.promote(version=chal_version)
-        else:
-            registry["models"].append({
-                "version": chal_version,
-                "subset": self.subset,
-                "alias": "challenger (rejected)",
-                "algorithm": "HistGradientBoosting Challenger",
-                "metrics": chal_metrics,
-                "holdout_metrics": chal_holdout_metrics,
-                "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "data_hash": chal_data_hash,
-                "model_path": f"artifacts/models/model_bundle_{self.subset}_{chal_version}.joblib"
-            })
-
-        with open(self.registry_file, "w", encoding="utf-8") as f:
-            json.dump(registry, f, indent=2)
+            self.promote_version(chal_version)
 
         return {
             "scenario": scenario,

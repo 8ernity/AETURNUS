@@ -335,7 +335,7 @@ class AlertManager:
             return item
 
         self.psi_thresh = float(_get_val(self.alerts_cfg, "drift_psi_threshold"))
-        self.key_sensors = self.alerts_cfg.get("key_drift_sensors") or ["s3", "s7", "s11"]
+        self.key_sensors = list(self.alerts_cfg["key_drift_sensors"])
         self.backlog_thresh = int(_get_val(self.alerts_cfg, "backlog_critical_high_threshold"))
         self.cov_min_thresh = float(_get_val(self.alerts_cfg, "coverage_min_threshold"))
         self.latency_thresh_ms = float(_get_val(self.alerts_cfg, "latency_p95_ms_threshold"))
@@ -398,7 +398,8 @@ class AlertManager:
         alerts: List[Dict[str, Any]] = []
 
         # 1. Rule: Elevated Drift on Key Sensors
-        sub = ctx.get("subset", "FD001")
+        # Default subset is derived from the pipeline config (never a typed fallback).
+        sub = ctx.get("subset") or load_yaml("configs/pipeline.yaml")["dataset"]["default_subset"]
         drift_firing = False
         max_psi = 0.0
         drift_sensor = ""
@@ -430,7 +431,8 @@ class AlertManager:
                     "rule_name": "RULE_ELEVATED_FEATURE_DRIFT",
                     "severity": "WARNING",
                     "status": "no data",
-                    "firing": None,
+                    "state": "no data",
+                    "firing": False,
                     "metric_value": None,
                     "threshold": self.psi_thresh,
                     "message": "no data",
@@ -502,7 +504,7 @@ class AlertManager:
                 "severity": "INFO",
                 "status": "no data",
                 "state": "no data",
-                "firing": None,
+                "firing": False,
                 "metric_value": None,
                 "threshold": self.cov_min_thresh,
                 "message": "no data",

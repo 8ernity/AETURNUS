@@ -65,3 +65,24 @@ def test_scoring_creates_drift_runs_row_and_get_only_reads():
     assert count_after_score > count_before, (
         f"Expected drift_runs row count to increase after scoring, before={count_before}, after={count_after_score}"
     )
+
+
+def test_first_start_seeds_empty_work_orders_db(tmp_path):
+    """A fresh install seeds an empty work_orders.db schema; no state is shipped."""
+    from src.agent.triage_agent import TriageAgent
+
+    db_file = tmp_path / "artifacts" / "sqlite" / "work_orders.db"
+    assert not db_file.exists()
+
+    TriageAgent(db_path=db_file)
+
+    assert db_file.exists(), "First start must create work_orders.db"
+    conn = sqlite3.connect(str(db_file))
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT count(*) FROM work_orders")
+        assert cur.fetchone()[0] == 0, "Seeded work_orders table must start empty"
+        cur.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='audit_events'")
+        assert cur.fetchone()[0] == 1, "First start must create the audit_events table"
+    finally:
+        conn.close()

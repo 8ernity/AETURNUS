@@ -41,7 +41,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from src.common.utils import get_root_dir, load_yaml
-from src.models.model_service import ModelService, CONDITIONS_MAP
+from src.models.model_service import ModelService
 from src.agent.triage_agent import TriageAgent
 from src.agent.self_healing_engine import SelfHealingEngine
 from src.mlops.drift_and_retrain import MLOpsManager
@@ -133,8 +133,16 @@ def _load_downcasted_parquet(path: Path) -> pd.DataFrame:
     trim_memory()
     return df
 
+def _cached_under_current_root(obj: Any) -> bool:
+    """True when a cached service still points at the active ROOT_DIR.
+
+    Guards against stale caches after ROOT_DIR is redirected (test isolation, relocations).
+    """
+    return Path(getattr(obj, "root_dir", "")) == Path(ROOT_DIR)
+
 def get_model_service(subset: str = "FD001") -> ModelService:
-    if subset not in model_services:
+    cached = model_services.get(subset)
+    if cached is None or not _cached_under_current_root(cached):
         ms = ModelService(subset)
         try:
             ms.load()
@@ -147,7 +155,8 @@ def get_model_service(subset: str = "FD001") -> ModelService:
     return model_services[subset]
 
 def get_mlops_manager(subset: str = "FD001") -> MLOpsManager:
-    if subset not in mlops_managers:
+    cached = mlops_managers.get(subset)
+    if cached is None or not _cached_under_current_root(cached):
         mlops_managers[subset] = MLOpsManager(subset)
     return mlops_managers[subset]
 
@@ -413,7 +422,7 @@ def get_fleet(subset: str = Query(default="FD001")):
         order = triage_agent.open_orders.get(pred["engine_id"])
         c_rul = float(pred["conservative_rul"])
         severity = order["severity"] if order else triage_agent.get_base_severity(c_rul)
-        severity_counts[severity] = severity_counts.get(severity, 0) + 1
+        severity_counts[severity] += 1
         total_rul += c_rul
 
         sparkline = history_by_unit.get(u, [float(pred["health_index"])])
@@ -468,35 +477,35 @@ def get_fleet(subset: str = Query(default="FD001")):
         {
             "name": "CRITICAL",
             "label": "Critical (≤15 cyc)",
-            "count": int(severity_counts.get("CRITICAL", 0)),
+            "count": int(severity_counts["CRITICAL"]),
             "color": "#f43f5e",
             "action": "Immediate grounding & borescope inspection"
         },
         {
             "name": "HIGH",
             "label": "High Risk (16-30 cyc)",
-            "count": int(severity_counts.get("HIGH", 0)),
+            "count": int(severity_counts["HIGH"]),
             "color": "#f97316",
             "action": "Schedule depot maintenance within 3 days"
         },
         {
             "name": "MEDIUM",
             "label": "Medium Risk (31-60 cyc)",
-            "count": int(severity_counts.get("MEDIUM", 0)),
+            "count": int(severity_counts["MEDIUM"]),
             "color": "#eab308",
             "action": "Elevated telemetry frequency & sensor review"
         },
         {
             "name": "LOW",
             "label": "Low Risk (61-100 cyc)",
-            "count": int(severity_counts.get("LOW", 0)),
+            "count": int(severity_counts["LOW"]),
             "color": "#06b6d4",
             "action": "Standard flight monitoring with regular checks"
         },
         {
             "name": "HEALTHY",
             "label": "Healthy (>100 cyc)",
-            "count": int(severity_counts.get("HEALTHY", 0)),
+            "count": int(severity_counts["HEALTHY"]),
             "color": "#10b981",
             "action": "Optimal flight readiness, full mission endurance"
         }
@@ -560,13 +569,13 @@ def get_engine_detail(engine_id: str, subset: str = Query(default="FD001")):
         for s in pred.get("top_sensors", []):
             info = sensor_map.get(s, {})
             subsystem = info.get("subsystem", "HPC")
-            dev = abs(float(last_row.get(f"{s}_dev_base", 1.0)))
+            dev = abs(float(last_row[f"{s}_dev_base"]))
             sensor_attributions.append({
                 "sensor": s,
                 "name": info.get("name", s),
                 "subsystem": subsystem,
                 "contribution": round(min(1.0, dev / 10.0), 3),
-                "shap_value": round(float(last_row.get(f"{s}_dev_base", 1.0)), 3),
+                "shap_value": round(float(last_row[f"{s}_dev_base"]), 3),
                 "direction": "shortens_life",
                 "impact": "shortens remaining life"
             })
@@ -602,7 +611,7 @@ def get_engine_detail(engine_id: str, subset: str = Query(default="FD001")):
                     )
                 )
             )
-        val = abs(float(item.get("shap_value", item.get("contribution", 0.0))))
+        val = abs(float(item["shap_value"] if "shap_value" in item else item["contribution"]))
         subsystem_shap_abs[grp] += val
 
     total_shap = sum(subsystem_shap_abs.values())
@@ -726,15 +735,20 @@ def get_maintenance_queue(subset: str = Query(default="FD001"), capacity: int = 
     open_items = []
     for eng_id, wo in triage_agent.open_orders.items():
         if wo.get("subset") == subset:
+            if "rul_drop" in wo:
+                rul_drop = float(wo["rul_drop"])
+            else:
+                hist = triage_agent.engine_state_history.get(eng_id, [])
+                rul_drop = max(0.0, hist[-2]["conservative_rul"] - hist[-1]["conservative_rul"]) if len(hist) >= 2 else 0.0
             open_items.append({
                 "work_order_id": wo.get("work_order_id"),
                 "engine_id": eng_id,
-                "unit": int(wo.get("unit", 1)),
-                "conservative_rul": float(wo.get("conservative_rul", 50.0)),
-                "rul_p10": float(wo.get("rul_p10", 50.0)),
-                "fail_prob_30": float(wo.get("fail_prob_30", 0.5)),
-                "anomaly_score": float(wo.get("anomaly_score", 0.2)),
-                "rul_drop": float(wo.get("rul_drop", 5.0)),
+                "unit": int(wo["unit"]),
+                "conservative_rul": float(wo["conservative_rul"]),
+                "rul_p10": float(wo["rul_p10"]),
+                "fail_prob_30": float(wo["fail_prob_30"]),
+                "anomaly_score": float(wo["anomaly_score"]),
+                "rul_drop": rul_drop,
                 "suspected_subsystem": wo.get("suspected_subsystem", "HPC"),
                 "severity": wo.get("severity", "HIGH"),
                 "status": wo.get("status", "OPEN"),
@@ -750,21 +764,26 @@ def get_maintenance_queue(subset: str = Query(default="FD001"), capacity: int = 
         for _, row in last_rows.iterrows():
             r_dict = row.to_dict()
             pred = ms.predict_point(r_dict)
-            c_rul = pred.get("conservative_rul", 999.0)
-            fp30 = pred.get("fail_prob_30", 0.0)
+            c_rul = pred["conservative_rul"]
+            fp30 = pred["fail_prob_30"]
             if c_rul <= 60.0 or fp30 >= 0.30:
                 subsys = "HPC"
                 if pred.get("top_contributors"):
                     subsys = pred["top_contributors"][0].get("subsystem", "HPC")
+                prior_rows = df[(df["unit"] == pred["unit"]) & (df["cycle"] == pred["cycle"] - 1)]
+                rul_drop = 0.0
+                if not prior_rows.empty:
+                    prior_pred = ms.predict_point(prior_rows.iloc[0].to_dict())
+                    rul_drop = max(0.0, float(prior_pred["rul_p50"]) - float(pred["rul_p50"]))
                 open_items.append({
                     "work_order_id": f"PENDING-WO-{pred['engine_id']}",
                     "engine_id": pred["engine_id"],
                     "unit": int(pred["unit"]),
                     "conservative_rul": c_rul,
-                    "rul_p10": pred.get("rul_p10", c_rul),
+                    "rul_p10": pred["rul_p10"],
                     "fail_prob_30": fp30,
-                    "anomaly_score": pred.get("anomaly_score", 0.1),
-                    "rul_drop": 5.0,
+                    "anomaly_score": pred["anomaly_score"],
+                    "rul_drop": rul_drop,
                     "suspected_subsystem": subsys,
                     "severity": "CRITICAL" if c_rul <= 15 else ("HIGH" if c_rul <= 30 else "MEDIUM"),
                     "status": "QUEUED"
@@ -842,10 +861,12 @@ def download_maintenance_report_by_engine(engine_id: str, subset: str = Query(de
         df = get_test_df(subset)
         unit = int(engine_id.split("-")[-1]) if "-" in engine_id else 1
         unit_df = df[df["unit"] == unit]
-        cycle = int(unit_df["cycle"].max()) if not unit_df.empty else 100
+        if unit_df.empty:
+            raise HTTPException(status_code=404, detail=f"No telemetry available for engine {engine_id}")
+        cycle = int(unit_df["cycle"].max())
         ms = get_model_service(subset)
-        row = unit_df[unit_df["cycle"] == cycle].iloc[0].to_dict() if not unit_df.empty else {}
-        pred = ms.predict_point(row) if row else {"conservative_rul": 55.0, "rul_p10": 50.0, "rul_p50": 60.0, "rul_p90": 70.0}
+        row = unit_df[unit_df["cycle"] == cycle].iloc[0].to_dict()
+        pred = ms.predict_point(row)
         target_wo = {
             "work_order_id": f"WO-{engine_id}-REPORT",
             "engine_id": engine_id,
@@ -855,16 +876,16 @@ def download_maintenance_report_by_engine(engine_id: str, subset: str = Query(de
             "current_cycle": cycle,
             "severity": "LOW",
             "status": "CLOSED",
-            "conservative_rul": pred.get("conservative_rul", 50.0),
+            "conservative_rul": pred["conservative_rul"],
             "predicted_rul": {
-                "p10": pred.get("rul_p10", 45.0),
-                "p50": pred.get("rul_p50", 55.0),
-                "p90": pred.get("rul_p90", 65.0)
+                "p10": pred["rul_p10"],
+                "p50": pred["rul_p50"],
+                "p90": pred["rul_p90"]
             },
             "suspected_subsystem": "HPC",
-            "top_sensors": pred.get("top_sensors", ["s9", "s14"]),
+            "top_sensors": pred["top_sensors"],
             "decision_trace": ["baseline:evaluation_nominal", "severity:LOW"],
-            "model_version": pred.get("model_version", "GBDT-v2.1"),
+            "model_version": pred["model_version"],
             "events": [{"cycle": cycle, "actor": "Inspector", "event": "Baseline maintenance recommendation issued"}]
         }
 
@@ -934,7 +955,7 @@ def simulate_what_if(req: WhatIfRequest, subset: str = Query(default="FD001")):
             "conservative_rul": round(float(p10_preds[i]), 1),
             "fail_prob_30": round(float(fail_probs[i]), 3),
             "anomaly_score": round(float(norm_scores[i]), 3),
-            "health_index": round(float(row.get("health_index", 1.0)), 3),
+            "health_index": round(float(row["health_index"]), 3),
             "top_sensors": ["s2", "s3", "s4"],
             "model_version": f"rul-{subset.lower()}@{getattr(ms, 'version', 'v1.0')}"
         }
@@ -990,34 +1011,33 @@ def get_model_benchmark():
                 is_stale = True
                 stale_reasons.append(f"model_bundle_{sub}.joblib hash mismatch")
 
-        m = sub_info.get("metrics", {})
-        target_rmse = sub_info.get("target_rmse")
-        target_met = sub_info.get("target_met")
-        if target_met is None and target_rmse is not None and "rmse" in m:
-            target_met = bool(m["rmse"] <= target_rmse)
+        # Every field below is read directly from the manifest; no typed fallbacks.
+        m = sub_info["metrics"]
+        target_rmse = sub_info["target_rmse"]
+        target_met = sub_info["target_met"]
         status = "Target Met" if target_met else "Target Missed"
-        cond, faults = CONDITIONS_MAP.get(sub, ("Single (Sea Level)", "1 (HPC Degradation)"))
         benchmarks.append({
             "subset": sub,
-            "condition": cond,
-            "faults": faults,
-            "algorithm": sub_info.get("algorithm", "lightgbm"),
-            "protocol_id": sub_info.get("protocol_id", ""),
-            "n_engines": sub_info.get("n_engines", 100),
+            "condition": sub_info["condition"],
+            "faults": sub_info["faults"],
+            "algorithm": sub_info["algorithm"],
+            "protocol_id": sub_info["protocol_id"],
+            "n_engines": sub_info["n_engines"],
             "target_rmse": target_rmse,
             "target_met": target_met,
             "status": status,
-            "rmse": m.get("rmse"),
-            "mae": m.get("mae"),
-            "nasa_score": m.get("nasa_score"),
-            "early_rate": m.get("early_rate"),
-            "late_rate": m.get("late_rate"),
-            "pr_auc": m.get("pr_auc"),
-            "interval_coverage": m.get("interval_coverage"),
-            "mean_interval_width": m.get("mean_interval_width"),
-            "cv": sub_info.get("cv", {}),
-            "deep_comparison": sub_info.get("comparison_rows", []),
-            "champion": sub_info.get("champion", {})
+            "target_provenance": sub_info.get("target_provenance"),
+            "rmse": m["rmse"],
+            "mae": m["mae"],
+            "nasa_score": m["nasa_score"],
+            "early_rate": m["early_rate"],
+            "late_rate": m["late_rate"],
+            "pr_auc": m["pr_auc"],
+            "interval_coverage": m["interval_coverage"],
+            "mean_interval_width": m["mean_interval_width"],
+            "cv": sub_info["cv"],
+            "deep_comparison": sub_info["comparison_rows"],
+            "champion": sub_info["champion"]
         })
 
     return {
@@ -1065,10 +1085,9 @@ def get_model_details(subset: str):
     _, _, rul_truth = loader.load_raw_data()
     ms = get_model_service(subset)
     eval_res = ms.evaluate_test(test_df, rul_truth, save_report=False)
-
-    cv_data = sub_info.get("cv", {})
-    tr_mean = float(cv_data.get("mean_train_rmse", 0.0))
-    cv_mean = float(cv_data.get("mean_rmse", 0.0))
+    cv_data = sub_info["cv"]
+    tr_mean = float(cv_data["mean_train_rmse"])
+    cv_mean = float(cv_data["mean_rmse"])
     te_mean = float(sub_info["metrics"]["rmse"])
     tt_gap = round(te_mean - tr_mean, 2)
 
@@ -1097,7 +1116,9 @@ def get_model_details(subset: str):
         "early_rate": sub_info["metrics"]["early_rate"],
         "late_rate": sub_info["metrics"]["late_rate"],
         "nasa_phm08": eval_res.get("nasa_phm08", {}),
-        "status": eval_res.get("status", "Evaluated"),
+        "target_rmse": sub_info["target_rmse"],
+        "target_met": sub_info["target_met"],
+        "status": "Target Met" if sub_info["target_met"] else "Target Missed",
         "interval_coverage": sub_info["metrics"]["interval_coverage"],
         "mean_interval_width": sub_info["metrics"]["mean_interval_width"],
         "coverage_wilson_ci_95": eval_res.get("coverage_wilson_ci_95", []),
@@ -1513,7 +1534,7 @@ async def predict_batch(
                 pred = ms.predict_point(row.to_dict())
             except ValueError as ve:
                 raise HTTPException(status_code=422, detail=str(ve))
-            c_rul = pred.get("conservative_rul", 999.0)
+            c_rul = pred["conservative_rul"]
             subsys = "HPC"
             if pred.get("top_contributors"):
                 subsys = pred["top_contributors"][0].get("subsystem", "HPC")
@@ -1521,14 +1542,14 @@ async def predict_batch(
                 "unit": int(pred["unit"]),
                 "cycle": int(pred["cycle"]),
                 "conservative_rul": c_rul,
-                "rul_p10": pred.get("rul_p10", c_rul),
-                "rul_p50": pred.get("rul_p50", c_rul),
-                "rul_p90": pred.get("rul_p90", c_rul),
-                "fail_prob_10": pred.get("fail_prob_10", 0.0),
-                "fail_prob_30": pred.get("fail_prob_30", 0.0),
-                "fail_prob_60": pred.get("fail_prob_60", 0.0),
-                "health_index": pred.get("health_index", 1.0),
-                "anomaly_score": pred.get("anomaly_score", 0.0),
+                "rul_p10": pred["rul_p10"],
+                "rul_p50": pred["rul_p50"],
+                "rul_p90": pred["rul_p90"],
+                "fail_prob_10": pred["fail_prob_10"],
+                "fail_prob_30": pred["fail_prob_30"],
+                "fail_prob_60": pred["fail_prob_60"],
+                "health_index": pred["health_index"],
+                "anomaly_score": pred["anomaly_score"],
                 "top_sensors": pred.get("top_sensors", []),
                 "suspected_subsystem": subsys,
                 "severity": "CRITICAL" if c_rul <= 15 else ("HIGH" if c_rul <= 30 else ("MEDIUM" if c_rul <= 60 else "HEALTHY"))
@@ -1544,22 +1565,22 @@ async def predict_batch(
                 out = streaming_pipe.stream_cycle(row.to_dict())
                 last_pred = out["prediction"]
             if last_pred:
-                c_rul = last_pred.get("conservative_rul", 999.0)
+                c_rul = last_pred["conservative_rul"]
                 subsys = "HPC"
                 if last_pred.get("top_contributors"):
                     subsys = last_pred["top_contributors"][0].get("subsystem", "HPC")
                 predictions.append({
                     "unit": int(unit_id),
-                    "cycle": int(last_pred.get("cycle", 1)),
+                    "cycle": int(last_pred["cycle"]),
                     "conservative_rul": c_rul,
-                    "rul_p10": last_pred.get("rul_p10", c_rul),
-                    "rul_p50": last_pred.get("rul_p50", c_rul),
-                    "rul_p90": last_pred.get("rul_p90", c_rul),
-                    "fail_prob_10": last_pred.get("fail_prob_10", 0.0),
-                    "fail_prob_30": last_pred.get("fail_prob_30", 0.0),
-                    "fail_prob_60": last_pred.get("fail_prob_60", 0.0),
-                    "health_index": last_pred.get("health_index", 1.0),
-                    "anomaly_score": last_pred.get("anomaly_score", 0.0),
+                    "rul_p10": last_pred["rul_p10"],
+                    "rul_p50": last_pred["rul_p50"],
+                    "rul_p90": last_pred["rul_p90"],
+                    "fail_prob_10": last_pred["fail_prob_10"],
+                    "fail_prob_30": last_pred["fail_prob_30"],
+                    "fail_prob_60": last_pred["fail_prob_60"],
+                    "health_index": last_pred["health_index"],
+                    "anomaly_score": last_pred["anomaly_score"],
                     "top_sensors": last_pred.get("top_sensors", []),
                     "suspected_subsystem": subsys,
                     "severity": "CRITICAL" if c_rul <= 15 else ("HIGH" if c_rul <= 30 else ("MEDIUM" if c_rul <= 60 else "HEALTHY"))
@@ -1757,8 +1778,8 @@ def get_metrics():
             try:
                 with open(eval_f, "r", encoding="utf-8") as f:
                     ev = json.load(f)
-                PDM_TEST_RMSE.labels(subset=sub).set(float(ev.get("rmse", 0.0)))
-                PDM_CONFORMAL_COVERAGE.labels(subset=sub).set(float(ev.get("interval_coverage", 0.0)))
+                PDM_TEST_RMSE.labels(subset=sub).set(float(ev["rmse"]))
+                PDM_CONFORMAL_COVERAGE.labels(subset=sub).set(float(ev["interval_coverage"]))
             except Exception:
                 pass
 
@@ -1790,9 +1811,11 @@ def get_metrics():
             curr_sample = test_df.sample(min(150, len(test_df)), random_state=42)
             mgr = mlops_managers.get(sub) or MLOpsManager(sub)
             report = mgr.calculate_drift_report(ref_sample, curr_sample)
-            DRIFT_SHARE.labels(subset=sub).set(float(report.get("drift_share", 0.0)))
+            share = report["share_drifting_features"]
+            if share is not None:
+                DRIFT_SHARE.labels(subset=sub).set(float(share))
         except Exception:
-            DRIFT_SHARE.labels(subset=sub).set(0.0)
+            pass
 
     # 5. Evaluate active alerts using LIVE drift
     from src.mlops.alerts import AlertManager

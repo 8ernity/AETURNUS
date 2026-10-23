@@ -31,31 +31,21 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Generate Clean Source Archive
+      - name: Generate Clean Source Archive (tracked files only)
         run: |
-          python -c "
-          import zipfile
-          from pathlib import Path
-
-          root = Path('.')
-          zip_path = Path('AETURNUS_source.zip')
-          exclude_dirs = {'.git', '.github', '.venv', 'venv', 'env', 'node_modules', '__pycache__', '.pytest_cache', 'mlruns', 'processed', 'raw', 'uploads'}
-          exclude_exts = {'.pyc', '.joblib', '.parquet', '.db', '.db-wal', '.db-shm', '.log'}
-
-          with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as z:
-              for f in root.rglob('*'):
-                  if not f.is_file() or f.name == 'AETURNUS_source.zip':
-                      continue
-                  rel = f.relative_to(root)
-                  if any(part in exclude_dirs for part in rel.parts) or f.suffix.lower() in exclude_exts:
-                      continue
-                  z.write(f, arcname=f'AETURNUS/{rel}')
-          print(f'Created {zip_path} with size: {zip_path.stat().st_size / 1024 / 1024:.2f} MB')
-          "
+          git archive --format=zip --prefix=AETURNUS/ -o AETURNUS_source.zip HEAD
+          python - <<'PY'
+          import sys, zipfile
+          names = zipfile.ZipFile('AETURNUS_source.zip').namelist()
+          bad = [n for n in names if n.endswith(('.db', '.db-wal', '.db-shm', '.db-journal'))]
+          if bad:
+              sys.exit(f'Archive contains DB state: {bad}')
+          print(f'Archived {len(names)} tracked files; no DB state.')
+          PY
 
       - name: Generate SHA-256 Checksums
         run: |
-          sha256sum AETURNUS_source.zip artifacts/reports/benchmark_summary.json > CHECKSUMS.txt
+          sha256sum AETURNUS_source.zip > CHECKSUMS.txt
           cat CHECKSUMS.txt
 
       - name: Create GitHub Release
@@ -69,6 +59,3 @@ jobs:
           files: |
             AETURNUS_source.zip
             CHECKSUMS.txt
-            artifacts/reports/benchmark_summary.json
-            artifacts/reports/model_comparison_FD001.json
-            artifacts/reports/data_quality_FD001.json

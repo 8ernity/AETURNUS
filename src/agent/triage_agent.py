@@ -637,6 +637,8 @@ class TriageAgent:
             }
             existing_order["fail_prob_30"] = fail_prob
             existing_order["anomaly_score"] = anomaly_score
+            existing_order["rul_p10"] = rul_p10
+            existing_order["rul_drop"] = rul_drop
             existing_order["decision_trace"] = trace
 
             # NEVER overwrite human status
@@ -705,8 +707,10 @@ class TriageAgent:
                 "p90": rul_p90
             },
             "conservative_rul": cons_rul,
+            "rul_p10": rul_p10,
             "fail_prob_30": fail_prob,
             "anomaly_score": anomaly_score,
+            "rul_drop": rul_drop,
             "due_by_cycle": due_by_cycle,
             "suspected_subsystem": suspected_subsystem,
             "top_sensors": top_sensors,

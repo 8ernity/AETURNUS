@@ -2,9 +2,9 @@
 MLOps Model Gate & Benchmark Regression Verification Script
 ============================================================
 Validates that:
-1. Shipped model bundles match reported metrics in evaluation_*.json (within 0.05 RMSE).
+1. Shipped model bundles match reported metrics in run_manifest.json (within 0.05 RMSE).
 2. Quantile predictions obey strict monotonicity: p10 <= p50 <= p90.
-3. Cryptographic SHA-256 dataset fingerprints are valid in model_registry.json.
+3. Bundle SHA-256 fingerprints match the committed run manifest.
 4. Empirical conformal coverage lies within honest operational bounds (50% - 95%).
 5. Generates an executive Markdown table for GitHub Actions Step Summary.
 """
@@ -12,6 +12,7 @@ Validates that:
 import os
 import sys
 import json
+import hashlib
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -42,41 +43,55 @@ def run_model_gate() -> bool:
     summary_rows = []
     all_passed = True
 
-    # Check registry file
-    registry_file = ROOT_DIR / "artifacts" / "reports" / "model_registry.json"
-    registry_data = {}
-    if registry_file.exists():
-        with open(registry_file, "r", encoding="utf-8") as f:
-            registry_data = json.load(f)
+    # The run manifest is the committed, authoritative source of shipped
+    # metrics. Evaluation reports are gitignored build products and are not
+    # guaranteed to exist in a fresh clone or CI checkout.
+    manifest_file = ROOT_DIR / "artifacts" / "run_manifest.json"
+    if not manifest_file.exists():
+        print(f"  [FAIL] Missing run manifest: {manifest_file}")
+        return False
+    with open(manifest_file, "r", encoding="utf-8") as f:
+        manifest = json.load(f)
 
     for sub in SUBSETS:
         print(f"\n>>> Checking Model Gate for Subset: {sub}...")
         bundle_path = ROOT_DIR / "artifacts" / "models" / f"model_bundle_{sub}.joblib"
-        eval_path = ROOT_DIR / "artifacts" / "reports" / f"evaluation_{sub}.json"
+        subset_info = manifest.get("subsets", {}).get(sub)
+
+        if not subset_info:
+            print(f"  [FAIL] Missing {sub} entry in {manifest_file}")
+            all_passed = False
+            continue
 
         if not bundle_path.exists():
             print(f"  [FAIL] Missing model bundle: {bundle_path}")
             all_passed = False
             continue
 
-        if not eval_path.exists():
-            print(f"  [FAIL] Missing evaluation report: {eval_path}")
+        metrics = subset_info.get("metrics") or {}
+        if "rmse" not in metrics:
+            print(f"  [FAIL] Missing metrics.rmse in manifest for {sub}")
             all_passed = False
             continue
 
-        with open(eval_path, "r", encoding="utf-8") as f:
-            eval_report = json.load(f)
+        reported_rmse = float(metrics["rmse"])
 
-        reported_rmse = float(eval_report["rmse"])
-        reported_mae = float(eval_report["mae"])
-        reported_nasa = float(eval_report["nasa_score"])
-        reported_cov = float(eval_report["interval_coverage"])
+        # 1. Verify the shipped bundle matches the manifest's SHA-256.
+        expected_sha = subset_info.get("bundle_sha256")
+        actual_sha = hashlib.sha256(bundle_path.read_bytes()).hexdigest()
+        sha_passed = bool(expected_sha) and actual_sha == expected_sha
+        if not sha_passed:
+            print(
+                f"  [FAIL] Bundle SHA-256 mismatch for {sub}: "
+                f"{actual_sha} != {expected_sha}"
+            )
+            all_passed = False
 
-        # 1. Load active model bundle
+        # 2. Load active model bundle
         ms = ModelService(subset=sub).load()
         sklearn_ver = getattr(ms, "sklearn_version", "unknown")
 
-        # 2. Check test parquet
+        # 3. Check test parquet
         test_path = ROOT_DIR / "data" / "processed" / sub / "test.parquet"
         if not test_path.exists():
             print(f"  [BUILD] Test parquet missing for {sub}. Running DataPipeline...")
@@ -87,16 +102,15 @@ def run_model_gate() -> bool:
         loader = CMAPSSLoader(subset=sub)
         _, _, rul_truth = loader.load_raw_data()
 
-        # 3. Re-evaluate live bundle on test cohort
+        # 4. Re-evaluate live bundle on test cohort
         live_metrics = ms.evaluate_test(test_df, rul_truth, save_report=False)
         live_rmse = float(live_metrics["rmse"])
-        live_mae = float(live_metrics["mae"])
         live_cov = float(live_metrics["interval_coverage"])
 
         rmse_diff = abs(live_rmse - reported_rmse)
         rmse_gate_passed = rmse_diff <= TOLERANCE_RMSE
 
-        # 4. Verify Monotonicity (p10 <= p50 <= p90)
+        # 5. Verify Monotonicity (p10 <= p50 <= p90)
         monotonic_violations = 0
         sample_rows = test_df.sample(min(100, len(test_df)), random_state=42)
         for _, row in sample_rows.iterrows():
@@ -107,16 +121,12 @@ def run_model_gate() -> bool:
 
         monotonic_passed = (monotonic_violations == 0)
 
-        # 5. Check Registry SHA-256 fingerprint
-        reg_models = registry_data.get("models", [])
-        sub_models = [m for m in reg_models if m.get("version", "").startswith(f"v_{sub}") or (sub == "FD001" and m.get("alias") == "champion")]
-        data_hash = sub_models[0].get("data_hash", "N/A") if sub_models else "sha256:verified"
-
-        status_flag = "PASS" if (rmse_gate_passed and monotonic_passed) else "FAIL"
+        status_flag = "PASS" if (sha_passed and rmse_gate_passed and monotonic_passed) else "FAIL"
         if status_flag == "FAIL":
             all_passed = False
 
         print(f"  Live RMSE:      {live_rmse:.3f} | Reported: {reported_rmse:.3f} (Diff: {rmse_diff:.3f})")
+        print(f"  Bundle SHA-256: {'[MATCHED]' if sha_passed else '[FAILED]'}")
         print(f"  RMSE Gate:      {'[PASSED]' if rmse_gate_passed else '[FAILED]'}")
         print(f"  Monotonicity:   {'[PASSED]' if monotonic_passed else '[FAILED]'}")
         print(f"  Empirical Cov:  {live_cov * 100:.1f}%")

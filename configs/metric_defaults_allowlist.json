@@ -1,0 +1,8 @@
+{
+  "allowed_keys": {
+    "unit": "Engine identifier used only as a deterministic cache/record key, not a model or telemetry metric.",
+    "cycle": "Lifecycle cycle index used as an identifier, not a model or telemetry metric.",
+    "regime": "Operating-regime identifier supplied by the feature pipeline, not a model metric.",
+    "created_at_cycle": "Work-order creation cycle used only for ordering records, not a model metric."
+  }
+}

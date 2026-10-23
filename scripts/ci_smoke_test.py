@@ -6,6 +6,7 @@ in under 10 seconds.
 """
 import sys
 import json
+import hashlib
 from pathlib import Path
 import pandas as pd
 import numpy as np
@@ -31,26 +32,41 @@ def run_smoke_test():
     assert "drift" in monitoring_cfg, "monitoring.yaml missing drift"
     print("  --> Configurations loaded successfully.")
 
-    # 2. Artifacts & Reports
-    print("[2/6] Validating disk reports and model artifacts...")
+    # 2. Manifest & model artifacts
+    print("[2/6] Validating manifest provenance and model artifacts...")
     artifacts_dir = root_dir / "artifacts"
     reports_dir = artifacts_dir / "reports"
     models_dir = artifacts_dir / "models"
-    
+
+    manifest_f = artifacts_dir / "run_manifest.json"
+    assert manifest_f.exists(), f"Missing run manifest: {manifest_f}"
+    with open(manifest_f, "r", encoding="utf-8") as f:
+        manifest = json.load(f)
+    assert manifest.get("run_id"), "run_manifest.json is missing run_id"
+
     for sub in ["FD001", "FD002", "FD003", "FD004"]:
-        eval_f = reports_dir / f"evaluation_{sub}.json"
-        assert eval_f.exists(), f"Missing evaluation report: {eval_f}"
-        with open(eval_f, "r", encoding="utf-8") as f:
-            d = json.load(f)
-            assert "rmse" in d and d["rmse"] > 0, f"Invalid RMSE in {eval_f}"
-            assert "multi_seed" in d, f"Missing multi_seed in {eval_f}"
-        
+        info = manifest.get("subsets", {}).get(sub)
+        assert info, f"Missing {sub} entry in {manifest_f}"
+
+        metrics = info.get("metrics") or {}
+        assert float(metrics.get("rmse", 0.0)) > 0.0, f"Invalid RMSE in manifest for {sub}"
+        assert "multi_seed" in info, f"Missing multi_seed in manifest for {sub}"
+
         bundle_f = models_dir / f"model_bundle_{sub}.joblib"
         assert bundle_f.exists(), f"Missing model bundle: {bundle_f}"
+        actual_sha = hashlib.sha256(bundle_f.read_bytes()).hexdigest()
+        assert actual_sha == info.get("bundle_sha256"), (
+            f"Bundle hash mismatch for {sub}: {actual_sha} != {info.get('bundle_sha256')}"
+        )
 
+    # The registry is a derived cache; validate it when present, but a fresh
+    # clone is expected to rebuild it from the manifest on first use.
     reg_f = reports_dir / "model_registry.json"
-    assert reg_f.exists(), "Missing model_registry.json"
-    print("  --> All FD001-FD004 artifacts & reports verified.")
+    if reg_f.exists():
+        with open(reg_f, "r", encoding="utf-8") as f:
+            registry = json.load(f)
+        assert isinstance(registry.get("models"), list), "Invalid model_registry.json"
+    print("  --> FD001-FD004 manifest provenance and bundles verified.")
 
     # 3. Data Cleaning & Regime Normalization
     print("[3/6] Testing DataCleaner and Causal Imputation...")

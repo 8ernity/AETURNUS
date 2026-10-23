@@ -39,7 +39,7 @@ def render_metrics_block(manifest: dict) -> str:
         cond = loader.operating_conditions
         faults = loader.fault_modes
         n_eng = s_data["n_engines"] if "n_engines" in s_data else len(loader.load_raw_data()[2])
-        algo = s_data.get("algorithm", "lightgbm").upper()
+        algo = s_data["algorithm"].upper()
         
         rmse = f"**{m['rmse']:.2f}**" if "rmse" in m else "N/A"
         mae = f"{m['mae']:.2f}" if "mae" in m else "N/A"
@@ -47,25 +47,32 @@ def render_metrics_block(manifest: dict) -> str:
         pr_auc = f"{m['pr_auc']:.3f}" if "pr_auc" in m else "N/A"
         cov = f"{m['interval_coverage'] * 100:.1f}%" if "interval_coverage" in m else "N/A"
         
-        # Read target_met strictly from manifest
-        target_met = s_data.get("target_met", False)
-        status = '<span style="color:#22c55e;font-weight:bold;">TARGET REACHED</span>' if target_met else '<span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span>'
+        # Read target_met strictly from manifest; never infer or default it here.
+        target_met = s_data["target_met"]
+        if target_met is True:
+            status = '<span style="color:#22c55e;font-weight:bold;">TARGET REACHED</span>'
+        elif target_met is False:
+            status = '<span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span>'
+        else:
+            status = '<span style="color:#94a3b8;font-weight:bold;">NO DATA</span>'
         
         lines.append(f"| **{sub}** | {cond} | {faults} | {n_eng} | **{algo}** | {rmse} | {mae} | {nasa} | {pr_auc} | {cov} | {status} |")
 
     lines.extend([
         "",
-        "### 🔬 5-Fold GroupKFold Cross-Validation (Persistent Engines)",
+        "### 🔬 5-Fold GroupKFold Cross-Validation (Censored, Persistent Engines)",
         "",
-        "| Subset | RMSE ($mean \\pm std$) | NASA Score ($mean \\pm std$) | Algorithm | Protocol ID |",
+        "Validation targets are censored with the same random-truncation protocol as the official test set; the CV protocol ID below hashes the mode and draw count actually used.",
+        "",
+        "| Subset | RMSE ($mean \\pm std$) | NASA Score ($mean \\pm std$) | Algorithm | CV Protocol ID |",
         "|:---:|:---:|:---:|:---:|:---:|"
     ])
 
     for sub in ["FD001", "FD002", "FD003", "FD004"]:
         s_data = subsets.get(sub, {})
         cv = s_data.get("cv", {})
-        algo = s_data.get("algorithm", "lightgbm")
-        proto = s_data.get("protocol_id", "canonical")
+        algo = s_data["algorithm"]
+        proto = s_data["cv_protocol_id"]
         cv_rmse = f"${cv['mean_rmse']:.2f} \\pm {cv['std_rmse']:.2f}$" if ("mean_rmse" in cv and "std_rmse" in cv) else "N/A"
         cv_nasa = f"${cv['mean_nasa']:,.1f} \\pm {cv['std_nasa']:.1f}$" if ("mean_nasa" in cv and "std_nasa" in cv) else "N/A"
         lines.append(f"| **{sub}** | {cv_rmse} | {cv_nasa} | `{algo}` | `{proto}` |")
