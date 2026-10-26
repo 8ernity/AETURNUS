@@ -1,21 +1,21 @@
 {
-  "run_id": "run_1792682781_cd500a5c",
-  "git_sha": "cd500a5cbbd6dde95352a4c6a081de6dea5ae9d1",
-  "config_hash": "864b42091ef6d01be11fe0c2d17bd0a55885811de22192488ca44da525e5b54d",
+  "run_id": "run_1792823030_6f50628b",
+  "git_sha": "6f50628ba2615ff15a5f739452c81b612316c5f6",
+  "config_hash": "52a8cb9689efd99488403ea100baca33b11d565feac78f9e586b113d743f5d1b",
   "data_sha256": {
     "FD001_train": "8d39aa11937f96cdcaf873242336fb1a8be1f92a6c6cac2fcd59f067cddcace2",
     "FD001_test": "9e4783f9d661b1042cf2c2e4e8db76a8382fee9a225882e197088d723cc2c150",
-    "FD002_train": "19f8adb9cf02dbee72134a405ee2745b70f37b00917e5b4321099a42b562a1c5",
-    "FD002_test": "79a7adad443c90352b0f6040fb04d51eebdab59f75396a148d004b4b571a0589",
+    "FD002_train": "2540662c146e1fc80ae2591998dd1a1e4f5e3a10194d3a6d4a679081f4b3424e",
+    "FD002_test": "1d4be20982cb6bd7ff4093fc28bd46dd80d963725e789a26aa49cdbb15387b24",
     "FD003_train": "a8de98b70da6931aedbe5ed2b2ab6bf18142c41aa60abdebb896cf8c07802fda",
     "FD003_test": "c38a69c35e279eebbc8bd27659c935c37bc3d905ec26e78afb73f3b8c21f964c",
-    "FD004_train": "0cf981d06b29048002b72f1bdd47f73bc4ae33802014a16398e5c9cde2c0cc92",
-    "FD004_test": "8d9850fc48a7ae44bb42efd933e5d7af180a3db34f1e57477a6c2cce8b148a3a"
+    "FD004_train": "73f63196aeb1a8f0071f44e569b6074816426b1e6d35c462265e164d52d0be6d",
+    "FD004_test": "16a5fdfc3e3e43f25c3ece6c9f8258efbe9b9b641c9688e0597c3b8bfbcce8bd"
   },
-  "created_at": 1792684992.1207078,
+  "created_at": 1792832414.7266617,
   "subsets": {
     "FD001": {
-      "bundle_sha256": "2db3bf2dbe49e104db03b15469ce177b3ec14decf1c62ffce129875488a15c47",
+      "bundle_sha256": "8ca4cdd8238bd3349b0ee96db4c65260f360f39fe26efcac126a77ba1b6ddb92",
       "algorithm": "lightgbm",
       "p50_model_class": "LGBMRegressor",
       "protocol_id": "43ddc1669083ecc7fec59c5fd2967fe9d16a2a881434c001771eea26f303f15c",
@@ -35,8 +35,88 @@
         "early_rate": 0.49,
         "late_rate": 0.51,
         "pr_auc": 0.966,
-        "interval_coverage": 0.74,
-        "mean_interval_width": 29.2
+        "interval_coverage": 0.85,
+        "mean_interval_width": 42.65,
+        "coverage_target": 0.8,
+        "coverage_wilson_ci_95": [
+          0.7672,
+          0.9069
+        ],
+        "coverage_wilson_ci_contains_target": true,
+        "coverage_ci_excludes_target": false,
+        "coverage_by_bucket": [
+          {
+            "bucket_index": 0,
+            "predicted_p50_lower": null,
+            "predicted_p50_upper": 30.9964,
+            "sample_count": 23,
+            "coverage": 0.7391,
+            "wilson_ci_95": [
+              0.5353,
+              0.8745
+            ],
+            "mean_interval_width": 11.53,
+            "conformal_q": 1.9302
+          },
+          {
+            "bucket_index": 1,
+            "predicted_p50_lower": 30.9964,
+            "predicted_p50_upper": 82.9233,
+            "sample_count": 23,
+            "coverage": 0.913,
+            "wilson_ci_95": [
+              0.732,
+              0.9758
+            ],
+            "mean_interval_width": 44.86,
+            "conformal_q": 11.5692
+          },
+          {
+            "bucket_index": 2,
+            "predicted_p50_lower": 82.9233,
+            "predicted_p50_upper": null,
+            "sample_count": 54,
+            "coverage": 0.8704,
+            "wilson_ci_95": [
+              0.7558,
+              0.9358
+            ],
+            "mean_interval_width": 54.97,
+            "conformal_q": 14.3726
+          }
+        ]
+      },
+      "calibration": {
+        "method": "split_conformal_cv_protocol",
+        "calibration_engine_count": 7,
+        "calibration_sample_count": 35,
+        "target_coverage": 0.8,
+        "calibration_alpha": 0.2,
+        "alpha_policy": "single_regime_nominal_80",
+        "calibration_regime_count": 1,
+        "nominal_coverage": 0.8,
+        "protocol_id": "ef961bf9dce8c24ef12e715833e969a9f65fe7022f689643951e652de9eeebcc",
+        "n_buckets": 3,
+        "edges": [
+          30.9964,
+          82.9233
+        ],
+        "bucket_q": [
+          1.9302392791768046,
+          11.56918240093719,
+          14.372602989692336
+        ],
+        "bucket_counts": [
+          12,
+          11,
+          12
+        ],
+        "bucket_score_counts": [
+          12,
+          11,
+          12
+        ],
+        "global_q": 5.890124609295198
       },
       "cv": {
         "protocol_id": "ef961bf9dce8c24ef12e715833e969a9f65fe7022f689643951e652de9eeebcc",
@@ -48,7 +128,54 @@
         "std_rmse": 1.06,
         "mean_nasa": 282.8,
         "std_nasa": 94.0,
-        "mean_train_rmse": 4.13
+        "mean_train_rmse": 4.13,
+        "by_regime": {
+          "0": {
+            "sample_count": 350,
+            "share": 1.0,
+            "rmse": 14.3059,
+            "mae": 10.2966
+          }
+        }
+      },
+      "cv_by_regime": {
+        "0": {
+          "sample_count": 350,
+          "share": 1.0,
+          "rmse": 14.3059,
+          "mae": 10.2966
+        }
+      },
+      "test_by_regime": {
+        "0": {
+          "sample_count": 100,
+          "share": 1.0,
+          "rmse": 13.1406,
+          "mae": 9.0743
+        }
+      },
+      "regime_mix_gap": {
+        "cv_regime_counts": {
+          "0": 350
+        },
+        "test_regime_counts": {
+          "0": 100
+        },
+        "cv_regime_shares": {
+          "0": 1.0
+        },
+        "test_regime_shares": {
+          "0": 1.0
+        },
+        "max_share_gap": 0.0,
+        "chi2_statistic": null,
+        "chi2_pvalue": null,
+        "ks_statistic": null,
+        "ks_pvalue": null,
+        "low_expected_counts": false,
+        "gap_flag": false,
+        "status": "comparable",
+        "note": "Single-regime split; chi-square and KS tests are undefined."
       },
       "comparison_rows": [
         {
@@ -196,7 +323,7 @@
       "condition": "1 (Sea Level)",
       "faults": "1 (HPC Degradation)",
       "status": "Target Met",
-      "train_time_sec": 35.65,
+      "train_time_sec": 1591.28,
       "multi_seed": {
         "algorithm": "lightgbm",
         "seeds": [
@@ -217,7 +344,7 @@
       }
     },
     "FD002": {
-      "bundle_sha256": "5ae5301116e161a2282fc2abcd28ca7e2cde3acbf575b19f4e27be857894879d",
+      "bundle_sha256": "abbd177989bdad50b1e110f01b4798d80da48a913266b9aa6e26158567983f3e",
       "algorithm": "lightgbm",
       "p50_model_class": "LGBMRegressor",
       "protocol_id": "43ddc1669083ecc7fec59c5fd2967fe9d16a2a881434c001771eea26f303f15c",
@@ -237,8 +364,88 @@
         "early_rate": 0.5791505791505791,
         "late_rate": 0.42084942084942084,
         "pr_auc": 0.998,
-        "interval_coverage": 0.5907,
-        "mean_interval_width": 27.85
+        "interval_coverage": 0.7683,
+        "mean_interval_width": 48.22,
+        "coverage_target": 0.8,
+        "coverage_wilson_ci_95": [
+          0.7133,
+          0.8156
+        ],
+        "coverage_wilson_ci_contains_target": true,
+        "coverage_ci_excludes_target": false,
+        "coverage_by_bucket": [
+          {
+            "bucket_index": 0,
+            "predicted_p50_lower": null,
+            "predicted_p50_upper": 43.0171,
+            "sample_count": 73,
+            "coverage": 0.9178,
+            "wilson_ci_95": [
+              0.8321,
+              0.9618
+            ],
+            "mean_interval_width": 16.21,
+            "conformal_q": 2.9005
+          },
+          {
+            "bucket_index": 1,
+            "predicted_p50_lower": 43.0171,
+            "predicted_p50_upper": 82.6211,
+            "sample_count": 59,
+            "coverage": 0.9492,
+            "wilson_ci_95": [
+              0.8608,
+              0.9826
+            ],
+            "mean_interval_width": 60.55,
+            "conformal_q": 13.3101
+          },
+          {
+            "bucket_index": 2,
+            "predicted_p50_lower": 82.6211,
+            "predicted_p50_upper": null,
+            "sample_count": 127,
+            "coverage": 0.5984,
+            "wilson_ci_95": [
+              0.5115,
+              0.6796
+            ],
+            "mean_interval_width": 60.89,
+            "conformal_q": 14.0948
+          }
+        ]
+      },
+      "calibration": {
+        "method": "split_conformal_cv_protocol",
+        "calibration_engine_count": 19,
+        "calibration_sample_count": 95,
+        "target_coverage": 0.8,
+        "calibration_alpha": 0.1,
+        "alpha_policy": "multi_regime_nominal_90",
+        "calibration_regime_count": 6,
+        "nominal_coverage": 0.9,
+        "protocol_id": "ef961bf9dce8c24ef12e715833e969a9f65fe7022f689643951e652de9eeebcc",
+        "n_buckets": 3,
+        "edges": [
+          43.0171,
+          82.6211
+        ],
+        "bucket_q": [
+          2.900461007861032,
+          13.31006057966017,
+          14.094843838329327
+        ],
+        "bucket_counts": [
+          32,
+          31,
+          32
+        ],
+        "bucket_score_counts": [
+          32,
+          31,
+          32
+        ],
+        "global_q": 8.718696663137214
       },
       "cv": {
         "protocol_id": "ef961bf9dce8c24ef12e715833e969a9f65fe7022f689643951e652de9eeebcc",
@@ -246,11 +453,167 @@
         "n_draws": 5,
         "min_cycles": 60,
         "k_folds": 5,
-        "mean_rmse": 14.41,
-        "std_rmse": 0.68,
-        "mean_nasa": 766.9,
-        "std_nasa": 97.9,
-        "mean_train_rmse": 8.56
+        "mean_rmse": 14.38,
+        "std_rmse": 0.69,
+        "mean_nasa": 754.8,
+        "std_nasa": 97.3,
+        "mean_train_rmse": 8.54,
+        "by_regime": {
+          "0": {
+            "sample_count": 221,
+            "share": 0.2429,
+            "rmse": 15.074,
+            "mae": 11.2995
+          },
+          "1": {
+            "sample_count": 131,
+            "share": 0.144,
+            "rmse": 14.7778,
+            "mae": 10.616
+          },
+          "2": {
+            "sample_count": 148,
+            "share": 0.1626,
+            "rmse": 14.2073,
+            "mae": 10.3723
+          },
+          "3": {
+            "sample_count": 130,
+            "share": 0.1429,
+            "rmse": 13.8541,
+            "mae": 9.8456
+          },
+          "4": {
+            "sample_count": 148,
+            "share": 0.1626,
+            "rmse": 13.622,
+            "mae": 10.2876
+          },
+          "5": {
+            "sample_count": 132,
+            "share": 0.1451,
+            "rmse": 14.4427,
+            "mae": 11.2141
+          }
+        }
+      },
+      "cv_by_regime": {
+        "0": {
+          "sample_count": 221,
+          "share": 0.2429,
+          "rmse": 15.074,
+          "mae": 11.2995
+        },
+        "1": {
+          "sample_count": 131,
+          "share": 0.144,
+          "rmse": 14.7778,
+          "mae": 10.616
+        },
+        "2": {
+          "sample_count": 148,
+          "share": 0.1626,
+          "rmse": 14.2073,
+          "mae": 10.3723
+        },
+        "3": {
+          "sample_count": 130,
+          "share": 0.1429,
+          "rmse": 13.8541,
+          "mae": 9.8456
+        },
+        "4": {
+          "sample_count": 148,
+          "share": 0.1626,
+          "rmse": 13.622,
+          "mae": 10.2876
+        },
+        "5": {
+          "sample_count": 132,
+          "share": 0.1451,
+          "rmse": 14.4427,
+          "mae": 11.2141
+        }
+      },
+      "test_by_regime": {
+        "0": {
+          "sample_count": 69,
+          "share": 0.2664,
+          "rmse": 21.0186,
+          "mae": 12.9919
+        },
+        "1": {
+          "sample_count": 32,
+          "share": 0.1236,
+          "rmse": 25.8034,
+          "mae": 17.3243
+        },
+        "2": {
+          "sample_count": 42,
+          "share": 0.1622,
+          "rmse": 27.0712,
+          "mae": 19.0082
+        },
+        "3": {
+          "sample_count": 41,
+          "share": 0.1583,
+          "rmse": 29.6303,
+          "mae": 19.0055
+        },
+        "4": {
+          "sample_count": 39,
+          "share": 0.1506,
+          "rmse": 23.9133,
+          "mae": 14.6189
+        },
+        "5": {
+          "sample_count": 36,
+          "share": 0.139,
+          "rmse": 24.5452,
+          "mae": 16.6533
+        }
+      },
+      "regime_mix_gap": {
+        "cv_regime_counts": {
+          "0": 221,
+          "1": 131,
+          "2": 148,
+          "3": 130,
+          "4": 148,
+          "5": 132
+        },
+        "test_regime_counts": {
+          "0": 69,
+          "1": 32,
+          "2": 42,
+          "3": 41,
+          "4": 39,
+          "5": 36
+        },
+        "cv_regime_shares": {
+          "0": 0.2429,
+          "1": 0.144,
+          "2": 0.1626,
+          "3": 0.1429,
+          "4": 0.1626,
+          "5": 0.1451
+        },
+        "test_regime_shares": {
+          "0": 0.2664,
+          "1": 0.1236,
+          "2": 0.1622,
+          "3": 0.1583,
+          "4": 0.1506,
+          "5": 0.139
+        },
+        "max_share_gap": 0.0235,
+        "chi2_statistic": 1.6166,
+        "chi2_pvalue": 0.899236,
+        "ks_statistic": 0.0236,
+        "ks_pvalue": 0.999737,
+        "low_expected_counts": false,
+        "gap_flag": false,
+        "status": "comparable"
       },
       "comparison_rows": [
         {
@@ -378,7 +741,7 @@
       "condition": "6 (Full Envelope)",
       "faults": "1 (HPC Degradation)",
       "status": "Target Missed",
-      "train_time_sec": 73.88,
+      "train_time_sec": 1214.51,
       "multi_seed": {
         "algorithm": "lightgbm",
         "seeds": [
@@ -394,12 +757,12 @@
         "nasa_std": 0.0,
         "pr_auc_mean": 0.998,
         "pr_auc_std": 0.0,
-        "coverage_mean": 0.5907,
+        "coverage_mean": 0.7683,
         "coverage_std": 0.0
       }
     },
     "FD003": {
-      "bundle_sha256": "99bc20f1845c4a398adb745b15601a32a17b98e6525f7020f06b74240c5e62da",
+      "bundle_sha256": "16e74a4d156a4842e0f4e094c7cd63f0ba6e50b959addc2477aae3a764ff2f2a",
       "algorithm": "lightgbm",
       "p50_model_class": "LGBMRegressor",
       "protocol_id": "43ddc1669083ecc7fec59c5fd2967fe9d16a2a881434c001771eea26f303f15c",
@@ -419,8 +782,88 @@
         "early_rate": 0.36,
         "late_rate": 0.64,
         "pr_auc": 0.983,
-        "interval_coverage": 0.62,
-        "mean_interval_width": 22.24
+        "interval_coverage": 0.75,
+        "mean_interval_width": 32.5,
+        "coverage_target": 0.8,
+        "coverage_wilson_ci_95": [
+          0.657,
+          0.8245
+        ],
+        "coverage_wilson_ci_contains_target": true,
+        "coverage_ci_excludes_target": false,
+        "coverage_by_bucket": [
+          {
+            "bucket_index": 0,
+            "predicted_p50_lower": null,
+            "predicted_p50_upper": 47.2669,
+            "sample_count": 24,
+            "coverage": 0.8333,
+            "wilson_ci_95": [
+              0.6415,
+              0.9332
+            ],
+            "mean_interval_width": 9.91,
+            "conformal_q": 1.3502
+          },
+          {
+            "bucket_index": 1,
+            "predicted_p50_lower": 47.2669,
+            "predicted_p50_upper": 110.8725,
+            "sample_count": 47,
+            "coverage": 0.8936,
+            "wilson_ci_95": [
+              0.7741,
+              0.9537
+            ],
+            "mean_interval_width": 46.62,
+            "conformal_q": 10.2986
+          },
+          {
+            "bucket_index": 2,
+            "predicted_p50_lower": 110.8725,
+            "predicted_p50_upper": null,
+            "sample_count": 29,
+            "coverage": 0.4483,
+            "wilson_ci_95": [
+              0.2841,
+              0.6245
+            ],
+            "mean_interval_width": 28.33,
+            "conformal_q": 5.3803
+          }
+        ]
+      },
+      "calibration": {
+        "method": "split_conformal_cv_protocol",
+        "calibration_engine_count": 7,
+        "calibration_sample_count": 35,
+        "target_coverage": 0.8,
+        "calibration_alpha": 0.2,
+        "alpha_policy": "single_regime_nominal_80",
+        "calibration_regime_count": 1,
+        "nominal_coverage": 0.8,
+        "protocol_id": "ef961bf9dce8c24ef12e715833e969a9f65fe7022f689643951e652de9eeebcc",
+        "n_buckets": 3,
+        "edges": [
+          47.2669,
+          110.8725
+        ],
+        "bucket_q": [
+          1.3501820606288875,
+          10.298622370231298,
+          5.380277243078566
+        ],
+        "bucket_counts": [
+          12,
+          11,
+          12
+        ],
+        "bucket_score_counts": [
+          12,
+          11,
+          12
+        ],
+        "global_q": 4.172339305009631
       },
       "cv": {
         "protocol_id": "ef961bf9dce8c24ef12e715833e969a9f65fe7022f689643951e652de9eeebcc",
@@ -432,7 +875,54 @@
         "std_rmse": 2.72,
         "mean_nasa": 264.2,
         "std_nasa": 160.0,
-        "mean_train_rmse": 3.87
+        "mean_train_rmse": 3.87,
+        "by_regime": {
+          "0": {
+            "sample_count": 350,
+            "share": 1.0,
+            "rmse": 13.7751,
+            "mae": 9.6113
+          }
+        }
+      },
+      "cv_by_regime": {
+        "0": {
+          "sample_count": 350,
+          "share": 1.0,
+          "rmse": 13.7751,
+          "mae": 9.6113
+        }
+      },
+      "test_by_regime": {
+        "0": {
+          "sample_count": 100,
+          "share": 1.0,
+          "rmse": 14.0631,
+          "mae": 10.1355
+        }
+      },
+      "regime_mix_gap": {
+        "cv_regime_counts": {
+          "0": 350
+        },
+        "test_regime_counts": {
+          "0": 100
+        },
+        "cv_regime_shares": {
+          "0": 1.0
+        },
+        "test_regime_shares": {
+          "0": 1.0
+        },
+        "max_share_gap": 0.0,
+        "chi2_statistic": null,
+        "chi2_pvalue": null,
+        "ks_statistic": null,
+        "ks_pvalue": null,
+        "low_expected_counts": false,
+        "gap_flag": false,
+        "status": "comparable",
+        "note": "Single-regime split; chi-square and KS tests are undefined."
       },
       "comparison_rows": [
         {
@@ -560,7 +1050,7 @@
       "condition": "1 (Sea Level)",
       "faults": "2 (HPC + Fan Degradation)",
       "status": "Target Met",
-      "train_time_sec": 53.97,
+      "train_time_sec": 77.92,
       "multi_seed": {
         "algorithm": "lightgbm",
         "seeds": [
@@ -581,7 +1071,7 @@
       }
     },
     "FD004": {
-      "bundle_sha256": "7764dd8b4c2a837e5371107f71cb6a49e3e5b459f0e8543f017a4adbd8393e69",
+      "bundle_sha256": "088e88d6a59d8729f44ce1681ca8000f42e34a64074e6b483f0955a01216bdf0",
       "algorithm": "lightgbm",
       "p50_model_class": "LGBMRegressor",
       "protocol_id": "43ddc1669083ecc7fec59c5fd2967fe9d16a2a881434c001771eea26f303f15c",
@@ -601,8 +1091,88 @@
         "early_rate": 0.532258064516129,
         "late_rate": 0.46774193548387094,
         "pr_auc": 0.97,
-        "interval_coverage": 0.629,
-        "mean_interval_width": 33.45
+        "interval_coverage": 0.7661,
+        "mean_interval_width": 71.36,
+        "coverage_target": 0.8,
+        "coverage_wilson_ci_95": [
+          0.7096,
+          0.8145
+        ],
+        "coverage_wilson_ci_contains_target": true,
+        "coverage_ci_excludes_target": false,
+        "coverage_by_bucket": [
+          {
+            "bucket_index": 0,
+            "predicted_p50_lower": null,
+            "predicted_p50_upper": 60.9972,
+            "sample_count": 87,
+            "coverage": 0.9885,
+            "wilson_ci_95": [
+              0.9377,
+              0.998
+            ],
+            "mean_interval_width": 88.49,
+            "conformal_q": 50.7679
+          },
+          {
+            "bucket_index": 1,
+            "predicted_p50_lower": 60.9972,
+            "predicted_p50_upper": 101.8337,
+            "sample_count": 57,
+            "coverage": 0.9474,
+            "wilson_ci_95": [
+              0.8563,
+              0.9819
+            ],
+            "mean_interval_width": 81.66,
+            "conformal_q": 18.779
+          },
+          {
+            "bucket_index": 2,
+            "predicted_p50_lower": 101.8337,
+            "predicted_p50_upper": null,
+            "sample_count": 104,
+            "coverage": 0.4808,
+            "wilson_ci_95": [
+              0.3872,
+              0.5758
+            ],
+            "mean_interval_width": 51.39,
+            "conformal_q": 15.2435
+          }
+        ]
+      },
+      "calibration": {
+        "method": "split_conformal_cv_protocol",
+        "calibration_engine_count": 18,
+        "calibration_sample_count": 90,
+        "target_coverage": 0.8,
+        "calibration_alpha": 0.1,
+        "alpha_policy": "multi_regime_nominal_90",
+        "calibration_regime_count": 6,
+        "nominal_coverage": 0.9,
+        "protocol_id": "ef961bf9dce8c24ef12e715833e969a9f65fe7022f689643951e652de9eeebcc",
+        "n_buckets": 3,
+        "edges": [
+          60.9972,
+          101.8337
+        ],
+        "bucket_q": [
+          50.767912613666134,
+          18.778999202716978,
+          15.24352855927402
+        ],
+        "bucket_counts": [
+          30,
+          30,
+          30
+        ],
+        "bucket_score_counts": [
+          30,
+          30,
+          30
+        ],
+        "global_q": 16.735845899061072
       },
       "cv": {
         "protocol_id": "ef961bf9dce8c24ef12e715833e969a9f65fe7022f689643951e652de9eeebcc",
@@ -614,7 +1184,163 @@
         "std_rmse": 2.33,
         "mean_nasa": 2315.2,
         "std_nasa": 3234.6,
-        "mean_train_rmse": 8.27
+        "mean_train_rmse": 8.27,
+        "by_regime": {
+          "0": {
+            "sample_count": 223,
+            "share": 0.2563,
+            "rmse": 15.4322,
+            "mae": 11.1311
+          },
+          "1": {
+            "sample_count": 126,
+            "share": 0.1448,
+            "rmse": 17.1492,
+            "mae": 11.4738
+          },
+          "2": {
+            "sample_count": 140,
+            "share": 0.1609,
+            "rmse": 13.6887,
+            "mae": 9.4165
+          },
+          "3": {
+            "sample_count": 121,
+            "share": 0.1391,
+            "rmse": 12.2325,
+            "mae": 8.8534
+          },
+          "4": {
+            "sample_count": 134,
+            "share": 0.154,
+            "rmse": 17.7366,
+            "mae": 10.4484
+          },
+          "5": {
+            "sample_count": 126,
+            "share": 0.1448,
+            "rmse": 15.2127,
+            "mae": 10.5455
+          }
+        }
+      },
+      "cv_by_regime": {
+        "0": {
+          "sample_count": 223,
+          "share": 0.2563,
+          "rmse": 15.4322,
+          "mae": 11.1311
+        },
+        "1": {
+          "sample_count": 126,
+          "share": 0.1448,
+          "rmse": 17.1492,
+          "mae": 11.4738
+        },
+        "2": {
+          "sample_count": 140,
+          "share": 0.1609,
+          "rmse": 13.6887,
+          "mae": 9.4165
+        },
+        "3": {
+          "sample_count": 121,
+          "share": 0.1391,
+          "rmse": 12.2325,
+          "mae": 8.8534
+        },
+        "4": {
+          "sample_count": 134,
+          "share": 0.154,
+          "rmse": 17.7366,
+          "mae": 10.4484
+        },
+        "5": {
+          "sample_count": 126,
+          "share": 0.1448,
+          "rmse": 15.2127,
+          "mae": 10.5455
+        }
+      },
+      "test_by_regime": {
+        "0": {
+          "sample_count": 64,
+          "share": 0.2581,
+          "rmse": 25.0159,
+          "mae": 16.9178
+        },
+        "1": {
+          "sample_count": 33,
+          "share": 0.1331,
+          "rmse": 28.0309,
+          "mae": 20.7143
+        },
+        "2": {
+          "sample_count": 43,
+          "share": 0.1734,
+          "rmse": 26.8386,
+          "mae": 18.6714
+        },
+        "3": {
+          "sample_count": 39,
+          "share": 0.1573,
+          "rmse": 21.8835,
+          "mae": 13.9578
+        },
+        "4": {
+          "sample_count": 30,
+          "share": 0.121,
+          "rmse": 28.419,
+          "mae": 21.1939
+        },
+        "5": {
+          "sample_count": 39,
+          "share": 0.1573,
+          "rmse": 24.1131,
+          "mae": 15.3362
+        }
+      },
+      "regime_mix_gap": {
+        "cv_regime_counts": {
+          "0": 223,
+          "1": 126,
+          "2": 140,
+          "3": 121,
+          "4": 134,
+          "5": 126
+        },
+        "test_regime_counts": {
+          "0": 64,
+          "1": 33,
+          "2": 43,
+          "3": 39,
+          "4": 30,
+          "5": 39
+        },
+        "cv_regime_shares": {
+          "0": 0.2563,
+          "1": 0.1448,
+          "2": 0.1609,
+          "3": 0.1391,
+          "4": 0.154,
+          "5": 0.1448
+        },
+        "test_regime_shares": {
+          "0": 0.2581,
+          "1": 0.1331,
+          "2": 0.1734,
+          "3": 0.1573,
+          "4": 0.121,
+          "5": 0.1573
+        },
+        "max_share_gap": 0.033,
+        "chi2_statistic": 2.4584,
+        "chi2_pvalue": 0.78274,
+        "ks_statistic": 0.0206,
+        "ks_pvalue": 0.999991,
+        "low_expected_counts": false,
+        "gap_flag": false,
+        "status": "comparable"
       },
       "comparison_rows": [
         {
@@ -742,7 +1468,7 @@
       "condition": "6 (Full Envelope)",
       "faults": "2 (HPC + Fan Degradation)",
       "status": "Target Missed",
-      "train_time_sec": 115.24,
+      "train_time_sec": 210.94,
       "multi_seed": {
         "algorithm": "lightgbm",
         "seeds": [
@@ -758,9 +1484,14 @@
         "nasa_std": 0.0,
         "pr_auc_mean": 0.97,
         "pr_auc_std": 0.0,
-        "coverage_mean": 0.629,
+        "coverage_mean": 0.7661,
         "coverage_std": 0.0
       }
     }
+  },
+  "regime_mix_gap": {
+    "flagged_subsets": [],
+    "status": "comparable",
+    "note": "Chi-square and KS compare censored-CV sample regime mix with official test regime mix."
   }
 }

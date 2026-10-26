@@ -127,8 +127,8 @@ flowchart TB
     subgraph StorageLayer["💾 ARTIFACTS & DATA STORAGE"]
         DiskReports["artifacts/reports/*.json<br/><i>(Verified Benchmark Reports)</i>"]:::storageStyle
         ModelBundles["artifacts/models/*.joblib<br/><i>(Versioned Champion Bundles)</i>"]:::storageStyle
-        WorkOrderDB["artifacts/sqlite/work_orders.db<br/><i>(Audit Trails & UUID Orders)</i>"]:::storageStyle
-        MLflowStore["mlruns/<br/><i>(Experiment Tracking & Artifacts)</i>"]:::storageStyle
+        WorkOrderDB["state/work_orders.db<br/><i>(Audit Trails, Drift & MLflow SQLite)</i>"]:::storageStyle
+        MLflowStore["mlruns/<br/><i>(Experiment Artifacts)</i>"]:::storageStyle
     end
 
     RawData --> CausalCleaner --> RegimeClustering --> FeatureEngineering
@@ -172,15 +172,15 @@ sequenceDiagram
 
 > [!NOTE]
 > **Canonical Run Provenance**  
-> **Run ID**: `run_1792682781_cd500a5c` | **Git SHA**: `cd500a5cbb` | **Config Hash**: `864b42091e`  
+> **Run ID**: `run_1792823030_6f50628b` | **Git SHA**: `6f50628ba2` | **Config Hash**: `52a8cb9689`  
 > *All figures are derived directly from model bundles and authentic C-MAPSS evaluation parquets at run time.*
 
 | Dataset Subset | Operating Conditions | Fault Modes | Test Engines | Champion Model | Test RMSE | Test MAE | NASA Asymmetric Score | PR-AUC (Fail $\le 30$) | Conformal Coverage | Target Status |
 |:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **FD001** | 1 (Sea Level) | 1 (HPC Degradation) | 100 | **LIGHTGBM** | **13.14** | 9.07 | **235.4** | 0.966 | 74.0% | <span style="color:#22c55e;font-weight:bold;">TARGET REACHED</span> |
-| **FD002** | 6 (Full Envelope) | 1 (HPC Degradation) | 259 | **LIGHTGBM** | **25.05** | 16.21 | **6,892.6** | 0.998 | 59.1% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
-| **FD003** | 1 (Sea Level) | 2 (HPC + Fan Degradation) | 100 | **LIGHTGBM** | **14.06** | 10.14 | **342.3** | 0.983 | 62.0% | <span style="color:#22c55e;font-weight:bold;">TARGET REACHED</span> |
-| **FD004** | 6 (Full Envelope) | 2 (HPC + Fan Degradation) | 248 | **LIGHTGBM** | **25.60** | 17.53 | **4,319.2** | 0.970 | 62.9% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
+| **FD001** | 1 (Sea Level) | 1 (HPC Degradation) | 100 | **LIGHTGBM** | **13.14** | 9.07 | **235.4** | 0.966 | 85.0% | <span style="color:#22c55e;font-weight:bold;">TARGET REACHED</span> |
+| **FD002** | 6 (Full Envelope) | 1 (HPC Degradation) | 259 | **LIGHTGBM** | **25.05** | 16.21 | **6,892.6** | 0.998 | 76.8% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
+| **FD003** | 1 (Sea Level) | 2 (HPC + Fan Degradation) | 100 | **LIGHTGBM** | **14.06** | 10.14 | **342.3** | 0.983 | 75.0% | <span style="color:#22c55e;font-weight:bold;">TARGET REACHED</span> |
+| **FD004** | 6 (Full Envelope) | 2 (HPC + Fan Degradation) | 248 | **LIGHTGBM** | **25.60** | 17.53 | **4,319.2** | 0.970 | 76.6% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
 
 ### 🔬 5-Fold GroupKFold Cross-Validation (Censored, Persistent Engines)
 
@@ -189,7 +189,7 @@ Validation targets are censored with the same random-truncation protocol as the 
 | Subset | RMSE ($mean \pm std$) | NASA Score ($mean \pm std$) | Algorithm | CV Protocol ID |
 |:---:|:---:|:---:|:---:|:---:|
 | **FD001** | $14.27 \pm 1.06$ | $282.8 \pm 94.0$ | `lightgbm` | `ef961bf9dce8c24ef12e715833e969a9f65fe7022f689643951e652de9eeebcc` |
-| **FD002** | $14.41 \pm 0.68$ | $766.9 \pm 97.9$ | `lightgbm` | `ef961bf9dce8c24ef12e715833e969a9f65fe7022f689643951e652de9eeebcc` |
+| **FD002** | $14.38 \pm 0.69$ | $754.8 \pm 97.3$ | `lightgbm` | `ef961bf9dce8c24ef12e715833e969a9f65fe7022f689643951e652de9eeebcc` |
 | **FD003** | $13.50 \pm 2.72$ | $264.2 \pm 160.0$ | `lightgbm` | `ef961bf9dce8c24ef12e715833e969a9f65fe7022f689643951e652de9eeebcc` |
 | **FD004** | $15.22 \pm 2.33$ | $2,315.2 \pm 3234.6$ | `lightgbm` | `ef961bf9dce8c24ef12e715833e969a9f65fe7022f689643951e652de9eeebcc` |
 
@@ -388,7 +388,7 @@ AETURNUS/
 │   └── models/
 │       ├── model_service.py           # Multi-head quantile model inference & calibration
 │       └── neural_baseline.py         # PyTorch 1D-CNN and GRU deep learning architectures
-├── tests/                             # Comprehensive 69-test test suite
+├── tests/                             # Comprehensive 158-test test suite
 │   ├── test_benchmark_and_reports.py  # Report disk verification tests
 │   ├── test_cleaner.py                # Causal cleaning & regex sensor tests
 │   ├── test_metrics.py                # NASA score & metric verification tests
@@ -469,14 +469,31 @@ python run_app.py
 ```
 Open your browser to **http://127.0.0.1:8000** to interact with the fleet cockpit.
 
+### Runtime State
+
+All mutable SQLite state (work orders, self-healing actions, drift history, and
+MLflow tracking) lives in one directory:
+
+```bash
+# Default from configs/pipeline.yaml (state/) or override explicitly
+export AETURNUS_STATE_DIR=/var/lib/aeturnus   # Windows: $env:AETURNUS_STATE_DIR="..."
+make demo
+
+# Optional: seed two closed historical work orders with zero open orders/alerts
+make seed-demo
+
+# Build a portable source zip from tracked files only (no DB state is shipped)
+make package
+```
+
 ---
 
 ## 🧪 Testing & CI Validation
 
-The platform includes a rigorous **69-test Pytest suite across 20 test modules** and an autonomous **CI smoke test**:
+The platform includes a rigorous **158-test Pytest suite across 40 test modules** and an autonomous **CI smoke test**:
 
 ```bash
-# Run the complete test suite across all 20 modules
+# Run the complete test suite across all test modules
 make test
 # Or: pytest tests/ -v
 
@@ -491,7 +508,7 @@ Every commit and pull request triggers [.github/workflows/ci.yml](.github/workfl
 2. Dependency installation (`pip install -r requirements.txt`).
 3. Frontend bundle compilation (`npm run build`).
 4. Lightning CI smoke test verification (`scripts/ci_smoke_test.py`).
-5. Complete 69-test Pytest suite (`pytest tests/ -v`).
+5. Complete 157-test Pytest suite (`pytest tests/ -v`).
 
 ### Test Suite Verification Matrix (20 Modules, 69 Passing Tests)
 

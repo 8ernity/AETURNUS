@@ -1,3 +1,5 @@
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 from src.api.server import app
@@ -14,6 +16,38 @@ def test_prometheus_metrics_endpoint():
     assert "pdm_model_test_rmse" in text
     assert "pdm_conformal_coverage" in text
     assert "pdm_active_alerts" in text
+    assert "pdm_artifact_hash_info" in text
+    assert "pdm_artifact_mtime_seconds" in text
+
+
+def test_metrics_scrape_is_fast_and_hashes_are_stable():
+    client.get("/metrics")
+    start = time.perf_counter()
+    resp = client.get("/metrics")
+    elapsed = time.perf_counter() - start
+    assert resp.status_code == 200
+    assert elapsed < 0.5, f"/metrics scrape took {elapsed:.3f}s, expected < 0.5s"
+    assert resp.text.count("pdm_artifact_hash_info") >= 5
+
+
+def test_artifact_hash_cache_invalidates_on_mtime(tmp_path, monkeypatch):
+    import os
+    import src.api.server as server
+
+    artifact = tmp_path / "artifact.bin"
+    artifact.write_bytes(b"first")
+    monkeypatch.setattr(server, "_artifact_paths", lambda: {"test_artifact": artifact})
+
+    first = server.refresh_artifact_metrics(force=True)["test_artifact"]
+    assert server.refresh_artifact_metrics()["test_artifact"] == first, (
+        "Unchanged mtime must reuse the cached digest"
+    )
+
+    artifact.write_bytes(b"second")
+    stat = artifact.stat()
+    os.utime(artifact, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+    second = server.refresh_artifact_metrics()["test_artifact"]
+    assert second != first, "Changed mtime must invalidate the cached digest"
 
 def test_monitoring_alerts_endpoint():
     """Verify GET /api/v1/monitoring/alerts returns structured active alerts."""

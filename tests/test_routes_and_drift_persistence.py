@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 from src.api.server import app
 from src.common.utils import get_root_dir
+from src.common.state import state_db_path
 
 client = TestClient(app)
 
@@ -25,7 +26,7 @@ def test_routes_unique_method_and_path():
 def test_scoring_creates_drift_runs_row_and_get_only_reads():
     """Assert that a scoring run creates a drift_runs row, while GET only reads."""
     root_dir = get_root_dir()
-    db_path = root_dir / "artifacts" / "drift_monitoring.db"
+    db_path = state_db_path("drift_monitoring.db", root_dir)
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     def get_drift_runs_count():

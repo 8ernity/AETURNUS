@@ -86,11 +86,12 @@ def run_smoke_test():
 
     # 4. Triage Agent Rules & SQLite
     print("[4/6] Testing Triage Agent rule engine & UUID generation...")
+    import tempfile
+    import shutil
     import uuid
     from src.agent.triage_agent import TriageAgent
-    smoke_db = root_dir / "artifacts" / "smoke_test.db"
-    if smoke_db.exists():
-        smoke_db.unlink()
+    smoke_dir = Path(tempfile.mkdtemp(prefix="aeturnus_smoke_"))
+    smoke_db = smoke_dir / "smoke_test.db"
     agent = TriageAgent(db_path=smoke_db)
     pred = {
         "engine_id": "ENG-FD001-SMOKE",
@@ -113,8 +114,7 @@ def run_smoke_test():
     uuid_obj = uuid.UUID(wo_id[3:])
     assert f"WO-{str(uuid_obj)}" == wo_id, "work_order_id is not a valid UUID"
     try:
-        if smoke_db.exists():
-            smoke_db.unlink()
+        shutil.rmtree(smoke_dir, ignore_errors=True)
     except Exception:
         pass
     print("  --> Agent produced valid UUID order and proper audit trace.")

@@ -134,11 +134,20 @@ def generate_maintenance_report_pdf(engine_id: str, data: Dict[str, Any]) -> byt
     rules_version = str(data.get("rules_version", "2026-10-07.1"))
     reported_time = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
     
-    pred_rul = data.get("predicted_rul", {})
-    p10 = float(pred_rul.get("p10", data.get("conservative_rul", 0.0)))
-    p50 = float(pred_rul.get("p50", p10 + 10.0))
-    p90 = float(pred_rul.get("p90", p50 + 20.0))
-    conservative_rul = float(data.get("conservative_rul", p10))
+    pred_rul = data.get("predicted_rul") or {}
+    p10_value = pred_rul.get("p10", data.get("rul_p10"))
+    p50_value = pred_rul.get("p50", data.get("rul_p50"))
+    p90_value = pred_rul.get("p90", data.get("rul_p90"))
+    conservative_value = data.get("conservative_rul")
+    if p10_value is None or p50_value is None or p90_value is None or conservative_value is None:
+        raise ValueError(
+            "Maintenance report requires RUL p10/p50/p90 and conservative_rul; "
+            "numeric report defaults are not allowed."
+        )
+    p10 = float(p10_value)
+    p50 = float(p50_value)
+    p90 = float(p90_value)
+    conservative_rul = float(conservative_value)
 
     # 3. Target Asset & Report Summary Table
     meta_data = [

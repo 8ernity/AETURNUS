@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple, Set
 from src.common.utils import get_root_dir, load_yaml
+from src.common.state import state_db_path
 
 SEVERITY_ORDER = ["HEALTHY", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
 HUMAN_STATUSES = {
@@ -36,11 +37,9 @@ class TriageAgent:
         self.sensor_cfg = load_yaml("configs/sensor_map.yaml")
         self.rules_version = self.rules_cfg.get("rules_version", "2026-10-07.1")
         
-        # SQLite Database Path (Primary: artifacts/sqlite/work_orders.db)
-        default_sqlite = self.root_dir / "artifacts" / "sqlite" / "work_orders.db"
+        # All runtime SQLite files live under the single configured state directory.
         if not db_path:
-            default_sqlite.parent.mkdir(parents=True, exist_ok=True)
-            self.db_path = default_sqlite
+            self.db_path = state_db_path("work_orders.db", self.root_dir)
         else:
             self.db_path = Path(db_path) if str(db_path) != ":memory:" else db_path
 
@@ -62,12 +61,25 @@ class TriageAgent:
         self._init_db()
         self._load_from_db()
 
+    def _severity_bands(self) -> Dict[str, float]:
+        """Severity thresholds are policy: every band must be present in config."""
+        sev_bands = self.rules_cfg.get("severity_bands")
+        if not isinstance(sev_bands, dict):
+            raise ValueError(
+                "configs/agent_rules.yaml must define severity_bands with "
+                "critical/high/medium/low thresholds; numeric defaults are not allowed."
+            )
+        missing = [key for key in ("critical", "high", "medium", "low") if key not in sev_bands]
+        if missing:
+            raise ValueError(f"configs/agent_rules.yaml severity_bands missing keys: {missing}")
+        return {key: float(sev_bands[key]) for key in ("critical", "high", "medium", "low")}
+
     def get_base_severity(self, cons_rul: float) -> str:
-        sev_bands = self.rules_cfg.get("severity_bands", {})
-        crit_thresh = sev_bands.get("critical", 15)
-        high_thresh = sev_bands.get("high", 30)
-        med_thresh = sev_bands.get("medium", 60)
-        low_thresh = sev_bands.get("low", 100)
+        sev_bands = self._severity_bands()
+        crit_thresh = sev_bands["critical"]
+        high_thresh = sev_bands["high"]
+        med_thresh = sev_bands["medium"]
+        low_thresh = sev_bands["low"]
         if cons_rul <= crit_thresh:
             return "CRITICAL"
         elif cons_rul <= high_thresh:
@@ -240,7 +252,18 @@ class TriageAgent:
 
     def _persist_order(self, order: Dict[str, Any]):
         now = time.strftime("%Y-%m-%d %H:%M:%S")
-        pred_rul = order.get("predicted_rul", {})
+        pred_rul = order.get("predicted_rul") or {}
+        p10 = order.get("rul_p10")
+        p50 = order.get("rul_p50")
+        p90 = order.get("rul_p90")
+        if p10 is None:
+            p10 = pred_rul.get("p10")
+        if p50 is None:
+            p50 = pred_rul.get("p50")
+        if p90 is None:
+            p90 = pred_rul.get("p90")
+        if p10 is None or p50 is None or p90 is None:
+            raise ValueError("Work order is missing required RUL quantiles p10/p50/p90")
         with self._get_db() as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO work_orders (
@@ -261,13 +284,13 @@ class TriageAgent:
                 order["severity"],
                 order.get("raw_severity", order["severity"]),
                 order["status"],
-                float(order.get("conservative_rul", 0.0)),
-                float(pred_rul.get("p10", 0.0)),
-                float(pred_rul.get("p50", 0.0)),
-                float(pred_rul.get("p90", 0.0)),
-                float(order.get("fail_prob_30", 0.0)),
-                float(order.get("anomaly_score", 0.0)),
-                int(order.get("due_by_cycle", 1)),
+                float(order["conservative_rul"]),
+                float(p10),
+                float(p50),
+                float(p90),
+                float(order["fail_prob_30"]),
+                float(order["anomaly_score"]),
+                int(order["due_by_cycle"]),
                 order.get("suspected_subsystem", "HPC"),
                 json.dumps(order.get("top_sensors", [])),
                 order.get("recommended_action", ""),
@@ -307,7 +330,7 @@ class TriageAgent:
     ) -> Tuple[Optional[Dict[str, Any]], List[str]]:
         """
         Executes the 9-step decision pipeline on an engine prediction/state and guarantees
-        immediate persistence into the SQLite database (artifacts/sqlite/work_orders.db).
+        immediate persistence into the configured SQLite state database.
         
         Args:
             engine: Engine prediction dictionary containing keys like engine_id, unit, cycle,
@@ -373,37 +396,44 @@ class TriageAgent:
             order = self._create_exception_order(prediction, "Missing conservative_rul in prediction input", trace)
             return order, trace
 
-        # Read thresholds dynamically from agent_rules.yaml
-        sev_bands = self.rules_cfg.get("severity_bands", {})
-        crit_thresh = sev_bands.get("critical", 15)
-        high_thresh = sev_bands.get("high", 30)
-        med_thresh = sev_bands.get("medium", 60)
-        low_thresh = sev_bands.get("low", 100)
+        # Read thresholds dynamically from agent_rules.yaml. Every policy value is
+        # required: numeric fallbacks would silently invent operating limits.
+        sev_bands = self._severity_bands()
+        crit_thresh = sev_bands["critical"]
+        high_thresh = sev_bands["high"]
+        med_thresh = sev_bands["medium"]
+        low_thresh = sev_bands["low"]
 
-        esc_cfg = self.rules_cfg.get("escalation", {})
-        drop_window = esc_cfg.get("rul_drop_window", 10)
-        drop_thresh = esc_cfg.get("rul_drop_threshold", 15)
-        anom_thresh = esc_cfg.get("anomaly_threshold", 0.80)
-        fail_thresh = esc_cfg.get("fail_prob_threshold", 0.70)
-        deescalate_cycles = esc_cfg.get("deescalate_after_cycles", 5)
+        esc_cfg = self.rules_cfg["escalation"]
+        drop_window = int(esc_cfg["rul_drop_window"])
+        drop_thresh = float(esc_cfg["rul_drop_threshold"])
+        anom_thresh = float(esc_cfg["anomaly_threshold"])
+        fail_thresh = float(esc_cfg["fail_prob_threshold"])
+        deescalate_cycles = int(esc_cfg["deescalate_after_cycles"])
 
-        exc_cfg = self.rules_cfg.get("exceptions", {})
-        max_interval_width = exc_cfg.get("max_interval_width", 40)
-        max_missing_frac = exc_cfg.get("max_missing_fraction", 0.30)
-        min_hist_cycles = exc_cfg.get("min_history_cycles", 15)
-        data_gap_cycles = exc_cfg.get("data_gap_cycles", 5)
+        exc_cfg = self.rules_cfg["exceptions"]
+        max_interval_width = float(exc_cfg["max_interval_width"])
+        max_missing_frac = float(exc_cfg["max_missing_fraction"])
+        min_hist_cycles = int(exc_cfg["min_history_cycles"])
+        data_gap_cycles = int(exc_cfg["data_gap_cycles"])
 
-        life_cfg = self.rules_cfg.get("lifecycle", {})
-        cooldown_cycles = life_cfg.get("cooldown_cycles", 20)
-        due_by_factor = life_cfg.get("default_due_by_factor", 0.5)
-        suppression_cycles = life_cfg.get("suppression_window_cycles", 10)
+        life_cfg = self.rules_cfg["lifecycle"]
+        cooldown_cycles = int(life_cfg["cooldown_cycles"])
+        due_by_factor = float(life_cfg["default_due_by_factor"])
+        suppression_cycles = int(life_cfg["suppression_window_cycles"])
 
-        # Step 2: Conservative RUL & uncertainty
+        # Step 2: Conservative RUL & uncertainty. Missing quantiles are not
+        # replaced by invented magnitudes; p10 falls back to conservative RUL and
+        # p90 falls back to p10, yielding a degenerate interval.
         cons_rul = float(prediction["conservative_rul"])
-        rul_p10 = float(prediction.get("rul_p10", cons_rul))
-        rul_p90 = float(prediction.get("rul_p90", cons_rul + 20.0))
-        fail_prob = float(prediction.get("fail_prob_30", 0.0))
-        anomaly_score = float(prediction.get("anomaly_score", 0.0))
+        p10_value = prediction.get("rul_p10")
+        p90_value = prediction.get("rul_p90")
+        rul_p10 = float(cons_rul if p10_value is None else p10_value)
+        rul_p90 = float(rul_p10 if p90_value is None else p90_value)
+        fail_prob_value = prediction.get("fail_prob_30")
+        anomaly_value = prediction.get("anomaly_score")
+        fail_prob = float(0.0 if fail_prob_value is None else fail_prob_value)
+        anomaly_score = float(0.0 if anomaly_value is None else anomaly_value)
 
         # Step 3: Degradation trend
         rul_drop = 0.0
@@ -444,12 +474,16 @@ class TriageAgent:
             trace.append("M2:not_fired")
 
         # M3: Multi-horizon failure probability with validation-tuned threshold
-        effective_tau_30 = float(prediction.get("classifier_threshold_30", fail_thresh))
-        fail_prob_10 = float(prediction.get("fail_prob_10", 0.0))
-        if fail_prob_10 >= 0.70:
+        tau_30_value = prediction.get("classifier_threshold_30")
+        effective_tau_30 = float(fail_thresh if tau_30_value is None else tau_30_value)
+        tau_10_value = prediction.get("classifier_threshold_10")
+        effective_tau_10 = float(effective_tau_30 if tau_10_value is None else tau_10_value)
+        fail_prob_10_value = prediction.get("fail_prob_10")
+        fail_prob_10 = float(fail_prob_10_value) if fail_prob_10_value is not None else None
+        if fail_prob_10 is not None and fail_prob_10 >= effective_tau_10:
             sev_idx = max(sev_idx, SEVERITY_ORDER.index("CRITICAL"))
             trace.append(f"M3:fired(fail_prob_10={fail_prob_10:.2f}->CRITICAL)")
-            self._dispatch_rule_webhook("M3", engine_id, cycle, "CRITICAL", cons_rul, {"fail_prob_10": round(float(fail_prob_10), 2), "threshold": 0.70})
+            self._dispatch_rule_webhook("M3", engine_id, cycle, "CRITICAL", cons_rul, {"fail_prob_10": round(float(fail_prob_10), 2), "threshold": round(float(effective_tau_10), 2)})
         elif fail_prob >= effective_tau_30:
             sev_idx = max(sev_idx, SEVERITY_ORDER.index("HIGH"))
             trace.append(f"M3:fired(fail_prob={fail_prob:.2f}>={effective_tau_30:.2f}->HIGH)")
@@ -507,14 +541,17 @@ class TriageAgent:
         elif cons_rul <= high_thresh and anomaly_score < 0.20:
             triggered_exceptions.append(f"X2: Model disagreement (near-failure RUL {cons_rul:.1f} <= {high_thresh} with low anomaly {anomaly_score:.2f})")
 
-        # X3: Sensor flatlines
-        flatlines_count = (data_quality_flags or {}).get("flatlines_count", 0)
-        has_flatline = (data_quality_flags or {}).get("has_flatline", False)
+        # X3: Sensor flatlines. Absent quality telemetry means no reported flatline.
+        flag_values = data_quality_flags or {}
+        flatlines_value = flag_values.get("flatlines_count")
+        flatlines_count = int(flatlines_value) if flatlines_value is not None else 0
+        has_flatline = bool(flag_values.get("has_flatline", False))
         if flatlines_count >= 3 or has_flatline:
             triggered_exceptions.append(f"X3: Suspected sensor fault (flatline detected on {flatlines_count} sensors)")
 
         # X4: High missing telemetry fraction
-        missing_frac = (data_quality_flags or {}).get("missing_fraction", 0.0)
+        missing_value = flag_values.get("missing_fraction")
+        missing_frac = float(missing_value) if missing_value is not None else 0.0
         if missing_frac > max_missing_frac:
             triggered_exceptions.append(f"X4: High missing telemetry fraction ({missing_frac:.1%} > {max_missing_frac:.1%})")
 
@@ -535,9 +572,12 @@ class TriageAgent:
             triggered_exceptions.append(f"X7: Telemetry data gap detected ({cycle - last_recorded_cycle} cycles > {data_gap_cycles})")
         elif last_recorded_cycle > 0 and cycle < last_recorded_cycle:
             triggered_exceptions.append(f"X7: Telemetry time regression / out-of-order cycle ({cycle} < {last_recorded_cycle})")
-        elif (data_quality_flags or {}).get("has_gap", False) or (data_quality_flags or {}).get("cycle_gap", 0) > data_gap_cycles:
-            gap_len = (data_quality_flags or {}).get("cycle_gap", data_gap_cycles + 1)
-            triggered_exceptions.append(f"X7: Telemetry data gap detected ({gap_len} cycles > {data_gap_cycles})")
+        else:
+            cycle_gap_value = flag_values.get("cycle_gap")
+            cycle_gap = int(cycle_gap_value) if cycle_gap_value is not None else 0
+            if flag_values.get("has_gap", False) or cycle_gap > data_gap_cycles:
+                gap_len = cycle_gap if cycle_gap else data_gap_cycles + 1
+                triggered_exceptions.append(f"X7: Telemetry data gap detected ({gap_len} cycles > {data_gap_cycles})")
 
         model_ver = prediction.get("model_version")
         if not model_ver or str(model_ver).strip() in ["unknown", "None", ""]:
@@ -591,7 +631,7 @@ class TriageAgent:
                 return existing_order, trace
 
         # Check human REJECT suppression window
-        suppress_until = self.suppressed_engines.get(engine_id, 0)
+        suppress_until = self.suppressed_engines.get(engine_id) or 0
         if cycle <= suppress_until and final_severity != "CRITICAL":
             trace.append(f"suppression:active_until_cycle_{suppress_until}")
             return None, trace
@@ -703,7 +743,7 @@ class TriageAgent:
             "status": status,
             "predicted_rul": {
                 "p10": rul_p10,
-                "p50": float(prediction.get("rul_p50", cons_rul + 10.0)),
+                "p50": float(cons_rul if prediction.get("rul_p50") is None else prediction["rul_p50"]),
                 "p90": rul_p90
             },
             "conservative_rul": cons_rul,
@@ -861,7 +901,7 @@ class TriageAgent:
             target_order["closed_at_cycle"] = cycle
             target_order["events"].append({"cycle": cycle, "event": "Rejected by human engineer", "reason": reason, "actor": "HumanOperator"})
             # Apply suppression window
-            suppression_cycles = self.rules_cfg.get("lifecycle", {}).get("suppression_window_cycles", 10)
+            suppression_cycles = int(self.rules_cfg["lifecycle"]["suppression_window_cycles"])
             self.suppressed_engines[target_engine] = cycle + suppression_cycles
             
             # Archive order

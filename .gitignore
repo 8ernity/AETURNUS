@@ -51,6 +51,7 @@ data/uploads/
 uploads/
 **/uploads/
 mlruns/
+state/
 artifacts/reports/*
 artifacts/tmp/
 artifacts/*.db

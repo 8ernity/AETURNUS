@@ -4,7 +4,7 @@ from pathlib import Path
 
 from src.common.utils import get_root_dir
 
-SCANNED_PACKAGES = ("src/api", "src/mlops", "src/economics")
+SCANNED_PACKAGES = ("src/api", "src/mlops", "src/economics", "src/agent", "src/eval")
 ALLOWLIST_PATH = "configs/metric_defaults_allowlist.json"
 
 

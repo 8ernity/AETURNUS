@@ -126,3 +126,27 @@ splits:
     value: 42
     kind: policy
     source: "Deterministic split random seed"
+
+state:
+  dir:
+    value: "state"
+    kind: policy
+    source: "Single runtime SQLite directory for triage, self-healing, drift, and MLflow state; overridable via AETURNUS_STATE_DIR"
+
+conformal:
+  target_coverage:
+    value: 0.80
+    kind: policy
+    source: "Target empirical interval coverage for held-out test engines"
+  calibration_alpha:
+    value: 0.10
+    kind: policy
+    source: "Nominal 90% split-conformal quantile used as a finite-sample and train-to-test safety margin for multi-regime subsets"
+  calibration_alpha_single_regime:
+    value: 0.20
+    kind: policy
+    source: "Nominal 80% split-conformal quantile for single-regime subsets, where calibration/test heterogeneity is lower"
+  n_buckets:
+    value: 3
+    kind: policy
+    source: "Number of predicted-RUL buckets used for conditional conformal calibration"

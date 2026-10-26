@@ -17,16 +17,20 @@ def test_persistent_split_properties():
         assert split1 == split2, f"Split for {sub} must be persistent and deterministic"
 
         train = set(split1["train_units"])
+        calib = set(split1["calib_units"])
         val = set(split1["val_units"])
         holdout = set(split1["lifecycle_holdout_units"])
 
-        # Disjoint checks
+        # Disjoint checks: calibration engines are never validation or training engines.
+        assert train.isdisjoint(calib), f"Train and Calib must be disjoint in {sub}"
         assert train.isdisjoint(val), f"Train and Val must be disjoint in {sub}"
         assert train.isdisjoint(holdout), f"Train and Holdout must be disjoint in {sub}"
+        assert calib.isdisjoint(val), f"Calib and Val must be disjoint in {sub}"
+        assert calib.isdisjoint(holdout), f"Calib and Holdout must be disjoint in {sub}"
         assert val.isdisjoint(holdout), f"Val and Holdout must be disjoint in {sub}"
 
         # Union covers all
-        total_unique = train | val | holdout
+        total_unique = train | calib | val | holdout
         assert len(total_unique) == split1["total_units"]
 
 def test_training_and_retrain_gate_and_lifecycle_use_same_split():

@@ -1,4 +1,4 @@
-.PHONY: setup data train evaluate render-readme demo test ci-smoke lint archive check-readme
+.PHONY: setup data train evaluate render-readme demo test ci-smoke lint archive package seed-demo check-readme
 
 PYTHON ?= python
 
@@ -31,6 +31,13 @@ test:
 
 ci-smoke:
 	$(PYTHON) scripts/ci_smoke_test.py
+
+seed-demo:
+	$(PYTHON) scripts/seed_demo_state.py
+
+# Package only tracked files (git ls-files) and reject SQLite runtime state.
+package:
+	$(PYTHON) scripts/package_tracked.py
 
 # Ship only tracked source: git archive cannot include untracked DB/runtime state.
 archive:

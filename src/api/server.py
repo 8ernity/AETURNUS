@@ -339,7 +339,9 @@ def bootstrap_fleet_triage(subsets: Optional[List[str]] = None):
     """
     Executes a one-time batch evaluation of the current fleet state on startup.
     Passes all current engines through triage_agent.evaluate_and_persist(engine)
-    to populate artifacts/sqlite/work_orders.db before frontend connects.
+    to populate the configured state directory before the frontend connects.
+
+    Disabled by default; set ``AETURNUS_BOOTSTRAP_TRIAGE=1`` to replay fleet state.
     """
     target_subsets = subsets or ["FD001", "FD002", "FD003", "FD004"]
     for sub in target_subsets:
@@ -366,8 +368,11 @@ async def startup_event():
             except Exception:
                 pass
 
-        # 2. Bootstrap Triage Agent on startup: batch evaluation of fleet state
-        bootstrap_fleet_triage(["FD001", "FD002", "FD003", "FD004"])
+        # 2. Bootstrap Triage Agent only when explicitly requested. Fresh installs
+        # must not replay stale fleet state into an otherwise empty work-order DB.
+        bootstrap_enabled = os.getenv("AETURNUS_BOOTSTRAP_TRIAGE", "0").lower() in ("1", "true", "yes")
+        if bootstrap_enabled:
+            bootstrap_fleet_triage(["FD001", "FD002", "FD003", "FD004"])
 
         # 3. Prime initial fleet prediction cache
         ms = get_model_service(current_subset)
@@ -1750,6 +1755,120 @@ PDM_CONFORMAL_COVERAGE = Gauge(
     "Empirical conformal interval coverage",
     ["subset"]
 )
+PDM_ARTIFACT_HASH_INFO = Gauge(
+    "pdm_artifact_hash_info",
+    "SHA-256 identity of shipped manifest and active model bundles (value is always 1)",
+    ["artifact", "sha256"]
+)
+PDM_ARTIFACT_MTIME_SECONDS = Gauge(
+    "pdm_artifact_mtime_seconds",
+    "Last modification time of a shipped artifact",
+    ["artifact"]
+)
+
+_artifact_hash_cache: Dict[str, Dict[str, Any]] = {}
+_metrics_drift_cache: Dict[str, Any] = {"computed_at": 0.0, "values": {}}
+_metrics_alert_cache: Dict[str, Any] = {"computed_at": 0.0, "values": []}
+_alert_manager_singleton = None
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _artifact_paths() -> Dict[str, Path]:
+    artifacts = {"manifest": ROOT_DIR / "artifacts" / "run_manifest.json"}
+    for sub in ["FD001", "FD002", "FD003", "FD004"]:
+        artifacts[f"bundle_{sub}"] = ROOT_DIR / "artifacts" / "models" / f"model_bundle_{sub}.joblib"
+    return artifacts
+
+
+def refresh_artifact_metrics(force: bool = False) -> Dict[str, str]:
+    """Computes manifest/bundle hashes once per mtime change.
+
+    Startup calls this to avoid hashing tens of MB on every Prometheus scrape.
+    A changed mtime (new promoted bundle or regenerated manifest) invalidates
+    only that artifact's cached digest.
+    """
+    hashes: Dict[str, str] = {}
+    for name, path in _artifact_paths().items():
+        if not path.exists():
+            continue
+        stat = path.stat()
+        cached = _artifact_hash_cache.get(name)
+        if force or cached is None or cached["mtime_ns"] != stat.st_mtime_ns or cached["size"] != stat.st_size:
+            cached = {
+                "mtime_ns": stat.st_mtime_ns,
+                "size": stat.st_size,
+                "sha256": _sha256_file(path),
+            }
+            _artifact_hash_cache[name] = cached
+        hashes[name] = cached["sha256"]
+        PDM_ARTIFACT_HASH_INFO.labels(artifact=name, sha256=cached["sha256"]).set(1.0)
+        PDM_ARTIFACT_MTIME_SECONDS.labels(artifact=name).set(stat.st_mtime)
+    return hashes
+
+
+def refresh_live_drift_metrics(max_age_seconds: float = 30.0, force: bool = False) -> Dict[str, float]:
+    """Refreshes live drift shares at most once per cache window.
+
+    ``/metrics`` must remain a fast scrape (p99 < 0.5 s), so it reads this cache
+    instead of recomputing PSI/KS for every subset on every scrape.  Startup
+    warms the cache; if startup has not run yet, the caller receives an empty
+    snapshot and existing gauge values remain untouched.
+    """
+    now = time.time()
+    if not force and not _metrics_drift_cache["values"]:
+        return {}
+    if not force and _metrics_drift_cache["values"] and now - _metrics_drift_cache["computed_at"] < max_age_seconds:
+        return _metrics_drift_cache["values"]
+
+    values: Dict[str, float] = {}
+    for sub in ["FD001", "FD002", "FD003", "FD004"]:
+        try:
+            train_df = get_dataframe("train", sub)
+            test_df = get_dataframe("test", sub)
+            ref_sample = train_df.sample(min(300, len(train_df)), random_state=42)
+            curr_sample = test_df.sample(min(150, len(test_df)), random_state=42)
+            mgr = mlops_managers.get(sub) or MLOpsManager(sub)
+            report = mgr.calculate_drift_report(ref_sample, curr_sample)
+            share = report["share_drifting_features"]
+            if share is not None:
+                values[sub] = float(share)
+        except Exception:
+            continue
+    _metrics_drift_cache["values"] = values
+    _metrics_drift_cache["computed_at"] = now
+    return values
+
+
+def refresh_alert_metrics(max_age_seconds: float = 30.0, force: bool = False) -> List[Dict[str, Any]]:
+    """Evaluates alert rules at most once per cache window for fast scrapes."""
+    global _alert_manager_singleton
+    now = time.time()
+    cached_values = _metrics_alert_cache["values"]
+    if not force and cached_values and now - _metrics_alert_cache["computed_at"] < max_age_seconds:
+        return cached_values
+
+    if _alert_manager_singleton is None:
+        from src.mlops.alerts import AlertManager
+        _alert_manager_singleton = AlertManager()
+    alerts = _alert_manager_singleton.evaluate_alerts(triage_agent=triage_agent)
+    _metrics_alert_cache["values"] = alerts
+    _metrics_alert_cache["computed_at"] = now
+    return alerts
+
+
+@app.on_event("startup")
+async def _startup_artifact_metrics():
+    refresh_artifact_metrics(force=True)
+    refresh_live_drift_metrics(force=True)
+    refresh_alert_metrics(force=True)
+
 
 @app.middleware("http")
 async def track_http_metrics(request: Request, call_next):
@@ -1802,25 +1921,17 @@ def get_metrics():
                 pass
         CHAMPION_INFO.labels(subset=sub, version=v).set(1.0)
 
-    # 4. Update drift_share{subset} computed from live data
+    # 4. Update drift_share{subset} from the startup-warmed cache (never compute on scrape)
+    drift_values = refresh_live_drift_metrics()
     for sub in ["FD001", "FD002", "FD003", "FD004"]:
-        try:
-            train_df = get_dataframe("train", sub)
-            test_df = get_dataframe("test", sub)
-            ref_sample = train_df.sample(min(300, len(train_df)), random_state=42)
-            curr_sample = test_df.sample(min(150, len(test_df)), random_state=42)
-            mgr = mlops_managers.get(sub) or MLOpsManager(sub)
-            report = mgr.calculate_drift_report(ref_sample, curr_sample)
-            share = report["share_drifting_features"]
-            if share is not None:
-                DRIFT_SHARE.labels(subset=sub).set(float(share))
-        except Exception:
-            pass
+        DRIFT_SHARE.labels(subset=sub).set(float(drift_values.get(sub) or 0.0))
 
-    # 5. Evaluate active alerts using LIVE drift
-    from src.mlops.alerts import AlertManager
-    alert_mgr = AlertManager()
-    alerts = alert_mgr.evaluate_alerts(triage_agent=triage_agent)
+    # 4b. Manifest/bundle hashes are cached by mtime; hashing happens once at startup
+    # (or when a promoted artifact changes), not on every scrape.
+    refresh_artifact_metrics()
+
+    # 5. Update active alerts from the startup-warmed/cached evaluation
+    alerts = refresh_alert_metrics()
     for a in alerts:
         PDM_ACTIVE_ALERTS.labels(rule_name=a["rule_name"], severity=a["severity"]).set(1 if a["firing"] else 0)
 

@@ -51,8 +51,8 @@ RUN python -m scripts.build_all_data
 # Copy compiled frontend from Stage 1 into web/dist
 COPY --from=frontend-builder /app/web/dist /app/web/dist
 
-# Create runtime directories for SQLite and uploads
-RUN mkdir -p /app/artifacts/sqlite /app/data/uploads
+# Create runtime directories for SQLite state and uploads
+RUN mkdir -p /app/state /app/data/uploads
 
 # Expose target application port
 EXPOSE 8000

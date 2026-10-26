@@ -11,8 +11,16 @@ def get_persistent_split(
     split_dir: Optional[Path] = None
 ) -> Dict[str, Any]:
     """
-    Returns the persistent engine-level split (train / val / lifecycle-holdout) for the subset.
-    If the split file does not exist, it deterministically partitions all_units and saves it.
+    Returns the persistent engine-level split for the subset:
+
+        train / calibration / validation / lifecycle-holdout
+
+    Calibration engines are disjoint from validation engines: conformal interval
+    offsets are learned only on ``calib_units`` while validation engines remain
+    available for threshold tuning and promotion gates.  If an older split file
+    lacks ``calib_units``, the existing validation group is deterministically
+    divided in half and the file is rewritten in place (train and holdout engines
+    are never changed).
     """
     root_dir = get_root_dir()
     target_dir = split_dir or (root_dir / "artifacts" / "splits")
@@ -23,7 +31,17 @@ def get_persistent_split(
         try:
             with open(split_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            if "train_units" in data and "val_units" in data and "lifecycle_holdout_units" in data:
+            required = {"train_units", "val_units", "lifecycle_holdout_units"}
+            if required.issubset(data):
+                if "calib_units" not in data:
+                    # Backward-compatible migration: carve calibration engines out
+                    # of the old validation group without touching train/holdout.
+                    old_val = [int(u) for u in data["val_units"]]
+                    n_calib = max(1, len(old_val) // 2) if old_val else 0
+                    data["calib_units"] = old_val[:n_calib]
+                    data["val_units"] = old_val[n_calib:]
+                    with open(split_file, "w", encoding="utf-8") as f:
+                        json.dump(data, f, indent=2)
                 return data
         except Exception:
             pass
@@ -42,24 +60,31 @@ def get_persistent_split(
 
     if n_units <= 2:
         train_units = [units[0]]
-        val_units = [units[-1]]
+        val_group = [units[-1]]
         lifecycle_holdout_units = [units[-1]]
     elif n_units <= 4:
         train_units = units[:2]
-        val_units = [units[2]]
+        val_group = [units[2]]
         lifecycle_holdout_units = [units[-1]]
     else:
-        # Standard: 70% train, 15% val, 15% lifecycle holdout
+        # Standard: 70% train, 15% validation group, 15% lifecycle holdout.
+        # The validation group is split into disjoint calibration and validation
+        # engines (calibration first, preserving deterministic ordering).
         n_train = max(1, int(n_units * 0.70))
         n_val = max(1, int(n_units * 0.15))
         train_units = units[:n_train]
-        val_units = units[n_train : n_train + n_val]
+        val_group = units[n_train : n_train + n_val]
         lifecycle_holdout_units = units[n_train + n_val :]
+
+    n_calib = max(1, len(val_group) // 2) if val_group else 0
+    calib_units = val_group[:n_calib]
+    val_units = val_group[n_calib:]
 
     split_data = {
         "subset": subset,
         "total_units": n_units,
         "train_units": train_units,
+        "calib_units": calib_units,
         "val_units": val_units,
         "lifecycle_holdout_units": lifecycle_holdout_units
     }

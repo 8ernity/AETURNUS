@@ -6,6 +6,8 @@ import time
 import hashlib
 import subprocess
 import argparse
+import tempfile
+import shutil
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import pandas as pd
@@ -32,6 +34,7 @@ from src.eval.protocol import (
     eval_frames,
     DEFAULT_SEED,
 )
+from src.eval.regime import regime_mix_gap
 
 def compute_git_sha(root_dir: Path) -> str:
     try:
@@ -226,6 +229,8 @@ def evaluate_subset(sub: str, root_dir: Path, force: bool = False) -> Dict[str, 
             and cached_cv.get("evaluation_mode") == cv_proto["mode"]
             and cached_cv.get("n_draws") == cv_proto["n_draws"]
             and cached_cv.get("min_cycles") == cv_proto["min_cycles"]
+            and cached_cv.get("regime_mix")
+            and cached_cv.get("by_regime")
         ):
             print(f">>> Reusing existing censored 5-fold CV evaluation from {cv_path.name}...")
             cv_res = cached_cv
@@ -274,8 +279,18 @@ def evaluate_subset(sub: str, root_dir: Path, force: bool = False) -> Dict[str, 
         "late_rate": float(res["late_rate"]),
         "pr_auc": float(res["pr_auc"]),
         "interval_coverage": float(res["interval_coverage"]),
-        "mean_interval_width": float(res["mean_interval_width"])
+        "mean_interval_width": float(res["mean_interval_width"]),
+        "coverage_target": float(res["coverage_target"]),
+        "coverage_wilson_ci_95": res["coverage_wilson_ci_95"],
+        "coverage_wilson_ci_contains_target": bool(res["coverage_wilson_ci_contains_target"]),
+        "coverage_ci_excludes_target": bool(res["coverage_ci_excludes_target"]),
+        "coverage_by_bucket": res["coverage_by_bucket"],
     }
+
+    regime_gap = regime_mix_gap(
+        cv_res["regime_mix"],
+        res["test_by_regime"],
+    )
 
     sub_dict = {
         "bundle_sha256": bundle_sha256,
@@ -292,6 +307,7 @@ def evaluate_subset(sub: str, root_dir: Path, force: bool = False) -> Dict[str, 
             "config": "configs/targets.yaml",
         },
         "metrics": metrics,
+        "calibration": bundle.get("conformal_buckets"),
         "cv": {
             "protocol_id": cv_res["protocol_id"],
             "evaluation_mode": cv_res["evaluation_mode"],
@@ -302,8 +318,12 @@ def evaluate_subset(sub: str, root_dir: Path, force: bool = False) -> Dict[str, 
             "std_rmse": cv_res["std_rmse"],
             "mean_nasa": cv_res["mean_nasa"],
             "std_nasa": cv_res["std_nasa"],
-            "mean_train_rmse": cv_res["mean_train_rmse"]
+            "mean_train_rmse": cv_res["mean_train_rmse"],
+            "by_regime": cv_res["by_regime"],
         },
+        "cv_by_regime": cv_res["by_regime"],
+        "test_by_regime": res["test_by_regime"],
+        "regime_mix_gap": regime_gap,
         "comparison_rows": comp_res["models"],
         "champion": champ_decision,
         "condition": res["condition"],
@@ -344,8 +364,7 @@ def main():
 
     # Evaluate each subset in its own process so PyTorch/tree-model memory is fully
     # reclaimed between subsets on memory-constrained hosts.
-    worker_dir = root_dir / "artifacts" / "tmp" / run_id
-    worker_dir.mkdir(parents=True, exist_ok=True)
+    worker_dir = Path(tempfile.mkdtemp(prefix=f"aeturnus_eval_{run_id}_"))
 
     for sub in subsets:
         print(f"\n>>> Evaluating {sub}...")
@@ -380,6 +399,13 @@ def main():
             "deep_comparison": sub_info.get("comparison_rows", [])
         })
 
+    shutil.rmtree(worker_dir, ignore_errors=True)
+
+    flagged_regimes = [
+        sub for sub, info in manifest_subsets.items()
+        if info.get("regime_mix_gap", {}).get("gap_flag")
+    ]
+
     # Assemble complete manifest
     manifest_data = {
         "run_id": run_id,
@@ -387,7 +413,12 @@ def main():
         "config_hash": config_hash,
         "data_sha256": data_sha256,
         "created_at": time.time(),
-        "subsets": manifest_subsets
+        "subsets": manifest_subsets,
+        "regime_mix_gap": {
+            "flagged_subsets": flagged_regimes,
+            "status": "material_gap" if flagged_regimes else "comparable",
+            "note": "Chi-square and KS compare censored-CV sample regime mix with official test regime mix.",
+        },
     }
 
     # Atomically write run_manifest.json

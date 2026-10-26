@@ -9,43 +9,50 @@ class MaintenanceQueue:
     def __init__(self, config_path: Optional[str] = None):
         root_dir = get_root_dir()
         cfg_file = Path(config_path) if config_path else root_dir / "configs" / "queue.yaml"
-        if cfg_file.exists():
-            self.config = load_yaml(str(cfg_file))
-        else:
-            self.config = {
-                "weights": {"w_rul": 0.40, "w_fail": 0.30, "w_anom": 0.15, "w_trend": 0.15},
-                "normalization": {"max_urgency_rul": 60.0, "max_rul_drop": 30.0},
-                "daily_service_capacity": 5,
-                "disclaimer": "Configured starting weights for decision support, not empirical physical claims."
-            }
+        if not cfg_file.exists():
+            raise FileNotFoundError(
+                f"Maintenance queue policy config not found: {cfg_file}. "
+                "Weights and normalization limits must come from config, not code defaults."
+            )
+        self.config = load_yaml(str(cfg_file))
 
-        w = self.config.get("weights", {})
-        self.w_rul = float(w.get("w_rul", 0.40))
-        self.w_fail = float(w.get("w_fail", 0.30))
-        self.w_anom = float(w.get("w_anom", 0.15))
-        self.w_trend = float(w.get("w_trend", 0.15))
+        w = self.config["weights"]
+        self.w_rul = float(w["w_rul"])
+        self.w_fail = float(w["w_fail"])
+        self.w_anom = float(w["w_anom"])
+        self.w_trend = float(w["w_trend"])
 
-        norm = self.config.get("normalization", {})
-        self.max_urgency_rul = float(norm.get("max_urgency_rul", 60.0))
-        self.max_rul_drop = float(norm.get("max_rul_drop", 30.0))
-        self.default_capacity = int(self.config.get("daily_service_capacity", 5))
-        self.disclaimer = self.config.get("disclaimer", "Configured starting weights for decision support.")
+        norm = self.config["normalization"]
+        self.max_urgency_rul = float(norm["max_urgency_rul"])
+        self.max_rul_drop = float(norm["max_rul_drop"])
+        self.default_capacity = int(self.config["daily_service_capacity"])
+        self.disclaimer = self.config["disclaimer"]
 
     def compute_priority_score(self, item: Dict[str, Any]) -> Tuple[float, Dict[str, float]]:
         """
         Computes composite maintenance priority score:
         S = w_rul * (1 - p10/60)+ + w_fail * P(fail<=30) + w_anom * anomaly_score + w_trend * (drop/30)+
         """
-        cons_rul = float(item.get("conservative_rul", item.get("rul_p10", 60.0)))
+        if "conservative_rul" in item:
+            cons_rul = float(item["conservative_rul"])
+        elif "rul_p10" in item:
+            cons_rul = float(item["rul_p10"])
+        else:
+            raise ValueError("MaintenanceQueue items require conservative_rul or rul_p10")
         rul_term = max(0.0, 1.0 - (cons_rul / self.max_urgency_rul))
 
-        fail_prob = float(item.get("fail_prob_30", item.get("fail_prob", 0.0)))
+        if "fail_prob_30" in item:
+            fail_prob = float(item["fail_prob_30"])
+        elif "fail_prob" in item:
+            fail_prob = float(item["fail_prob"])
+        else:
+            raise ValueError("MaintenanceQueue items require fail_prob_30")
         fail_term = max(0.0, min(1.0, fail_prob))
 
-        anom_score = float(item.get("anomaly_score", 0.0))
+        anom_score = float(item["anomaly_score"])
         anom_term = max(0.0, min(1.0, anom_score))
 
-        rul_drop = float(item.get("rul_drop", 0.0))
+        rul_drop = float(item["rul_drop"])
         trend_term = max(0.0, min(1.0, rul_drop / self.max_rul_drop))
 
         score = (
@@ -79,7 +86,10 @@ class MaintenanceQueue:
 
         for item in items:
             score, comps = self.compute_priority_score(item)
-            c_rul = float(item.get("conservative_rul", item.get("rul_p10", 999.0)))
+            if "conservative_rul" in item:
+                c_rul = float(item["conservative_rul"])
+            else:
+                c_rul = float(item["rul_p10"])
             entry = dict(item)
             entry["priority_score"] = score
             entry["score_components"] = comps

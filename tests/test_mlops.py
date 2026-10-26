@@ -105,7 +105,8 @@ def test_retrain_demo_fixed_holdout_and_no_fake_multipliers():
 
 def test_mlflow_runs_logged():
     import mlflow
-    db_file = root_dir / "artifacts" / "mlflow.db"
+    from src.common.state import state_db_path
+    db_file = state_db_path("mlflow.db", root_dir)
     assert db_file.exists(), "MLflow SQLite database must exist"
     mlflow.set_tracking_uri(f"sqlite:///{db_file.resolve().as_posix()}")
     runs = mlflow.search_runs(experiment_names=["cmapss_FD001"])

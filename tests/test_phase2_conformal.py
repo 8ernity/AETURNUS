@@ -31,9 +31,12 @@ def test_split_conformal_val_engines_only():
         split = get_persistent_split(sub, all_units=all_units)
         
         train_units = set(split["train_units"])
+        calib_units = set(split["calib_units"])
         val_units = set(split["val_units"])
-        assert len(train_units.intersection(val_units)) == 0, f"Train and Val engines must be strictly disjoint for {sub}"
-        assert len(val_units) > 0, f"Val engines must exist for calibration in {sub}"
+        assert len(train_units.intersection(calib_units)) == 0, f"Train and Calib engines must be strictly disjoint for {sub}"
+        assert len(calib_units.intersection(val_units)) == 0, f"Calib and Val engines must be strictly disjoint for {sub}"
+        assert len(calib_units) > 0, f"Calib engines must exist for conformal calibration in {sub}"
+        assert len(val_units) > 0, f"Val engines must exist for threshold tuning in {sub}"
 
 def test_interval_non_inversion_and_non_negativity():
     """Verify calibrated intervals are strictly ordered: 0 <= p10 <= p50 <= p90."""
@@ -72,6 +75,23 @@ def test_test_set_coverage_matches_evaluation_report():
         assert abs(reported_cov - computed_cov) < 0.01, (
             f"{sub}: Manifest coverage {reported_cov} differs from computed {computed_cov}"
         )
+        assert eval_res["coverage_target"] == manifest["subsets"][sub]["metrics"]["coverage_target"]
+        # The target is a lower bound on coverage: split conformal uses a finite-sample
+        # quantile correction, so a well-calibrated interval may over-cover. Require
+        # that the data cannot rule out the target (upper CI bound at or above it),
+        # rather than requiring the target to sit inside a two-sided interval.
+        _, ci_upper = eval_res["coverage_wilson_ci_95"]
+        assert ci_upper >= eval_res["coverage_target"], (
+            f"{sub}: held-out Wilson CI {eval_res['coverage_wilson_ci_95']} is entirely "
+            f"below target coverage {eval_res['coverage_target']}"
+        )
+        buckets = eval_res["coverage_by_bucket"]
+        assert buckets, f"{sub}: expected per-bucket coverage diagnostics"
+        assert sum(b["sample_count"] for b in buckets) == eval_res["test_engines_count"]
+        for bucket in buckets:
+            assert 0.0 <= bucket["coverage"] <= 1.0
+            assert len(bucket["wilson_ci_95"]) == 2
+            assert bucket["conformal_q"] >= 0.0
 
 def test_wilson_ci_mathematical_properties():
     """Verify Wilson score confidence interval correctness recomputed from bundle + manifest."""

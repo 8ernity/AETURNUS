@@ -9,11 +9,12 @@ from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional, Callable
 import mlflow
 from src.common.utils import get_root_dir, load_yaml, calculate_psi, calculate_ks_drift, calculate_metrics
+from src.common.state import state_db_path
 from src.models.model_service import ModelService
 
 def get_drift_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
     if db_path is None:
-        db_path = get_root_dir() / "artifacts" / "drift_monitoring.db"
+        db_path = state_db_path("drift_monitoring.db")
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     conn.execute("""
@@ -74,7 +75,7 @@ def get_latest_drift_run(
     Read-only: when no drift DB exists yet nothing is created or written, so a GET
     requests on a fresh install never produces database state.
     """
-    resolved = db_path if db_path is not None else get_root_dir() / "artifacts" / "drift_monitoring.db"
+    resolved = db_path if db_path is not None else state_db_path("drift_monitoring.db")
     if not Path(resolved).exists():
         return None
     conn = get_drift_db(resolved)
@@ -109,7 +110,7 @@ class MLOpsManager:
         self.artifacts_dir = self.root_dir / "artifacts"
         
         self.registry_file = self.artifacts_dir / "reports" / "model_registry.json"
-        self.drift_db_path = self.artifacts_dir / "drift_monitoring.db"
+        self.drift_db_path = state_db_path("drift_monitoring.db", self.root_dir)
         
         self._setup_mlflow()
         self._init_registry()
@@ -118,7 +119,7 @@ class MLOpsManager:
         """Initializes SQLite-backed MLflow tracking store."""
         os.environ["MLFLOW_ALLOW_FILE_STORE"] = "true"
         os.environ["MLFLOW_DISABLE_AGENT_HINT"] = "1"
-        db_path = (self.artifacts_dir / "mlflow.db").resolve()
+        db_path = state_db_path("mlflow.db", self.root_dir).resolve()
         mlflow.set_tracking_uri(f"sqlite:///{db_path.as_posix()}")
         mlflow.set_experiment(f"cmapss_{self.subset}")
 

@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from src.api.server import app, replay_state
 from src.mlops.drift_and_retrain import MLOpsManager
 from src.common.utils import get_root_dir
+from src.common.state import state_db_path
 
 client = TestClient(app)
 root_dir = get_root_dir()
@@ -15,7 +16,7 @@ def test_default_state_must_not_alarm():
     # The drift DB persists across tests/processes; clear it so this test observes the
     # default (no persisted drift run) state instead of a row written by an earlier run.
     from src.mlops.drift_and_retrain import get_drift_db
-    conn = get_drift_db(root_dir / "artifacts" / "drift_monitoring.db")
+    conn = get_drift_db(state_db_path("drift_monitoring.db", root_dir))
     try:
         conn.execute("DELETE FROM drift_runs")
         conn.commit()
@@ -42,7 +43,7 @@ def test_drift_returns_no_data_without_monitored_features():
     ref_df = pd.DataFrame({"unit": [1, 1], "cycle": [1, 2]})
     curr_df = pd.DataFrame({"unit": [1, 1], "cycle": [1, 2]})
 
-    conn = get_drift_db(root_dir / "artifacts" / "drift_monitoring.db")
+    conn = get_drift_db(state_db_path("drift_monitoring.db", root_dir))
     try:
         before = conn.execute("SELECT COUNT(*) FROM drift_runs WHERE subset = ?", (subset,)).fetchone()[0]
     finally:
@@ -54,7 +55,7 @@ def test_drift_returns_no_data_without_monitored_features():
     assert report["drift_alert"] is False
     assert report["share_drifting_features"] is None
 
-    conn = get_drift_db(root_dir / "artifacts" / "drift_monitoring.db")
+    conn = get_drift_db(state_db_path("drift_monitoring.db", root_dir))
     try:
         after = conn.execute("SELECT COUNT(*) FROM drift_runs WHERE subset = ?", (subset,)).fetchone()[0]
     finally:

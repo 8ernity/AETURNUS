@@ -6,13 +6,14 @@ import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from src.common.utils import get_root_dir, load_yaml
+from src.common.state import state_db_path
 
 class SelfHealingEngine:
     def __init__(self, db_path: Optional[Path] = None):
         self.root_dir = get_root_dir()
         self.rules_cfg = load_yaml("configs/agent_rules.yaml")
         self.sensor_cfg = load_yaml("configs/sensor_map.yaml")
-        self.db_path = db_path or (self.root_dir / "data" / "work_orders.db")
+        self.db_path = db_path or state_db_path("self_healing.db", self.root_dir)
         self.is_memory_db = str(self.db_path) == ":memory:"
         if not self.is_memory_db:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -88,6 +89,31 @@ class SelfHealingEngine:
                 CREATE INDEX IF NOT EXISTS idx_sh_status ON self_healing_actions(status);
             """)
 
+    def _severity_bands(self) -> Dict[str, float]:
+        """Severity thresholds are policy: every band must be present in config."""
+        sev_bands = self.rules_cfg.get("severity_bands")
+        if not isinstance(sev_bands, dict):
+            raise ValueError(
+                "configs/agent_rules.yaml must define severity_bands with "
+                "critical/high/medium/low thresholds; numeric defaults are not allowed."
+            )
+        missing = [key for key in ("critical", "high", "medium", "low") if key not in sev_bands]
+        if missing:
+            raise ValueError(f"configs/agent_rules.yaml severity_bands missing keys: {missing}")
+        return {key: float(sev_bands[key]) for key in ("critical", "high", "medium", "low")}
+
+    def get_base_severity(self, cons_rul: float) -> str:
+        bands = self._severity_bands()
+        if cons_rul <= bands["critical"]:
+            return "CRITICAL"
+        if cons_rul <= bands["high"]:
+            return "HIGH"
+        if cons_rul <= bands["medium"]:
+            return "MEDIUM"
+        if cons_rul <= bands["low"]:
+            return "LOW"
+        return "HEALTHY"
+
     def generate_prescriptions(self, engine_status: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
         Synthesizes rule-based recommended maintenance actions based on
@@ -96,7 +122,7 @@ class SelfHealingEngine:
         """
         engine_id = str(engine_status.get("engine_id", "unknown"))
         cycle = int(engine_status.get("cycle", 1))
-        cons_rul = float(engine_status.get("conservative_rul", 50.0))
+        cons_rul = float(engine_status["conservative_rul"])
         severity = str(engine_status.get("severity", "MEDIUM")).upper()
         subsystem = str(engine_status.get("suspected_subsystem", "HPC"))
 
@@ -160,7 +186,7 @@ class SelfHealingEngine:
             "cycle": cycle,
             "conservative_rul": cons_rul,
             "suspected_subsystem": subsystem,
-            "severity": "CRITICAL" if cons_rul <= 15 else ("HIGH" if cons_rul <= 30 else "MEDIUM")
+            "severity": self.get_base_severity(cons_rul)
         }
         candidates = self.generate_prescriptions(status_dict)
         chosen = next((c for c in candidates if c["action_type"] == action_type), candidates[0])

@@ -99,8 +99,8 @@ def test_engine_independence():
 def test_disjoint_persistent_engine_splits():
     """
     Disjoint Splits:
-    Across all 4 subsets, train, validation, and lifecycle holdout sets must have
-    strictly empty pairwise intersections.
+    Across all 4 subsets, train, calibration, validation, and lifecycle holdout
+    sets must have strictly empty pairwise intersections.
     """
     for sub in ["FD001", "FD002", "FD003", "FD004"]:
         loader = CMAPSSLoader(subset=sub)
@@ -109,16 +109,20 @@ def test_disjoint_persistent_engine_splits():
         
         split = get_persistent_split(sub, all_units=all_units)
         train_u = set(split["train_units"])
+        calib_u = set(split["calib_units"])
         val_u = set(split["val_units"])
         holdout_u = set(split["lifecycle_holdout_units"])
         
         # Verify pairwise disjointness
+        assert len(train_u.intersection(calib_u)) == 0, f"{sub}: Train and Calib overlap!"
         assert len(train_u.intersection(val_u)) == 0, f"{sub}: Train and Val overlap!"
         assert len(train_u.intersection(holdout_u)) == 0, f"{sub}: Train and Holdout overlap!"
+        assert len(calib_u.intersection(val_u)) == 0, f"{sub}: Calib and Val overlap!"
+        assert len(calib_u.intersection(holdout_u)) == 0, f"{sub}: Calib and Holdout overlap!"
         assert len(val_u.intersection(holdout_u)) == 0, f"{sub}: Val and Holdout overlap!"
         
         # Verify union covers all units
-        assert train_u.union(val_u).union(holdout_u) == set(all_units), f"{sub}: Partition incomplete"
+        assert train_u.union(calib_u).union(val_u).union(holdout_u) == set(all_units), f"{sub}: Partition incomplete"
 
 def test_group_kfold_no_cross_engine_leakage():
     """
