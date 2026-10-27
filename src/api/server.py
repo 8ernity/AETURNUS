@@ -74,18 +74,27 @@ streaming_pipelines: Dict[str, StreamingEnginePipeline] = {}
 # Cap executor workers at 2 to conserve thread memory in 512MB containers
 _fleet_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 _prediction_cache: Dict[tuple, Dict[str, Any]] = {}
+_PREDICTION_CACHE_MAX = 1024
 _cache_lock = threading.Lock()
+_startup_tasks: Set[asyncio.Task] = set()
+
+
+def _schedule_background(coro) -> None:
+    """Keeps a strong reference to background tasks so they are not GC'd."""
+    task = asyncio.create_task(coro)
+    _startup_tasks.add(task)
+    task.add_done_callback(_startup_tasks.discard)
 
 def get_cached_prediction(ms: ModelService, row_dict: Dict[str, Any], subset: str) -> Dict[str, Any]:
-    unit = int(row_dict.get("unit", 1))
-    cycle = int(row_dict.get("cycle", 1))
+    unit = int(row_dict["unit"])
+    cycle = int(row_dict["cycle"])
     cache_key = (str(subset), unit, cycle, getattr(ms, "version", "v1"))
     with _cache_lock:
         if cache_key in _prediction_cache:
             return _prediction_cache[cache_key]
     pred = ms.predict_point(row_dict)
     with _cache_lock:
-        if len(_prediction_cache) >= 500:
+        if len(_prediction_cache) >= _PREDICTION_CACHE_MAX:
             _prediction_cache.clear()
         _prediction_cache[cache_key] = pred
     return pred
@@ -166,7 +175,8 @@ def get_streaming_pipeline(subset: str = "FD001") -> StreamingEnginePipeline:
         streaming_pipelines[subset] = StreamingEnginePipeline(subset=subset, model_service=ms, triage_agent=triage_agent)
     return streaming_pipelines[subset]
 
-VALID_SUBSETS = {"FD001", "FD002", "FD003", "FD004"}
+CONFIGURED_SUBSETS = list(load_yaml("configs/pipeline.yaml")["dataset"]["subsets"])
+VALID_SUBSETS = set(CONFIGURED_SUBSETS)
 
 def validate_subset(subset: str):
     if subset not in VALID_SUBSETS:
@@ -337,13 +347,14 @@ def is_system_ready() -> bool:
 
 def bootstrap_fleet_triage(subsets: Optional[List[str]] = None):
     """
-    Executes a one-time batch evaluation of the current fleet state on startup.
+    Executes a one-time batch evaluation of the current fleet state during the
+    background startup warmup.
     Passes all current engines through triage_agent.evaluate_and_persist(engine)
     to populate the configured state directory before the frontend connects.
 
     Disabled by default; set ``AETURNUS_BOOTSTRAP_TRIAGE=1`` to replay fleet state.
     """
-    target_subsets = subsets or ["FD001", "FD002", "FD003", "FD004"]
+    target_subsets = subsets or CONFIGURED_SUBSETS
     for sub in target_subsets:
         try:
             df = get_test_df(sub)
@@ -357,34 +368,48 @@ def bootstrap_fleet_triage(subsets: Optional[List[str]] = None):
         except Exception as e:
             print(f"Bootstrap triage notice for {sub}: {e}")
 
+def _warm_startup_caches() -> None:
+    """Warm every configured subset after Uvicorn has bound its port.
+
+    Port binding must never wait for dataset/model loading. Each subset is
+    warmed sequentially in this background worker so peak memory stays bounded;
+    its telemetry frames are evicted immediately after the fleet prediction
+    cache is primed.
+    """
+    # Bootstrap Triage Agent only when explicitly requested. Fresh installs
+    # must not replay stale fleet state into an otherwise empty work-order DB.
+    bootstrap_enabled = os.getenv("AETURNUS_BOOTSTRAP_TRIAGE", "0").lower() in ("1", "true", "yes")
+
+    for subset in CONFIGURED_SUBSETS:
+        try:
+            print(f"[STARTUP] Warming {subset} in background...", flush=True)
+            ms = get_model_service(subset)
+            df = get_test_df(subset)
+
+            if bootstrap_enabled:
+                bootstrap_fleet_triage([subset])
+
+            last_indices = df.groupby("unit")["cycle"].idxmax()
+            records = df.loc[last_indices].sort_values("unit").to_dict("records")
+            list(_fleet_executor.map(lambda r, s=subset, m=ms: get_cached_prediction(m, r, s), records))
+            print(f"[STARTUP] Warmed {subset} ({len(records)} engines).", flush=True)
+        except Exception as e:
+            print(f"Startup precomputation notice for {subset}: {e}")
+        finally:
+            loaded_dfs.pop(f"train_{subset}", None)
+            loaded_dfs.pop(f"test_{subset}", None)
+            clear_engine_trajectory_cache(subset)
+            trim_memory()
+
+
 @app.on_event("startup")
 async def startup_event():
-    try:
-        # 1. Preload feature parquets and models into memory so endpoints serve in < 100ms
-        for sub in ["FD001", "FD002", "FD003", "FD004"]:
-            try:
-                get_test_df(sub)
-                get_model_service(sub)
-            except Exception:
-                pass
-
-        # 2. Bootstrap Triage Agent only when explicitly requested. Fresh installs
-        # must not replay stale fleet state into an otherwise empty work-order DB.
-        bootstrap_enabled = os.getenv("AETURNUS_BOOTSTRAP_TRIAGE", "0").lower() in ("1", "true", "yes")
-        if bootstrap_enabled:
-            bootstrap_fleet_triage(["FD001", "FD002", "FD003", "FD004"])
-
-        # 3. Prime initial fleet prediction cache
-        ms = get_model_service(current_subset)
-        df = get_test_df(current_subset)
-        last_indices = df.groupby("unit")["cycle"].idxmax()
-        records = df.loc[last_indices].sort_values("unit").to_dict("records")
-        list(_fleet_executor.map(lambda r: get_cached_prediction(ms, r, current_subset), records))
-    except Exception as e:
-        print(f"Startup precomputation notice: {e}")
-    finally:
-        trim_memory()
-    asyncio.create_task(replay_ticker_loop())
+    # Never block Uvicorn's lifespan startup. Render only scans for the open
+    # port after startup completes, so dataset/model warmup runs in a worker
+    # thread after this handler returns.
+    print("[STARTUP] Port binding unblocked; per-subset warmup scheduled in background.", flush=True)
+    _schedule_background(asyncio.to_thread(_warm_startup_caches))
+    _schedule_background(replay_ticker_loop())
 
 # ----------------- REST Endpoints -----------------
 
@@ -432,7 +457,7 @@ def get_fleet(subset: str = Query(default="FD001")):
 
         sparkline = history_by_unit.get(u, [float(pred["health_index"])])
         top_s = pred["top_sensors"][0] if pred.get("top_sensors") else "s11"
-        subsystem_name = sensor_map.get(top_s, {}).get("subsystem", "HPC")
+        subsystem_name = sensor_map.get(top_s, {}).get("subsystem", "Unknown")
 
         engines.append({
             "engine_id": str(pred["engine_id"]),
@@ -573,7 +598,7 @@ def get_engine_detail(engine_id: str, subset: str = Query(default="FD001")):
         sensor_attributions = []
         for s in pred.get("top_sensors", []):
             info = sensor_map.get(s, {})
-            subsystem = info.get("subsystem", "HPC")
+            subsystem = info.get("subsystem", "Unknown")
             dev = abs(float(last_row[f"{s}_dev_base"]))
             sensor_attributions.append({
                 "sensor": s,
@@ -588,45 +613,42 @@ def get_engine_detail(engine_id: str, subset: str = Query(default="FD001")):
         sensor_attributions = top_contribs
 
     # 360° Turbofan Subsystem Attribution Share (Sums strictly to 100%)
-    subsystem_sensor_groups = {
-        "Fan / LPC": ["s1", "s2", "s5", "s6", "s8", "s13", "s15"],
-        "HPC": ["s3", "s7", "s11"],
-        "Combustor": ["s10", "s12", "s16"],
-        "HPT": ["s9", "s14", "s20"],
-        "LPT / Exhaust": ["s4", "s17", "s21"]
-    }
+    subsystem_sensor_groups = sensor_map_cfg.get("subsystem_groups", {})
     sensor_to_group = {}
-    for grp, s_list in subsystem_sensor_groups.items():
-        for s in s_list:
-            sensor_to_group[s] = grp
+    for group, subsystems in subsystem_sensor_groups.items():
+        for sensor_id, info in sensor_map.items():
+            if info.get("subsystem") in subsystems:
+                sensor_to_group[sensor_id] = group
 
-    subsystem_shap_abs = {grp: 0.0 for grp in subsystem_sensor_groups}
+    subsystem_shap_abs = {group: 0.0 for group in subsystem_sensor_groups}
 
     for item in sensor_attributions:
-        s = item.get("sensor", "")
-        grp = sensor_to_group.get(s)
-        if not grp:
-            sub = item.get("subsystem", "")
-            grp = "HPC" if "HPC" in sub else (
-                "Fan / LPC" if ("Fan" in sub or "LPC" in sub) else (
-                    "Combustor" if "Combustor" in sub else (
-                        "HPT" if "HPT" in sub or "Core" in sub else (
-                            "LPT / Exhaust" if "LPT" in sub or "Bleed" in sub else "HPC"
-                        )
-                    )
-                )
+        sensor_id = item.get("sensor", "")
+        group = sensor_to_group.get(sensor_id)
+        if not group:
+            raw_subsystem = item.get("subsystem", "")
+            group = next(
+                (
+                    candidate
+                    for candidate, subsystems in subsystem_sensor_groups.items()
+                    if raw_subsystem in subsystems
+                ),
+                "Other",
             )
+        subsystem_shap_abs.setdefault(group, 0.0)
         val = abs(float(item["shap_value"] if "shap_value" in item else item["contribution"]))
-        subsystem_shap_abs[grp] += val
+        subsystem_shap_abs[group] += val
 
     total_shap = sum(subsystem_shap_abs.values())
     if total_shap <= 1e-6:
-        for grp, sensors in subsystem_sensor_groups.items():
-            for s in sensors:
-                if f"{s}_dev_base" in last_row:
-                    subsystem_shap_abs[grp] += abs(float(last_row[f"{s}_dev_base"]))
-                elif f"{s}_norm" in last_row:
-                    subsystem_shap_abs[grp] += abs(float(last_row[f"{s}_norm"]))
+        for group, subsystems in subsystem_sensor_groups.items():
+            for sensor_id, info in sensor_map.items():
+                if info.get("subsystem") not in subsystems:
+                    continue
+                if f"{sensor_id}_dev_base" in last_row:
+                    subsystem_shap_abs[group] += abs(float(last_row[f"{sensor_id}_dev_base"]))
+                elif f"{sensor_id}_norm" in last_row:
+                    subsystem_shap_abs[group] += abs(float(last_row[f"{sensor_id}_norm"]))
         total_shap = sum(subsystem_shap_abs.values())
 
     if total_shap > 1e-6:
@@ -709,10 +731,22 @@ def get_replay_state():
 
 # ----------------- Work Orders -----------------
 @app.get("/api/v1/work-orders")
-def get_work_orders(status: Optional[str] = None, severity: Optional[str] = None):
+def get_work_orders(
+    status: Optional[str] = None,
+    severity: Optional[str] = None,
+    include_closed: bool = Query(default=False),
+):
+    # The default view is the live maintenance queue: open orders only. Historical
+    # closed/rejected orders remain available explicitly via include_closed or a
+    # terminal status filter, so a fresh seed reports the same zero state as the
+    # maintenance queue.
+    terminal_statuses = {"CLOSED", "REJECTED", "CANCELLED"}
+    include_history = include_closed or (status is not None and status.upper() in terminal_statuses)
+
     orders = list(triage_agent.open_orders.values())
-    for hist_list in triage_agent.closed_orders_history.values():
-        orders.extend(hist_list)
+    if include_history:
+        for hist_list in triage_agent.closed_orders_history.values():
+            orders.extend(hist_list)
 
     if status:
         orders = [o for o in orders if o.get("status") == status]
@@ -732,67 +766,37 @@ def get_work_order_detail(work_order_id: str):
                 return o
 @app.get("/api/v1/maintenance-queue")
 def get_maintenance_queue(subset: str = Query(default="FD001"), capacity: int = Query(default=5)):
+    """Rank only work orders that the TriageAgent has already persisted."""
     validate_subset(subset)
     from src.agent.maintenance_queue import MaintenanceQueue
     mq = MaintenanceQueue()
-    
-    # 1. Collect open work orders for this subset
+
     open_items = []
     for eng_id, wo in triage_agent.open_orders.items():
-        if wo.get("subset") == subset:
-            if "rul_drop" in wo:
-                rul_drop = float(wo["rul_drop"])
-            else:
-                hist = triage_agent.engine_state_history.get(eng_id, [])
-                rul_drop = max(0.0, hist[-2]["conservative_rul"] - hist[-1]["conservative_rul"]) if len(hist) >= 2 else 0.0
-            open_items.append({
-                "work_order_id": wo.get("work_order_id"),
-                "engine_id": eng_id,
-                "unit": int(wo["unit"]),
-                "conservative_rul": float(wo["conservative_rul"]),
-                "rul_p10": float(wo["rul_p10"]),
-                "fail_prob_30": float(wo["fail_prob_30"]),
-                "anomaly_score": float(wo["anomaly_score"]),
-                "rul_drop": rul_drop,
-                "suspected_subsystem": wo.get("suspected_subsystem", "HPC"),
-                "severity": wo.get("severity", "HIGH"),
-                "status": wo.get("status", "OPEN"),
-            })
-            
-    # 2. If open work orders is empty, populate from test engines needing service
-    if not open_items:
-        df = get_test_df(subset)
-        ms = get_model_service(subset)
-        last_indices = df.groupby("unit")["cycle"].idxmax()
-        last_rows = df.loc[last_indices].sort_values("unit")
-        
-        for _, row in last_rows.iterrows():
-            r_dict = row.to_dict()
-            pred = ms.predict_point(r_dict)
-            c_rul = pred["conservative_rul"]
-            fp30 = pred["fail_prob_30"]
-            if c_rul <= 60.0 or fp30 >= 0.30:
-                subsys = "HPC"
-                if pred.get("top_contributors"):
-                    subsys = pred["top_contributors"][0].get("subsystem", "HPC")
-                prior_rows = df[(df["unit"] == pred["unit"]) & (df["cycle"] == pred["cycle"] - 1)]
-                rul_drop = 0.0
-                if not prior_rows.empty:
-                    prior_pred = ms.predict_point(prior_rows.iloc[0].to_dict())
-                    rul_drop = max(0.0, float(prior_pred["rul_p50"]) - float(pred["rul_p50"]))
-                open_items.append({
-                    "work_order_id": f"PENDING-WO-{pred['engine_id']}",
-                    "engine_id": pred["engine_id"],
-                    "unit": int(pred["unit"]),
-                    "conservative_rul": c_rul,
-                    "rul_p10": pred["rul_p10"],
-                    "fail_prob_30": fp30,
-                    "anomaly_score": pred["anomaly_score"],
-                    "rul_drop": rul_drop,
-                    "suspected_subsystem": subsys,
-                    "severity": "CRITICAL" if c_rul <= 15 else ("HIGH" if c_rul <= 30 else "MEDIUM"),
-                    "status": "QUEUED"
-                })
+        if wo["subset"] != subset:
+            continue
+        if wo.get("rul_drop") is not None:
+            rul_drop = float(wo["rul_drop"])
+        else:
+            hist = triage_agent.engine_state_history.get(eng_id, [])
+            rul_drop = (
+                max(0.0, hist[-2]["conservative_rul"] - hist[-1]["conservative_rul"])
+                if len(hist) >= 2
+                else None
+            )
+        open_items.append({
+            "work_order_id": wo["work_order_id"],
+            "engine_id": eng_id,
+            "unit": int(wo["unit"]),
+            "conservative_rul": float(wo["conservative_rul"]),
+            "rul_p10": float(wo["rul_p10"]),
+            "fail_prob_30": float(wo["fail_prob_30"]),
+            "anomaly_score": float(wo["anomaly_score"]),
+            "rul_drop": rul_drop,
+            "suspected_subsystem": wo["suspected_subsystem"],
+            "severity": wo["severity"],
+            "status": wo["status"],
+        })
 
     queue = mq.rank_items(open_items, capacity=capacity)
     return {
@@ -803,6 +807,84 @@ def get_maintenance_queue(subset: str = Query(default="FD001"), capacity: int = 
         "backlog_count": max(0, len(queue) - capacity),
         "queue": queue,
         "disclaimer": mq.disclaimer
+    }
+
+
+@app.get("/api/v1/maintenance-candidates")
+def get_maintenance_candidates(subset: str = Query(default="FD001"), capacity: int = Query(default=5)):
+    """Preview what the TriageAgent would queue without writing to the state DB.
+
+    Rules, severity bands, and escalation thresholds are evaluated by the same
+    TriageAgent code path used for persistence, so there is one policy source
+    (configs/agent_rules.yaml). Candidate IDs are never PENDING-* pseudo-orders.
+    """
+    validate_subset(subset)
+    from src.agent.maintenance_queue import MaintenanceQueue
+    mq = MaintenanceQueue()
+
+    df = get_test_df(subset)
+    ms = get_model_service(subset)
+    last_indices = df.groupby("unit")["cycle"].idxmax()
+    last_rows = df.loc[last_indices].sort_values("unit")
+    records = last_rows.to_dict("records")
+
+    # Dry-run agent: in-memory state, no writes to the persisted work-order DB.
+    candidate_agent = TriageAgent(db_path=":memory:", rules_cfg=triage_agent.rules_cfg)
+    candidates = []
+    for r_dict in records:
+        pred = get_cached_prediction(ms, r_dict, subset)
+        try:
+            order, trace = candidate_agent.evaluate_engine_cycle(pred, dry_run=True)
+        except ValueError as ve:
+            raise HTTPException(status_code=422, detail=str(ve))
+        if order is None:
+            continue
+
+        cycle = int(pred.get("cycle", order.get("current_cycle", 1)))
+        candidate_id = f"CAND-{order['engine_id']}-{cycle}"
+        p90_value = order["predicted_rul"].get("p90")
+        candidates.append({
+            "work_order_id": candidate_id,
+            "candidate_id": candidate_id,
+            "cycle": cycle,
+            "engine_id": order["engine_id"],
+            "unit": int(order["unit"]),
+            "subset": order["subset"],
+            "conservative_rul": float(order["conservative_rul"]),
+            "rul_p10": float(order["rul_p10"]),
+            "rul_p50": float(order["predicted_rul"]["p50"]),
+            "rul_p90": None if p90_value is None else float(p90_value),
+            "censored_at_cap": bool(order.get("censored_at_cap", pred.get("censored_at_cap", False))),
+            "interval_label": order.get("interval_label", pred.get("interval_label", "p10-p90")),
+            "fail_prob_30": float(order["fail_prob_30"]),
+            "anomaly_score": float(order["anomaly_score"]),
+            "rul_drop": (
+                None if order.get("rul_drop") is None else float(order["rul_drop"])
+            ),
+            "suspected_subsystem": order["suspected_subsystem"],
+            "severity": order["severity"],
+            "raw_severity": order["raw_severity"],
+            "status": order["status"],
+            "exception": order.get("exception"),
+            "decision_trace": trace,
+            "rule_trace": trace,
+            "rules_version": order["rules_version"],
+            "model_version": order.get("model_version"),
+            "dry_run": True,
+            "would_persist": False,
+        })
+
+    ranked = mq.rank_items(candidates, capacity=capacity)
+    return {
+        "subset": subset,
+        "capacity": capacity,
+        "total_candidates": len(ranked),
+        "actionable_count": min(len(ranked), capacity),
+        "backlog_count": max(0, len(ranked) - capacity),
+        "candidates": ranked,
+        "rules_version": getattr(triage_agent, "rules_version", None),
+        "dry_run": True,
+        "disclaimer": mq.disclaimer,
     }
 
 class HumanActionRequest(BaseModel):
@@ -882,12 +964,14 @@ def download_maintenance_report_by_engine(engine_id: str, subset: str = Query(de
             "severity": "LOW",
             "status": "CLOSED",
             "conservative_rul": pred["conservative_rul"],
+            "censored_at_cap": bool(pred.get("censored_at_cap", False)),
+            "interval_label": pred.get("interval_label", "p10-p90"),
             "predicted_rul": {
                 "p10": pred["rul_p10"],
                 "p50": pred["rul_p50"],
                 "p90": pred["rul_p90"]
             },
-            "suspected_subsystem": "HPC",
+            "suspected_subsystem": "Unknown",
             "top_sensors": pred["top_sensors"],
             "decision_trace": ["baseline:evaluation_nominal", "severity:LOW"],
             "model_version": pred["model_version"],
@@ -950,10 +1034,10 @@ def simulate_what_if(req: WhatIfRequest, subset: str = Query(default="FD001")):
     records = holdout_df.to_dict("records")
     for i, row in enumerate(records):
         pred = {
-            "engine_id": f"{subset}-{int(row.get('unit', 1)):03d}",
-            "unit": int(row.get("unit", 1)),
+            "engine_id": f"{subset}-{int(row['unit']):03d}",
+            "unit": int(row["unit"]),
             "subset": subset,
-            "cycle": int(row.get("cycle", 1)),
+            "cycle": int(row["cycle"]),
             "rul_p10": round(float(p10_preds[i]), 1),
             "rul_p50": round(float(p50_preds[i]), 1),
             "rul_p90": round(float(p90_preds[i]), 1),
@@ -1029,16 +1113,42 @@ def get_model_benchmark():
             "protocol_id": sub_info["protocol_id"],
             "n_engines": sub_info["n_engines"],
             "target_rmse": target_rmse,
+            "target_metric": sub_info["target_metric"],
+            "target_metric_value": sub_info["target_metric_value"],
             "target_met": target_met,
             "status": status,
             "target_provenance": sub_info.get("target_provenance"),
+            "target_metric_provenance": sub_info.get("target_metric_provenance"),
+            "coverage_metric": sub_info.get("coverage_metric", manifest.get("coverage_metric", {}).get("value")),
+            "coverage_metric_value": sub_info.get("coverage_metric_value"),
+            "coverage_metric_provenance": sub_info.get("coverage_metric_provenance"),
+            "target_coverage": sub_info.get("target_coverage"),
+            "target_coverage_provenance": sub_info.get("target_coverage_provenance"),
+            "target_coverage_met": sub_info.get("target_coverage_met"),
+            "coverage_status": sub_info.get("coverage_status"),
             "rmse": m["rmse"],
+            "rmse_vs_raw_truth": m["rmse_vs_raw_truth"],
+            "rmse_vs_capped_truth": m["rmse_vs_capped_truth"],
+            "share_true_rul_above_cap": m["share_true_rul_above_cap"],
+            "rmse_on_true_rul_le_cap": m["rmse_on_true_rul_le_cap"],
+            "rul_cap": m["rul_cap"],
             "mae": m["mae"],
             "nasa_score": m["nasa_score"],
             "early_rate": m["early_rate"],
             "late_rate": m["late_rate"],
             "pr_auc": m["pr_auc"],
             "interval_coverage": m["interval_coverage"],
+            "coverage_all": m.get("coverage_all", m["interval_coverage"]),
+            "coverage_all_n": m.get("coverage_all_n"),
+            "coverage_all_wilson_ci_95": m.get("coverage_all_wilson_ci_95"),
+            "coverage_le_cap": m.get("coverage_le_cap"),
+            "coverage_le_cap_n": m.get("coverage_le_cap_n"),
+            "coverage_le_cap_wilson_ci_95": m.get("coverage_le_cap_wilson_ci_95"),
+            "coverage_above_cap": m.get("coverage_above_cap"),
+            "coverage_above_cap_n": m.get("coverage_above_cap_n"),
+            "coverage_above_cap_wilson_ci_95": m.get("coverage_above_cap_wilson_ci_95"),
+            "coverage_metric_wilson_ci_95": m.get("coverage_metric_wilson_ci_95"),
+            "n_censored_intervals": m.get("n_censored_intervals"),
             "mean_interval_width": m["mean_interval_width"],
             "cv": sub_info["cv"],
             "deep_comparison": sub_info["comparison_rows"],
@@ -1049,6 +1159,9 @@ def get_model_benchmark():
         "run_id": manifest.get("run_id"),
         "git_sha": manifest.get("git_sha"),
         "config_hash": manifest.get("config_hash"),
+        "target_metric": manifest.get("target_metric"),
+        "coverage_metric": manifest.get("coverage_metric"),
+        "target_coverage": manifest.get("target_coverage"),
         "stale": is_stale,
         "stale_reason": "; ".join(stale_reasons) if stale_reasons else None,
         "benchmarks": benchmarks
@@ -1122,12 +1235,73 @@ def get_model_details(subset: str):
         "late_rate": sub_info["metrics"]["late_rate"],
         "nasa_phm08": eval_res.get("nasa_phm08", {}),
         "target_rmse": sub_info["target_rmse"],
+        "target_metric": sub_info["target_metric"],
+        "target_metric_value": sub_info["target_metric_value"],
+        "target_metric_provenance": sub_info.get("target_metric_provenance"),
         "target_met": sub_info["target_met"],
         "status": "Target Met" if sub_info["target_met"] else "Target Missed",
+        "rmse_vs_raw_truth": sub_info["metrics"]["rmse_vs_raw_truth"],
+        "rmse_vs_capped_truth": sub_info["metrics"]["rmse_vs_capped_truth"],
+        "share_true_rul_above_cap": sub_info["metrics"]["share_true_rul_above_cap"],
+        "rmse_on_true_rul_le_cap": sub_info["metrics"]["rmse_on_true_rul_le_cap"],
+        "rul_cap": sub_info["metrics"]["rul_cap"],
+        "rul_bucket_metrics": sub_info["metrics"]["rul_bucket_metrics"],
+        "calibration": eval_res.get("conformal_buckets") or sub_info.get("calibration", {}),
         "interval_coverage": sub_info["metrics"]["interval_coverage"],
+        "coverage_all": sub_info["metrics"].get("coverage_all", eval_res.get("coverage_all")),
+        "coverage_all_n": sub_info["metrics"].get("coverage_all_n", eval_res.get("coverage_all_n")),
+        "coverage_all_wilson_ci_95": sub_info["metrics"].get(
+            "coverage_all_wilson_ci_95", eval_res.get("coverage_all_wilson_ci_95", [])
+        ),
+        "coverage_le_cap": sub_info["metrics"].get("coverage_le_cap", eval_res.get("coverage_le_cap")),
+        "coverage_le_cap_n": sub_info["metrics"].get("coverage_le_cap_n", eval_res.get("coverage_le_cap_n")),
+        "coverage_le_cap_wilson_ci_95": sub_info["metrics"].get(
+            "coverage_le_cap_wilson_ci_95", eval_res.get("coverage_le_cap_wilson_ci_95", [])
+        ),
+        "coverage_above_cap": sub_info["metrics"].get(
+            "coverage_above_cap", eval_res.get("coverage_above_cap")
+        ),
+        "coverage_above_cap_n": sub_info["metrics"].get(
+            "coverage_above_cap_n", eval_res.get("coverage_above_cap_n")
+        ),
+        "coverage_above_cap_wilson_ci_95": sub_info["metrics"].get(
+            "coverage_above_cap_wilson_ci_95", eval_res.get("coverage_above_cap_wilson_ci_95", [])
+        ),
+        "coverage_split": sub_info["metrics"].get("coverage_split", eval_res.get("coverage_split")),
+        "coverage_rule": sub_info["metrics"].get("coverage_rule", eval_res.get("coverage_rule")),
+        "coverage_metric": sub_info.get("coverage_metric", eval_res.get("coverage_metric")),
+        "coverage_metric_value": sub_info.get(
+            "coverage_metric_value", eval_res.get("coverage_metric_value")
+        ),
+        "coverage_metric_wilson_ci_95": sub_info["metrics"].get(
+            "coverage_metric_wilson_ci_95", eval_res.get("coverage_metric_wilson_ci_95", [])
+        ),
+        "coverage_metric_provenance": sub_info.get(
+            "coverage_metric_provenance", eval_res.get("coverage_metric_provenance")
+        ),
+        "target_coverage": sub_info.get("target_coverage", eval_res.get("target_coverage")),
+        "target_coverage_provenance": sub_info.get(
+            "target_coverage_provenance", eval_res.get("target_coverage_provenance")
+        ),
+        "target_coverage_met": sub_info.get(
+            "target_coverage_met", eval_res.get("target_coverage_met")
+        ),
+        "coverage_status": sub_info.get(
+            "coverage_status",
+            "Coverage Target Met" if eval_res.get("target_coverage_met") else "Coverage Target Missed",
+        ),
+        "n_censored_intervals": sub_info["metrics"].get(
+            "n_censored_intervals", eval_res.get("n_censored_intervals")
+        ),
+        "n_closed_intervals": sub_info["metrics"].get(
+            "n_closed_intervals", eval_res.get("n_closed_intervals")
+        ),
         "mean_interval_width": sub_info["metrics"]["mean_interval_width"],
         "coverage_wilson_ci_95": eval_res.get("coverage_wilson_ci_95", []),
+        "coverage_target": sub_info.get("target_coverage", eval_res.get("coverage_target")),
         "coverage_ci_excludes_80": eval_res.get("coverage_ci_excludes_80", False),
+        "coverage_ci_excludes_target": eval_res.get("coverage_ci_excludes_target", False),
+        "coverage_ci_contains_target": eval_res.get("coverage_ci_contains_target", False),
         "test_rmse_bootstrap_ci_95": eval_res.get("test_rmse_bootstrap_ci_95", []),
         "multi_horizon_metrics": eval_res.get("multi_horizon_metrics", {}),
         "cv_metrics": cv_data,
@@ -1540,9 +1714,9 @@ async def predict_batch(
             except ValueError as ve:
                 raise HTTPException(status_code=422, detail=str(ve))
             c_rul = pred["conservative_rul"]
-            subsys = "HPC"
+            subsys = "Unknown"
             if pred.get("top_contributors"):
-                subsys = pred["top_contributors"][0].get("subsystem", "HPC")
+                subsys = pred["top_contributors"][0].get("subsystem", "Unknown")
             predictions.append({
                 "unit": int(pred["unit"]),
                 "cycle": int(pred["cycle"]),
@@ -1550,6 +1724,8 @@ async def predict_batch(
                 "rul_p10": pred["rul_p10"],
                 "rul_p50": pred["rul_p50"],
                 "rul_p90": pred["rul_p90"],
+                "censored_at_cap": bool(pred.get("censored_at_cap", False)),
+                "interval_label": pred.get("interval_label", "p10-p90"),
                 "fail_prob_10": pred["fail_prob_10"],
                 "fail_prob_30": pred["fail_prob_30"],
                 "fail_prob_60": pred["fail_prob_60"],
@@ -1557,7 +1733,7 @@ async def predict_batch(
                 "anomaly_score": pred["anomaly_score"],
                 "top_sensors": pred.get("top_sensors", []),
                 "suspected_subsystem": subsys,
-                "severity": "CRITICAL" if c_rul <= 15 else ("HIGH" if c_rul <= 30 else ("MEDIUM" if c_rul <= 60 else "HEALTHY"))
+                "severity": triage_agent.get_base_severity(c_rul)
             })
     else:
         from src.features.streaming import StreamingEnginePipeline
@@ -1571,9 +1747,9 @@ async def predict_batch(
                 last_pred = out["prediction"]
             if last_pred:
                 c_rul = last_pred["conservative_rul"]
-                subsys = "HPC"
+                subsys = "Unknown"
                 if last_pred.get("top_contributors"):
-                    subsys = last_pred["top_contributors"][0].get("subsystem", "HPC")
+                    subsys = last_pred["top_contributors"][0].get("subsystem", "Unknown")
                 predictions.append({
                     "unit": int(unit_id),
                     "cycle": int(last_pred["cycle"]),
@@ -1581,6 +1757,8 @@ async def predict_batch(
                     "rul_p10": last_pred["rul_p10"],
                     "rul_p50": last_pred["rul_p50"],
                     "rul_p90": last_pred["rul_p90"],
+                    "censored_at_cap": bool(last_pred.get("censored_at_cap", False)),
+                    "interval_label": last_pred.get("interval_label", "p10-p90"),
                     "fail_prob_10": last_pred["fail_prob_10"],
                     "fail_prob_30": last_pred["fail_prob_30"],
                     "fail_prob_60": last_pred["fail_prob_60"],
@@ -1588,7 +1766,7 @@ async def predict_batch(
                     "anomaly_score": last_pred["anomaly_score"],
                     "top_sensors": last_pred.get("top_sensors", []),
                     "suspected_subsystem": subsys,
-                    "severity": "CRITICAL" if c_rul <= 15 else ("HIGH" if c_rul <= 30 else ("MEDIUM" if c_rul <= 60 else "HEALTHY"))
+                    "severity": triage_agent.get_base_severity(c_rul)
                 })
 
     crit_count = sum(1 for p in predictions if p["severity"] == "CRITICAL")
@@ -1658,7 +1836,9 @@ def get_monitoring_drift(subset: str = Query(default="FD001"), n_cycles: int = Q
     curr_sample = curr_df.sample(min(500,  len(curr_df)), random_state=42)
 
     # GET endpoints never write (persist=False)
-    return mgr.calculate_drift_report(ref_sample, curr_sample, persist=False)
+    report = mgr.calculate_drift_report(ref_sample, curr_sample, persist=False)
+    _cache_drift_share(subset, report)
+    return report
 
 @app.post("/api/v1/monitoring/drift/compute")
 def compute_monitoring_drift(subset: str = Query(default="FD001"), n_cycles: int = Query(default=100)):
@@ -1680,7 +1860,9 @@ def compute_monitoring_drift(subset: str = Query(default="FD001"), n_cycles: int
     curr_sample = curr_window.sample(min(500, len(curr_window)), random_state=42)
 
     # Persists each computation in SQLite table drift_runs
-    return mgr.calculate_drift_report(ref_sample, curr_sample, persist=True)
+    report = mgr.calculate_drift_report(ref_sample, curr_sample, persist=True)
+    _cache_drift_share(subset, report)
+    return report
 
 # ----------------- Observability & Metrics -----------------
 from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
@@ -1752,7 +1934,17 @@ PDM_TEST_RMSE = Gauge(
 )
 PDM_CONFORMAL_COVERAGE = Gauge(
     "pdm_conformal_coverage",
-    "Empirical conformal interval coverage",
+    "Policy conformal interval coverage (coverage_metric from targets.yaml)",
+    ["subset"]
+)
+PDM_CONFORMAL_COVERAGE_ALL = Gauge(
+    "pdm_conformal_coverage_all",
+    "All-engine conformal interval coverage under the censored open-upper-bound rule",
+    ["subset"]
+)
+PDM_CONFORMAL_COVERAGE_LE_CAP = Gauge(
+    "pdm_conformal_coverage_le_cap",
+    "Conformal interval coverage for true RUL at or below the cap",
     ["subset"]
 )
 PDM_ARTIFACT_HASH_INFO = Gauge(
@@ -1770,6 +1962,17 @@ _artifact_hash_cache: Dict[str, Dict[str, Any]] = {}
 _metrics_drift_cache: Dict[str, Any] = {"computed_at": 0.0, "values": {}}
 _metrics_alert_cache: Dict[str, Any] = {"computed_at": 0.0, "values": []}
 _alert_manager_singleton = None
+
+
+def _cache_drift_share(subset: str, report: Dict[str, Any]) -> None:
+    """Cache a computed drift share so /metrics remains a fast scrape."""
+    share = report.get("share_drifting_features")
+    if share is None:
+        return
+    values = dict(_metrics_drift_cache["values"])
+    values[subset] = float(share)
+    _metrics_drift_cache["values"] = values
+    _metrics_drift_cache["computed_at"] = time.time()
 
 
 def _sha256_file(path: Path) -> str:
@@ -1813,22 +2016,24 @@ def refresh_artifact_metrics(force: bool = False) -> Dict[str, str]:
     return hashes
 
 
-def refresh_live_drift_metrics(max_age_seconds: float = 30.0, force: bool = False) -> Dict[str, float]:
-    """Refreshes live drift shares at most once per cache window.
+def refresh_live_drift_metrics(
+    force: bool = False,
+    subsets: Optional[List[str]] = None,
+) -> Dict[str, float]:
+    """Return cached live drift shares; never load parquet during a scrape.
 
-    ``/metrics`` must remain a fast scrape (p99 < 0.5 s), so it reads this cache
-    instead of recomputing PSI/KS for every subset on every scrape.  Startup
-    warms the cache; if startup has not run yet, the caller receives an empty
-    snapshot and existing gauge values remain untouched.
+    ``/metrics`` must remain a fast scrape (p99 < 0.5 s), so the endpoint only
+    reads this cache. Monitoring endpoints populate it when they compute drift;
+    callers can also refresh explicitly with ``force=True, subsets=[...]``
+    without blocking startup. Startup never loads train/test frames for metrics
+    on memory-constrained instances.
     """
-    now = time.time()
-    if not force and not _metrics_drift_cache["values"]:
-        return {}
-    if not force and _metrics_drift_cache["values"] and now - _metrics_drift_cache["computed_at"] < max_age_seconds:
+    if not force:
         return _metrics_drift_cache["values"]
 
-    values: Dict[str, float] = {}
-    for sub in ["FD001", "FD002", "FD003", "FD004"]:
+    target_subsets = subsets or CONFIGURED_SUBSETS
+    values: Dict[str, float] = dict(_metrics_drift_cache["values"])
+    for sub in target_subsets:
         try:
             train_df = get_dataframe("train", sub)
             test_df = get_dataframe("test", sub)
@@ -1842,7 +2047,7 @@ def refresh_live_drift_metrics(max_age_seconds: float = 30.0, force: bool = Fals
         except Exception:
             continue
     _metrics_drift_cache["values"] = values
-    _metrics_drift_cache["computed_at"] = now
+    _metrics_drift_cache["computed_at"] = time.time()
     return values
 
 
@@ -1865,8 +2070,11 @@ def refresh_alert_metrics(max_age_seconds: float = 30.0, force: bool = False) ->
 
 @app.on_event("startup")
 async def _startup_artifact_metrics():
+    # Hashing the manifest/bundles is bounded (~27 MB) and keeps the first
+    # Prometheus scrape fast. Drift needs train/test data, so it is never
+    # computed during startup; /metrics reads the cached value and monitoring
+    # endpoints populate it on demand.
     refresh_artifact_metrics(force=True)
-    refresh_live_drift_metrics(force=True)
     refresh_alert_metrics(force=True)
 
 
@@ -1898,7 +2106,16 @@ def get_metrics():
                 with open(eval_f, "r", encoding="utf-8") as f:
                     ev = json.load(f)
                 PDM_TEST_RMSE.labels(subset=sub).set(float(ev["rmse"]))
-                PDM_CONFORMAL_COVERAGE.labels(subset=sub).set(float(ev["interval_coverage"]))
+                metric_name = ev.get("coverage_metric", "coverage_all")
+                PDM_CONFORMAL_COVERAGE.labels(subset=sub).set(
+                    float(ev.get(metric_name, ev.get("interval_coverage", 0.0)))
+                )
+                PDM_CONFORMAL_COVERAGE_ALL.labels(subset=sub).set(
+                    float(ev.get("coverage_all", ev.get("interval_coverage", 0.0)))
+                )
+                PDM_CONFORMAL_COVERAGE_LE_CAP.labels(subset=sub).set(
+                    float(ev.get("coverage_le_cap", 0.0))
+                )
             except Exception:
                 pass
 
@@ -1921,7 +2138,8 @@ def get_metrics():
                 pass
         CHAMPION_INFO.labels(subset=sub, version=v).set(1.0)
 
-    # 4. Update drift_share{subset} from the startup-warmed cache (never compute on scrape)
+    # 4. Update drift_share{subset} from the cache populated by monitoring calls.
+    #    Scrapes never load parquet data.
     drift_values = refresh_live_drift_metrics()
     for sub in ["FD001", "FD002", "FD003", "FD004"]:
         DRIFT_SHARE.labels(subset=sub).set(float(drift_values.get(sub) or 0.0))
@@ -1986,7 +2204,7 @@ def test_monitoring_webhook(
 def get_engine_prescriptions(engine_id: str, cycle: int = Query(default=30)):
     order = triage_agent.open_orders.get(engine_id)
     cons_rul = order["conservative_rul"] if order else 35.0
-    subsystem = order["suspected_subsystem"] if order else "HPC"
+    subsystem = order["suspected_subsystem"] if order else "Unknown"
     severity = order["severity"] if order else "MEDIUM"
     
     status_dict = {
@@ -2010,7 +2228,7 @@ async def execute_self_healing_action(
 ):
     order = triage_agent.open_orders.get(engine_id)
     cons_rul = order["conservative_rul"] if order else 35.0
-    subsystem = order["suspected_subsystem"] if order else "HPC"
+    subsystem = order["suspected_subsystem"] if order else "Unknown"
     
     res = self_healing_engine.execute_action(
         engine_id=engine_id,

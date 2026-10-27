@@ -68,6 +68,7 @@ export const ModelLabTab: React.FC = () => {
   }, [selectedSub]);
 
   const targetsMetCount = benchmarks.filter((b) => b.target_met === true).length;
+  const coverageMetCount = benchmarks.filter((b) => b.target_coverage_met === true).length;
   const bucketErrors = modelDetails?.bucket_errors || [];
   const featureImportances = modelDetails?.feature_importance || [];
   const comparisonModels = comparison?.models || [];
@@ -126,15 +127,21 @@ export const ModelLabTab: React.FC = () => {
             <h3 className="font-bold text-base text-white">C-MAPSS Benchmark Leaderboard (FD001 – FD004)</h3>
           </div>
           <span className={`text-xs px-3 py-1 rounded-full font-semibold border ${
-            targetsMetCount === benchmarks.length && benchmarks.length > 0
+            targetsMetCount === benchmarks.length && coverageMetCount === benchmarks.length && benchmarks.length > 0
               ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
               : "bg-indigo-500/20 text-indigo-300 border-indigo-500/30"
           }`}>
-            {benchmarks.length > 0 ? `${targetsMetCount} of ${benchmarks.length} Targets Met` : "Evaluating..."}
+            {benchmarks.length > 0
+              ? `${targetsMetCount}/${benchmarks.length} RMSE · ${coverageMetCount}/${benchmarks.length} Coverage`
+              : "Evaluating..."}
           </span>
         </div>
         <p className="text-xs text-slate-400">
           Official protocol: Evaluated on the final cycle of each held-out test engine. Asymmetric NASA Score penalizes late predictions exponentially.
+          Censored predictions (calibrated upper bound reaches the RUL cap) are scored as open-ended <span className="font-mono">&gt;cap</span> intervals.
+          {benchmarkMeta?.target_metric?.value && (
+            <> RMSE policy is <span className="font-mono text-indigo-300">{benchmarkMeta.target_metric.value}</span>; coverage policy is <span className="font-mono text-emerald-300">{benchmarkMeta?.coverage_metric?.value ?? "coverage_le_cap"}</span>.</>
+          )}
         </p>
 
         <div className="overflow-x-auto">
@@ -144,12 +151,18 @@ export const ModelLabTab: React.FC = () => {
                 <th className="p-3.5">Subset</th>
                 <th className="p-3.5">Conditions</th>
                 <th className="p-3.5">Fault Modes</th>
-                <th className="p-3.5 font-mono">Test RMSE</th>
-                <th className="p-3.5 font-mono">Target RMSE</th>
+                <th className="p-3.5 font-mono">RMSE (Raw Truth)</th>
+                <th className="p-3.5 font-mono">RMSE (Capped Truth)</th>
+                <th className="p-3.5 font-mono">True RUL &gt; Cap</th>
+                <th className="p-3.5 font-mono">RMSE (RUL ≤ Cap)</th>
+                <th className="p-3.5 font-mono">Target Metric</th>
                 <th className="p-3.5 font-mono">NASA Score</th>
                 <th className="p-3.5 font-mono">PR-AUC</th>
+                <th className="p-3.5 font-mono">Coverage (All)</th>
+                <th className="p-3.5 font-mono">Coverage (RUL ≤ Cap)</th>
                 <th className="p-3.5 font-mono">Train Time</th>
-                <th className="p-3.5 text-center">Status</th>
+                <th className="p-3.5 text-center">RMSE Status</th>
+                <th className="p-3.5 text-center">Coverage Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 font-mono">
@@ -167,8 +180,19 @@ export const ModelLabTab: React.FC = () => {
                   </td>
                   <td className="p-3.5 text-slate-300 font-sans">{row.condition}</td>
                   <td className="p-3.5 text-slate-400 font-sans">{row.faults}</td>
-                  <td className="p-3.5 text-cyan-300 font-bold">{row.rmse}</td>
-                  <td className="p-3.5 text-slate-500">≤ {row.target_rmse}</td>
+                  <td className="p-3.5 text-cyan-300 font-bold">{row.rmse_vs_raw_truth}</td>
+                  <td className="p-3.5 text-indigo-300">{row.rmse_vs_capped_truth}</td>
+                  <td className="p-3.5 text-slate-300">
+                    {typeof row.share_true_rul_above_cap === "number"
+                      ? `${(row.share_true_rul_above_cap * 100).toFixed(1)}%`
+                      : "—"}
+                  </td>
+                  <td className="p-3.5 text-emerald-300">{row.rmse_on_true_rul_le_cap ?? "—"}</td>
+                  <td className="p-3.5 text-slate-400">
+                    <span className="block text-[10px] text-slate-500">{row.target_metric}</span>
+                    <span className="text-slate-300">{row.target_metric_value}</span>
+                    <span className="block text-[10px] text-slate-500">target ≤ {row.target_rmse}</span>
+                  </td>
                   <td className="p-3.5 text-purple-300">
                     <span className="font-bold">{row.nasa_score}</span>
                     {row.early_rate !== undefined && (
@@ -178,6 +202,14 @@ export const ModelLabTab: React.FC = () => {
                     )}
                   </td>
                   <td className="p-3.5 text-emerald-400">{row.pr_auc}</td>
+                  <td className="p-3.5 text-slate-300">
+                    {typeof row.coverage_all === "number" ? `${(row.coverage_all * 100).toFixed(1)}%` : "—"}
+                    <span className="block text-[10px] text-slate-500">n={row.coverage_all_n ?? "—"}</span>
+                  </td>
+                  <td className="p-3.5 text-emerald-300">
+                    {typeof row.coverage_le_cap === "number" ? `${(row.coverage_le_cap * 100).toFixed(1)}%` : "—"}
+                    <span className="block text-[10px] text-slate-500">n={row.coverage_le_cap_n ?? "—"}</span>
+                  </td>
                   <td className="p-3.5 text-slate-400">{row.train_time_sec}s</td>
                   <td className="p-3.5 text-center">
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
@@ -188,10 +220,59 @@ export const ModelLabTab: React.FC = () => {
                       {row.target_met === true ? "Target Met" : row.target_met === false ? "Target Missed" : "No Data"}
                     </span>
                   </td>
+                  <td className="p-3.5 text-center">
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
+                      row.target_coverage_met === true
+                        ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
+                        : "bg-amber-500/20 text-amber-300 border-amber-500/30"
+                    }`}>
+                      {row.target_coverage_met === true ? "Coverage Met" : row.target_coverage_met === false ? "Coverage Missed" : "No Data"}
+                    </span>
+                    <span className="block text-[9px] text-slate-500 font-sans">target ≥ {((row.target_coverage ?? 0.8) * 100).toFixed(0)}%</span>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+
+        <div className="pt-2">
+          <div className="flex items-center gap-2 mb-2">
+            <Layers className="w-4 h-4 text-cyan-400" />
+            <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+              {selectedSub} RUL-Bucket Error Breakdown
+            </h4>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-slate-900/80 text-slate-400 uppercase tracking-wider font-semibold border-b border-slate-800">
+                <tr>
+                  <th className="p-2.5">RUL Bucket</th>
+                  <th className="p-2.5 font-mono">Test Engines</th>
+                  <th className="p-2.5 font-mono">RMSE (Raw)</th>
+                  <th className="p-2.5 font-mono">RMSE (Capped)</th>
+                  <th className="p-2.5 font-mono">True RUL &gt; Cap</th>
+                  <th className="p-2.5 font-mono">RMSE (RUL ≤ Cap)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60 font-mono">
+                {(modelDetails?.rul_bucket_metrics || []).map((bucket: any) => (
+                  <tr key={`${bucket.bucket}-${bucket.lower}-${bucket.upper}`}>
+                    <td className="p-2.5 text-slate-200 font-sans">{bucket.bucket}</td>
+                    <td className="p-2.5 text-slate-400">{bucket.sample_count}</td>
+                    <td className="p-2.5 text-cyan-300">{bucket.rmse_vs_raw_truth ?? "—"}</td>
+                    <td className="p-2.5 text-indigo-300">{bucket.rmse_vs_capped_truth ?? "—"}</td>
+                    <td className="p-2.5 text-slate-300">
+                      {typeof bucket.share_true_rul_above_cap === "number"
+                        ? `${(bucket.share_true_rul_above_cap * 100).toFixed(1)}%`
+                        : "—"}
+                    </td>
+                    <td className="p-2.5 text-emerald-300">{bucket.rmse_on_true_rul_le_cap ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
@@ -237,7 +318,7 @@ export const ModelLabTab: React.FC = () => {
           <div className="bg-slate-900/80 p-4 rounded-2xl border border-slate-800 space-y-1">
             <div className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">5-Fold Group CV (Train)</div>
             <div className="text-xl font-black font-mono text-cyan-300">
-              {modelDetails?.cv_metrics ? `${modelDetails.cv_metrics.mean_rmse} ± ${modelDetails.cv_metrics.std_rmse}` : "13.06 ± 0.95"}
+              {modelDetails?.cv_metrics ? `${modelDetails.cv_metrics.mean_rmse} ± ${modelDetails.cv_metrics.std_rmse}` : "—"}
             </div>
             <div className="text-[10px] text-slate-500">GroupKFold-5 on train units only</div>
           </div>
@@ -252,19 +333,41 @@ export const ModelLabTab: React.FC = () => {
 
           <div className="bg-slate-900/80 p-4 rounded-2xl border border-slate-800 space-y-1">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Conformal Coverage</span>
-              {modelDetails?.coverage_ci_excludes_80 && (
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-semibold">
-                  CI &lt; 80%
-                </span>
-              )}
+              <span className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Censored Coverage Split</span>
+              <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${
+                modelDetails?.target_coverage_met
+                  ? "bg-emerald-500/20 text-emerald-300"
+                  : "bg-amber-500/20 text-amber-300"
+              }`}>
+                {modelDetails?.target_coverage_met ? "Policy Met" : "Policy Missed"}
+              </span>
             </div>
-            <div className="text-xl font-black font-mono text-emerald-400">
-              {modelDetails?.interval_coverage ? `${(modelDetails.interval_coverage * 100).toFixed(1)}%` : "—"}
+            <div className="flex items-baseline justify-between gap-2 font-mono">
+              <span className="text-[10px] text-slate-500">All</span>
+              <span className="text-lg font-black text-emerald-400">
+                {typeof modelDetails?.coverage_all === "number" ? `${(modelDetails.coverage_all * 100).toFixed(1)}%` : "—"}
+              </span>
+              <span className="text-[10px] text-slate-500">
+                CI {modelDetails?.coverage_all_wilson_ci_95 ? `[${(modelDetails.coverage_all_wilson_ci_95[0] * 100).toFixed(1)}, ${(modelDetails.coverage_all_wilson_ci_95[1] * 100).toFixed(1)}]` : "—"} · n={modelDetails?.coverage_all_n ?? "—"}
+              </span>
+            </div>
+            <div className="flex items-baseline justify-between gap-2 font-mono">
+              <span className="text-[10px] text-slate-500">≤ cap</span>
+              <span className="text-lg font-black text-cyan-300">
+                {typeof modelDetails?.coverage_le_cap === "number" ? `${(modelDetails.coverage_le_cap * 100).toFixed(1)}%` : "—"}
+              </span>
+              <span className="text-[10px] text-slate-500">
+                CI {modelDetails?.coverage_le_cap_wilson_ci_95 ? `[${(modelDetails.coverage_le_cap_wilson_ci_95[0] * 100).toFixed(1)}, ${(modelDetails.coverage_le_cap_wilson_ci_95[1] * 100).toFixed(1)}]` : "—"} · n={modelDetails?.coverage_le_cap_n ?? "—"}
+              </span>
             </div>
             <div className="text-[10px] text-slate-500 font-mono">
-              Wilson 95% CI: {modelDetails?.coverage_wilson_ci_95 ? `[${(modelDetails.coverage_wilson_ci_95[0] * 100).toFixed(1)}%, ${(modelDetails.coverage_wilson_ci_95[1] * 100).toFixed(1)}%]` : "—"}
+              Policy {modelDetails?.coverage_metric ?? "coverage_le_cap"} ≥ {((modelDetails?.target_coverage ?? 0.8) * 100).toFixed(0)}%
             </div>
+            {modelDetails?.calibration && (
+              <div className="text-[10px] text-slate-500 font-mono">
+                Nominal {(modelDetails.calibration.nominal_level * 100).toFixed(0)}% · Validation {((modelDetails.calibration.validation_coverage ?? 0) * 100).toFixed(1)}% · n={modelDetails.calibration.validation_sample_count ?? modelDetails.calibration.n_calibration}
+              </div>
+            )}
           </div>
 
           <div className="bg-slate-900/80 p-4 rounded-2xl border border-slate-800 space-y-1">
@@ -390,7 +493,7 @@ export const ModelLabTab: React.FC = () => {
           <div className="bg-slate-900/80 p-4 rounded-2xl border border-slate-800 space-y-1">
             <div className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">2. 5-Fold CV RMSE (Validation)</div>
             <div className="text-2xl font-black font-mono text-indigo-300">
-              {genGap?.val_rmse ? Number(genGap.val_rmse).toFixed(2) : (modelDetails?.cv_metrics?.mean_rmse ? Number(modelDetails.cv_metrics.mean_rmse).toFixed(2) : "13.06")} <span className="text-xs font-sans text-slate-500 font-normal">cyc</span>
+              {genGap?.val_rmse ? Number(genGap.val_rmse).toFixed(2) : (modelDetails?.cv_metrics?.mean_rmse ? Number(modelDetails.cv_metrics.mean_rmse).toFixed(2) : "—")} <span className="text-xs font-sans text-slate-500 font-normal">cyc</span>
             </div>
             <div className="text-[10px] text-slate-500">GroupKFold on unseen engine units</div>
           </div>
@@ -398,7 +501,7 @@ export const ModelLabTab: React.FC = () => {
           <div className="bg-slate-900/80 p-4 rounded-2xl border border-slate-800 space-y-1">
             <div className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">3. Held-Out Test RMSE</div>
             <div className="text-2xl font-black font-mono text-purple-300">
-              {genGap?.test_rmse ? Number(genGap.test_rmse).toFixed(2) : (modelDetails?.rmse ? Number(modelDetails.rmse).toFixed(2) : "13.30")} <span className="text-xs font-sans text-slate-500 font-normal">cyc</span>
+              {genGap?.test_rmse ? Number(genGap.test_rmse).toFixed(2) : (modelDetails?.rmse ? Number(modelDetails.rmse).toFixed(2) : "—")} <span className="text-xs font-sans text-slate-500 font-normal">cyc</span>
             </div>
             <div className="text-[10px] text-slate-500">Official held-out test engines</div>
           </div>
@@ -621,8 +724,10 @@ export const ModelLabTab: React.FC = () => {
                               <span className="text-indigo-300 font-bold">{data.predicted} cyc</span>
                             </div>
                             <div className="flex justify-between">
-                              <span className="text-slate-400">80% Interval:</span>
-                              <span className="text-slate-300">[{data.p10}, {data.p90}] cyc</span>
+                              <span className="text-slate-400">{data.censored_at_cap ? "Open interval:" : "80% Interval:"}</span>
+                              <span className="text-slate-300">
+                                {data.censored_at_cap ? `> ${data.p10} cyc (upper open)` : `[${data.p10}, ${data.p90}] cyc`}
+                              </span>
                             </div>
                             <div className="flex justify-between pt-1 border-t border-slate-800/80">
                               <span className="text-slate-400">Delta Error (d):</span>

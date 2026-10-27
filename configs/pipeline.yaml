@@ -137,15 +137,23 @@ conformal:
   target_coverage:
     value: 0.80
     kind: policy
-    source: "Target empirical interval coverage for held-out test engines"
-  calibration_alpha:
-    value: 0.10
+    source: "Target empirical interval coverage for held-out validation engines; test coverage is reported separately as a diagnostic."
+  nominal_levels:
+    value: [0.80, 0.85, 0.90, 0.95]
     kind: policy
-    source: "Nominal 90% split-conformal quantile used as a finite-sample and train-to-test safety margin for multi-regime subsets"
-  calibration_alpha_single_regime:
-    value: 0.20
+    source: "Candidate nominal conformal levels evaluated on the held-out validation-engine fold; the smallest level meeting target coverage is selected."
+  validation_draws:
+    value: 10
     kind: policy
-    source: "Nominal 80% split-conformal quantile for single-regime subsets, where calibration/test heterogeneity is lower"
+    source: "Independent truncation draws per held-out validation engine; at least 10 are required so Wilson lower bounds are not dominated by sampling noise."
+  selection_tolerance:
+    value: 0.03
+    kind: policy
+    source: "Allowed shortfall between the validation Wilson lower bound and target coverage when selecting a nominal level; prevents an optimistic point estimate from promoting an under-covering interval."
+  cross_conformal_folds:
+    value: 3
+    kind: policy
+    source: "Number of engine-disjoint folds used to generate out-of-fold quantile residuals across all non-test engines for cross-conformal calibration."
   n_buckets:
     value: 3
     kind: policy

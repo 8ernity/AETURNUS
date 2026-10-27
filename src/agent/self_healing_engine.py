@@ -121,10 +121,10 @@ class SelfHealingEngine:
         Contains no invented numbers or synthetic physics parameters.
         """
         engine_id = str(engine_status.get("engine_id", "unknown"))
-        cycle = int(engine_status.get("cycle", 1))
+        cycle = int(engine_status["cycle"])
         cons_rul = float(engine_status["conservative_rul"])
         severity = str(engine_status.get("severity", "MEDIUM")).upper()
-        subsystem = str(engine_status.get("suspected_subsystem", "HPC"))
+        subsystem = str(engine_status.get("suspected_subsystem", "Unknown"))
 
         rule_actions = {
             "CRITICAL": f"Immediate shutdown and remove from service. Perform emergent overhaul of {subsystem}.",

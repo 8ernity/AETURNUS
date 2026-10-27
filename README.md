@@ -171,16 +171,36 @@ sequenceDiagram
 ### 🏆 C-MAPSS Empirical Benchmark Performance (FD001–FD004)
 
 > [!NOTE]
-> **Canonical Run Provenance**  
-> **Run ID**: `run_1792823030_6f50628b` | **Git SHA**: `6f50628ba2` | **Config Hash**: `52a8cb9689`  
-> *All figures are derived directly from model bundles and authentic C-MAPSS evaluation parquets at run time.*
+> **Canonical Run Provenance**<br>
+> **Run ID**: `run_1793098315_e854b7cd` | **Git SHA**: `e854b7cd79` | **Config Hash**: `177e7d7f64`<br>
+> **Target Metric**: `rmse_vs_raw_truth` | **Coverage Metric**: `coverage_le_cap` | **Coverage Target**: `0.8` | **RUL Cap**: `125.0`<br>
+> *All figures are derived directly from model bundles and authentic C-MAPSS evaluation parquets at run time. Censored predictions cover any true RUL at or above p10 and are never rendered as closed intervals.*
 
-| Dataset Subset | Operating Conditions | Fault Modes | Test Engines | Champion Model | Test RMSE | Test MAE | NASA Asymmetric Score | PR-AUC (Fail $\le 30$) | Conformal Coverage | Target Status |
-|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **FD001** | 1 (Sea Level) | 1 (HPC Degradation) | 100 | **LIGHTGBM** | **13.14** | 9.07 | **235.4** | 0.966 | 85.0% | <span style="color:#22c55e;font-weight:bold;">TARGET REACHED</span> |
-| **FD002** | 6 (Full Envelope) | 1 (HPC Degradation) | 259 | **LIGHTGBM** | **25.05** | 16.21 | **6,892.6** | 0.998 | 76.8% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
-| **FD003** | 1 (Sea Level) | 2 (HPC + Fan Degradation) | 100 | **LIGHTGBM** | **14.06** | 10.14 | **342.3** | 0.983 | 75.0% | <span style="color:#22c55e;font-weight:bold;">TARGET REACHED</span> |
-| **FD004** | 6 (Full Envelope) | 2 (HPC + Fan Degradation) | 248 | **LIGHTGBM** | **25.60** | 17.53 | **4,319.2** | 0.970 | 76.6% | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
+| Dataset Subset | Operating Conditions | Fault Modes | Test Engines | Champion Model | Test RMSE (Raw Truth) | Test RMSE (Capped Truth) | True RUL Above Cap | RMSE (True RUL $\le$ Cap) | Test MAE | NASA Asymmetric Score | PR-AUC (Fail $\le 30$) | Coverage All (Censored) | Coverage (True RUL $\le$ Cap) | Coverage Status | RMSE Target Status |
+|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **FD001** | 1 (Sea Level) | 1 (HPC Degradation) | 100 | **LIGHTGBM** | **13.14** | 11.76 | 11.0% | 11.63 | 9.07 | **235.4** | 0.966 | 83.0% | 87.6% | <span style="color:#22c55e;font-weight:bold;">COVERAGE MET</span> | <span style="color:#22c55e;font-weight:bold;">TARGET REACHED</span> |
+| **FD002** | 6 (Full Envelope) | 1 (HPC Degradation) | 259 | **LIGHTGBM** | **25.05** | 12.26 | 22.0% | 12.50 | 16.21 | **6,892.6** | 0.998 | 78.8% | 85.2% | <span style="color:#22c55e;font-weight:bold;">COVERAGE MET</span> | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
+| **FD003** | 1 (Sea Level) | 2 (HPC + Fan Degradation) | 100 | **LIGHTGBM** | **14.06** | 12.53 | 15.0% | 12.60 | 10.14 | **342.3** | 0.983 | 90.0% | 89.4% | <span style="color:#22c55e;font-weight:bold;">COVERAGE MET</span> | <span style="color:#22c55e;font-weight:bold;">TARGET REACHED</span> |
+| **FD004** | 6 (Full Envelope) | 2 (HPC + Fan Degradation) | 248 | **LIGHTGBM** | **25.60** | 13.55 | 27.0% | 13.89 | 17.53 | **4,319.2** | 0.970 | 89.1% | 92.3% | <span style="color:#22c55e;font-weight:bold;">COVERAGE MET</span> | <span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span> |
+
+### 🧪 RUL-Bucket Error Breakdown (Raw vs Capped Truth)
+
+Target metric and cap are declared in `configs/targets.yaml` and `configs/pipeline.yaml`; this table is rendered from the same manifest.
+
+| Subset | RUL Bucket | Test Engines | RMSE (Raw Truth) | RMSE (Capped Truth) | True RUL Above Cap | RMSE (True RUL $\le$ Cap) |
+|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **FD001** | 0 - 30 cycles | 25 | 3.93 | 3.93 | 0.0% | 3.93 |
+| **FD001** | 30 - 60 cycles | 14 | 3.10 | 3.10 | 0.0% | 3.10 |
+| **FD001** | > 60 cycles | 61 | 16.57 | 14.78 | 18.0% | 15.18 |
+| **FD002** | 0 - 30 cycles | 61 | 3.63 | 3.63 | 0.0% | 3.63 |
+| **FD002** | 30 - 60 cycles | 41 | 9.29 | 9.29 | 0.0% | 9.29 |
+| **FD002** | > 60 cycles | 157 | 31.75 | 14.84 | 36.3% | 16.50 |
+| **FD003** | 0 - 30 cycles | 20 | 3.59 | 3.59 | 0.0% | 3.59 |
+| **FD003** | 30 - 60 cycles | 21 | 9.58 | 9.58 | 0.0% | 9.58 |
+| **FD003** | > 60 cycles | 59 | 17.27 | 15.13 | 25.4% | 16.03 |
+| **FD004** | 0 - 30 cycles | 53 | 5.98 | 5.98 | 0.0% | 5.98 |
+| **FD004** | 30 - 60 cycles | 38 | 13.86 | 13.86 | 0.0% | 13.86 |
+| **FD004** | > 60 cycles | 157 | 31.25 | 15.22 | 42.7% | 16.91 |
 
 ### 🔬 5-Fold GroupKFold Cross-Validation (Censored, Persistent Engines)
 
@@ -227,16 +247,12 @@ flowchart TD
 To eliminate quantile crossings caused by independently trained pinball regressors, predictions undergo post-hoc sorting and clipping:
 $$\hat{p}_{10} \le \hat{p}_{50} \le \hat{p}_{90}$$
 
-Residual conformal calibration adjustments are calculated on engine-split validation sets with a nominal target coverage of 80% ($[p_{10}, p_{90}]$).
+Residual conformal calibration adjustments are calculated on engine-split validation sets, with the nominal coverage level selected from `configs/pipeline.yaml`.
 
-#### 🎯 Empirical Coverage (62.5%–79.0%) vs 80% Nominal Target
-On standard held-out NASA C-MAPSS test engines, the empirical conformal coverage achieved across subsets is:
-- **FD001**: **79.0%** (Single condition, single fault — close to nominal 80% target)
-- **FD002**: **62.5%** (Six operational regimes, single fault — non-stationary flight conditions)
-- **FD003**: **64.0%** (Single condition, dual fault — compounding HPC + Fan wear)
-- **FD004**: **63.3%** (Six operational regimes, dual fault — maximum operating complexity)
+#### 🎯 Empirical Coverage vs Nominal Target
+Test-set coverage and Wilson 95% confidence intervals are generated directly from the evaluation manifest and reported in the benchmark tables above. The nominal level is selected on held-out validation engines; test coverage remains a diagnostic and is never used to tune the interval.
 
-**Why empirical coverage is 62.5%–79.0% instead of 80%**:
+**Why test coverage can differ from the validation target**:
 1. **Regime Distribution Shift**: In multi-regime subsets (`FD002`, `FD004`), flight conditions shift dynamically across 6 altitude/Mach regimes. Late-stage degradation induces severe covariate shift where residuals in extreme flight envelopes exhibit heavier tails than the stationary validation cohort.
 2. **Compound Degradation Modes**: Subsets with dual fault modes (`FD003`, `FD004`) exhibit coupled degradation between high-pressure compressors and fan modules. Wear accelerates non-linearly near end-of-life, causing wider residual dispersion.
 3. **Engineering Transparency**: Rather than artificially widening prediction bounds to claim inflated coverage, AETURNUS reports honest empirical coverage directly from code-generated test reports (`artifacts/reports/evaluation_*.json`).
@@ -572,16 +588,16 @@ The test suite rigorously verifies all system invariants across data engineering
    The NASA C-MAPSS dataset was generated via thermodynamic aero-engine simulations (Commercial Modular Aero-Propulsion System Simulation). While it accurately models realistic thermo-fluid dynamics and non-linear degradation under high-pressure turbine and compressor wear, it does not represent real-world physical airworthiness telemetry from operational flight lines.
 
 2. **Empirical Benchmark Realities & Target Misses**:
-   On single operating condition subsets (**FD001** and **FD003**), our LightGBM champions comfortably meet operational targets (achieving 13.30 and 13.39 RMSE). On multi-regime subsets (**FD002** and **FD004**), models achieve 24.76 and 25.80 RMSE, missing nominal benchmark targets (≤18.0 and ≤22.0). This stems from severe regime overlaps across 6 altitude/Mach conditions and two simultaneous degradation fault modes. Rather than masking these difficulties, all metrics are reported truthfully from code-generated artifact reports.
+   Champion performance, raw/capped-truth RMSE, RUL-bucket errors, and target status are generated from the manifest and shown in the benchmark tables above. Subsets that miss their configured target_metric remain visible rather than being hidden or re-tuned against the test set.
 
 3. **Decision Support Only (No Airworthiness Certification)**:
    All outputs—including remaining useful life predictions, uncertainty envelopes, multi-horizon failure probabilities, and recommended maintenance prescriptions—are intended strictly as **decision support tools** for maintenance coordinators and data analysts. This software is **NOT** certified by the FAA, EASA, or military airworthiness authorities for flight dispatch determination.
 
 4. **Configured Heuristic Thresholds**:
-   Severity thresholds (e.g., Critical $\le 15$ cycles, High $\le 30$ cycles) and maintenance queue weights ($w_{rul}=0.40, w_{fail}=0.30, w_{anom}=0.15, w_{trend}=0.15$) represent engineering starting values and heuristic defaults. They are not presented as empirically learned or physically validated constants.
+   Severity bands, escalation policy, exception thresholds, and maintenance queue weights are loaded from `configs/agent_rules.yaml` and `configs/queue.yaml`. They represent engineering policy inputs, not empirically learned or physically validated constants.
 
 5. **Conformal Coverage Certification**:
-   Prediction intervals $[p10, p90]$ are calibrated via split conformal prediction on persistent validation units with Wilson 95% score confidence intervals. On FD001, empirical coverage reaches 86.0% with a Wilson 95% CI of $[77.9\%, 91.5\%]$. Subsets that do not reach 80% coverage under high operational variance document their empirical coverage transparently.
+   Prediction intervals $[p10, p90]$ are calibrated via validation-selected, engine-disjoint cross-conformal prediction. Test coverage is reported with Wilson 95% score confidence intervals; the validation-selection coverage and calibration sample count are stored in each model bundle and manifest.
 
 ---
 

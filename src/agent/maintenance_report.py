@@ -139,14 +139,22 @@ def generate_maintenance_report_pdf(engine_id: str, data: Dict[str, Any]) -> byt
     p50_value = pred_rul.get("p50", data.get("rul_p50"))
     p90_value = pred_rul.get("p90", data.get("rul_p90"))
     conservative_value = data.get("conservative_rul")
-    if p10_value is None or p50_value is None or p90_value is None or conservative_value is None:
+    censored_at_cap = bool(
+        data.get("censored_at_cap", pred_rul.get("censored_at_cap", p90_value is None))
+    )
+    if p10_value is None or p50_value is None or conservative_value is None:
         raise ValueError(
-            "Maintenance report requires RUL p10/p50/p90 and conservative_rul; "
+            "Maintenance report requires RUL p10/p50 and conservative_rul; "
             "numeric report defaults are not allowed."
+        )
+    if not censored_at_cap and p90_value is None:
+        raise ValueError(
+            "Maintenance report requires a finite p90 for closed intervals or an "
+            "explicit censored_at_cap flag for open intervals."
         )
     p10 = float(p10_value)
     p50 = float(p50_value)
-    p90 = float(p90_value)
+    p90 = None if censored_at_cap else float(p90_value)
     conservative_rul = float(conservative_value)
 
     # 3. Target Asset & Report Summary Table
@@ -214,13 +222,28 @@ def generate_maintenance_report_pdf(engine_id: str, data: Dict[str, Any]) -> byt
         ],
         [
             Paragraph("Quantile p90 (Upper Bound)", body_style),
-            Paragraph(f"{p90:.1f}", body_style),
-            Paragraph("10% probability that remaining life exceeds this duration", body_style)
+            Paragraph("Open (> p10)" if censored_at_cap else f"{p90:.1f}", body_style),
+            Paragraph(
+                "Censored at the RUL cap; no finite upper bound is reported"
+                if censored_at_cap
+                else "10% probability that remaining life exceeds this duration",
+                body_style,
+            )
         ],
         [
             Paragraph("80% Empirical Interval", body_style),
-            Paragraph(f"[{p10:.1f} - {p90:.1f}]", body_style),
-            Paragraph(f"Interval breadth: {(p90 - p10):.1f} cycles (coverage calibrated ~80%)", body_style)
+            Paragraph(
+                f"> {p10:.1f} cycles (upper open)"
+                if censored_at_cap
+                else f"[{p10:.1f} - {p90:.1f}]",
+                body_style,
+            ),
+            Paragraph(
+                "Interval breadth is unbounded above because the calibrated upper bound reaches the RUL cap."
+                if censored_at_cap
+                else f"Interval breadth: {(p90 - p10):.1f} cycles (coverage calibrated ~80%)",
+                body_style,
+            )
         ]
     ]
     rul_table = Table(rul_table_data, colWidths=[150, 110, 280])

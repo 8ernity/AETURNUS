@@ -17,11 +17,40 @@ def test_handle_none_and_invalid_input(agent):
     assert order is None
     assert "X0:prediction_is_none" in trace
 
-    incomplete_pred = {"engine_id": "ENG-FD001-001", "cycle": 10}
+    incomplete_pred = {"engine_id": "ENG-FD001-001", "unit": 1, "cycle": 10}
     order2, trace2 = agent.evaluate_engine_cycle(incomplete_pred)
     assert order2 is not None
     assert order2["status"] == "NEEDS_REVIEW"
     assert "X0:missing_conservative_rul->exception" in trace2
+
+    with pytest.raises(ValueError, match="unit"):
+        agent.evaluate_engine_cycle({"engine_id": "ENG-FD001-001", "cycle": 10})
+    with pytest.raises(ValueError, match="cycle"):
+        agent.evaluate_engine_cycle({"engine_id": "ENG-FD001-001", "unit": 1})
+
+
+def test_dry_run_does_not_persist_or_mutate_state(agent):
+    pred = {
+        "engine_id": "ENG-FD001-DRYRUN",
+        "unit": 8,
+        "subset": "FD001",
+        "cycle": 40,
+        "conservative_rul": 20.0,
+        "rul_p10": 20.0,
+        "rul_p50": 28.0,
+        "rul_p90": 35.0,
+        "fail_prob_30": 0.85,
+        "anomaly_score": 0.60,
+        "model_version": "rul-fd001@champion",
+    }
+    order, trace = agent.evaluate_engine_cycle(pred, dry_run=True)
+    assert order is not None
+    assert order["work_order_id"].startswith("WO-")
+    assert "dry_run:not_persisted" in trace
+    assert pred["engine_id"] not in agent.open_orders
+    with agent._get_db() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM work_orders").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM audit_events").fetchone()[0] == 0
 
 def test_uuid_order_ids(agent):
     pred = {

@@ -51,6 +51,7 @@ def test_calibrated_intervals_and_noncrossing_monotonicity():
     res = ms.evaluate_test(test_df, rul_truth, save_report=False)
     assert "interval_coverage" in res
     assert 0.55 <= res["interval_coverage"] <= 0.95 # ~80% coverage target
+    assert res["coverage_le_cap"] >= res["coverage_target"]
 
     # Test point-by-point monotonicity
     for _, row in test_df.sample(20, random_state=42).iterrows():
@@ -58,7 +59,12 @@ def test_calibrated_intervals_and_noncrossing_monotonicity():
         p10 = pred["rul_p10"]
         p50 = pred["rul_p50"]
         p90 = pred["rul_p90"]
-        assert 0.0 <= p10 <= p50 <= p90
+        assert 0.0 <= p10 <= p50
+        if p90 is not None:
+            assert p50 <= p90
+        else:
+            assert pred["censored_at_cap"] is True
+            assert pred["interval_label"] == ">cap"
 
 def test_multi_seed_metrics_reporting():
     """Verify mean±std metrics are present in manifest."""

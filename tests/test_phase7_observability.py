@@ -1,3 +1,4 @@
+import json
 import time
 
 import pytest
@@ -115,6 +116,7 @@ def test_alert_manager_synthetic_triggers():
     cov_alerts = mgr.evaluate_alerts(context=cov_ctx)
     cov_alert = next(a for a in cov_alerts if a["rule_name"] == "RULE_CONFORMAL_COVERAGE_DIP")
     assert cov_alert["firing"] is True
+    assert cov_alert["metric_name"] == "coverage_le_cap"
     
     # 5. Latency spike condition
     lat_ctx = {
@@ -150,6 +152,28 @@ def test_conformal_coverage_alert_manifest():
         assert nodata_alert["firing"] is False
     finally:
         manifest_path.write_bytes(manifest_bytes)
+
+
+def test_conformal_coverage_alert_uses_manifest_policy_metric():
+    """The coverage rule must evaluate the policy metric, not interval_coverage."""
+    mgr = AlertManager()
+    mgr.cov_min_thresh = 0.75
+    manifest_path = mgr.root_dir / "artifacts" / "run_manifest.json"
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        manifest = json.load(f)
+    metric_name = manifest["coverage_metric"]["value"]
+    assert metric_name == "coverage_le_cap"
+    expected = min(
+        float(sub["metrics"][metric_name])
+        for sub in manifest["subsets"].values()
+        if sub["metrics"].get(metric_name) is not None
+    )
+
+    alerts = mgr.evaluate_alerts(context={})
+    cov_alert = next(a for a in alerts if a["rule_name"] == "RULE_CONFORMAL_COVERAGE_DIP")
+    assert cov_alert["metric_name"] == metric_name
+    assert cov_alert["metric_value"] == round(expected, 3)
+    assert cov_alert["firing"] is (expected < mgr.cov_min_thresh)
 
 
 def test_webhook_dispatcher_payload_formatting():

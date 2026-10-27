@@ -23,6 +23,8 @@ from src.models.model_service import (
     ModelService,
     algorithm_for_p50_model,
     load_cv_protocol,
+    resolve_coverage_policy,
+    resolve_target_policy,
 )
 from src.ingest.loader import CMAPSSLoader
 from src.eval.protocol import (
@@ -153,6 +155,60 @@ def select_champion(comparison_models: list) -> dict:
         "rule_inputs": rule_inputs
     }
 
+def build_manifest_metrics(res: Dict[str, Any]) -> Dict[str, Any]:
+    """Projects evaluation results onto the exact metrics persisted in the manifest."""
+    return {
+        "rmse": float(res["rmse"]),
+        "mae": float(res["mae"]),
+        "nasa_score": float(res["nasa_score"]),
+        "early_rate": float(res["early_rate"]),
+        "late_rate": float(res["late_rate"]),
+        "pr_auc": float(res["pr_auc"]),
+        "interval_coverage": float(res["interval_coverage"]),
+        "mean_interval_width": (
+            float(res["mean_interval_width"])
+            if res.get("mean_interval_width") is not None
+            else None
+        ),
+        "coverage_target": float(res["coverage_target"]),
+        "coverage_wilson_ci_95": res["coverage_wilson_ci_95"],
+        "coverage_wilson_ci_contains_target": bool(res["coverage_wilson_ci_contains_target"]),
+        "coverage_ci_excludes_target": bool(res["coverage_ci_excludes_target"]),
+        "coverage_ci_contains_target": bool(res["coverage_ci_contains_target"]),
+        "coverage_by_bucket": res["coverage_by_bucket"],
+        "coverage_metric": res["coverage_metric"],
+        "coverage_metric_value": float(res["coverage_metric_value"]),
+        "coverage_metric_wilson_ci_95": res["coverage_metric_wilson_ci_95"],
+        "coverage_metric_ci_lower": res["coverage_metric_ci_lower"],
+        "coverage_metric_ci_upper": res["coverage_metric_ci_upper"],
+        "target_coverage": float(res["target_coverage"]),
+        "target_coverage_met": bool(res["target_coverage_met"]),
+        "coverage_ci_lower_meets_target": bool(res["coverage_ci_lower_meets_target"]),
+        "coverage_all": res["coverage_all"],
+        "coverage_all_n": int(res["coverage_all_n"]),
+        "coverage_all_wilson_ci_95": res["coverage_all_wilson_ci_95"],
+        "coverage_le_cap": res["coverage_le_cap"],
+        "coverage_le_cap_n": int(res["coverage_le_cap_n"]),
+        "coverage_le_cap_wilson_ci_95": res["coverage_le_cap_wilson_ci_95"],
+        "coverage_above_cap": res["coverage_above_cap"],
+        "coverage_above_cap_n": int(res["coverage_above_cap_n"]),
+        "coverage_above_cap_wilson_ci_95": res["coverage_above_cap_wilson_ci_95"],
+        "coverage_split": res["coverage_split"],
+        "coverage_rule": res["coverage_rule"],
+        "n_censored_intervals": int(res["n_censored_intervals"]),
+        "n_closed_intervals": int(res["n_closed_intervals"]),
+        "censored_interval_rate": float(res["censored_interval_rate"]),
+        "rul_cap": res["metrics"]["rul_cap"],
+        "rmse_vs_raw_truth": res["metrics"]["rmse_vs_raw_truth"],
+        "rmse_vs_capped_truth": res["metrics"]["rmse_vs_capped_truth"],
+        "share_true_rul_above_cap": res["metrics"]["share_true_rul_above_cap"],
+        "rmse_on_true_rul_le_cap": res["metrics"]["rmse_on_true_rul_le_cap"],
+        "n_true_rul_le_cap": res["metrics"]["n_true_rul_le_cap"],
+        "n_true_rul_above_cap": res["metrics"]["n_true_rul_above_cap"],
+        "rul_bucket_metrics": res["metrics"]["rul_bucket_metrics"],
+    }
+
+
 def evaluate_subset(sub: str, root_dir: Path, force: bool = False) -> Dict[str, Any]:
     test_path = root_dir / "data" / "processed" / sub / "test.parquet"
     train_path = root_dir / "data" / "processed" / sub / "train.parquet"
@@ -160,7 +216,6 @@ def evaluate_subset(sub: str, root_dir: Path, force: bool = False) -> Dict[str, 
     train_df = pd.read_parquet(train_path)
     loader = CMAPSSLoader(subset=sub)
     _, _, rul_truth = loader.load_raw_data()
-    targets_cfg = load_yaml(root_dir / "configs" / "targets.yaml", raw=True)
     test_protocol_id = get_protocol_id(mode="last", seed=DEFAULT_SEED, n_draws=1)
     cv_proto = load_cv_protocol()
     expected_cv_protocol_id = get_protocol_id(
@@ -263,29 +318,17 @@ def evaluate_subset(sub: str, root_dir: Path, force: bool = False) -> Dict[str, 
     # Compute full bundle sha256
     bundle_sha256 = hashlib.sha256(active_bundle_path.read_bytes()).hexdigest()
 
-    # Compute target and target_met strictly from the configs/targets.yaml policy entry
-    raw_target = targets_cfg["subsets"][sub]["target_rmse"]
-    target_val = float(raw_target["value"])
-    target_kind = raw_target["kind"]
-    target_source = raw_target["source"]
-    target_met = bool(res["rmse"] <= target_val)
+    # Resolve target_met from the named metric policies in configs/targets.yaml.
+    target_policy = resolve_target_policy(sub, res["metrics"])
+    target_val = target_policy["target_rmse"]
+    target_metric = target_policy["target_metric"]
+    target_metric_value = target_policy["target_metric_value"]
+    target_met = target_policy["target_met"]
+    coverage_policy = resolve_coverage_policy(sub, res["metrics"])
 
     # Prepare exact test metrics without fallback defaults
-    metrics = {
-        "rmse": float(res["rmse"]),
-        "mae": float(res["mae"]),
-        "nasa_score": float(res["nasa_score"]),
-        "early_rate": float(res["early_rate"]),
-        "late_rate": float(res["late_rate"]),
-        "pr_auc": float(res["pr_auc"]),
-        "interval_coverage": float(res["interval_coverage"]),
-        "mean_interval_width": float(res["mean_interval_width"]),
-        "coverage_target": float(res["coverage_target"]),
-        "coverage_wilson_ci_95": res["coverage_wilson_ci_95"],
-        "coverage_wilson_ci_contains_target": bool(res["coverage_wilson_ci_contains_target"]),
-        "coverage_ci_excludes_target": bool(res["coverage_ci_excludes_target"]),
-        "coverage_by_bucket": res["coverage_by_bucket"],
-    }
+    metrics = build_manifest_metrics(res)
+    calibration = bundle.get("conformal_buckets") or res.get("conformal_buckets") or {}
 
     regime_gap = regime_mix_gap(
         cv_res["regime_mix"],
@@ -300,14 +343,27 @@ def evaluate_subset(sub: str, root_dir: Path, force: bool = False) -> Dict[str, 
         "cv_protocol_id": cv_res["protocol_id"],
         "n_engines": len(eval_rows),
         "target_rmse": target_val,
+        "target_metric": target_metric,
+        "target_metric_value": round(float(target_metric_value), 4),
         "target_met": target_met,
+        "target_metric_provenance": target_policy["target_metric_provenance"],
         "target_provenance": {
-            "kind": target_kind,
-            "source": target_source,
+            **target_policy["target_provenance"],
             "config": "configs/targets.yaml",
         },
+        "coverage_metric": coverage_policy["coverage_metric"],
+        "coverage_metric_value": round(float(coverage_policy["coverage_metric_value"]), 4),
+        "coverage_metric_provenance": coverage_policy["coverage_metric_provenance"],
+        "target_coverage": round(float(coverage_policy["target_coverage"]), 4),
+        "target_coverage_provenance": coverage_policy["target_coverage_provenance"],
+        "target_coverage_met": coverage_policy["target_coverage_met"],
+        "coverage_status": (
+            "Coverage Target Met"
+            if coverage_policy["target_coverage_met"]
+            else "Coverage Target Missed"
+        ),
         "metrics": metrics,
-        "calibration": bundle.get("conformal_buckets"),
+        "calibration": calibration,
         "cv": {
             "protocol_id": cv_res["protocol_id"],
             "evaluation_mode": cv_res["evaluation_mode"],
@@ -383,6 +439,11 @@ def main():
             "condition": sub_info["condition"],
             "faults": sub_info["faults"],
             "rmse": sub_info["metrics"]["rmse"],
+            "rmse_vs_raw_truth": sub_info["metrics"]["rmse_vs_raw_truth"],
+            "rmse_vs_capped_truth": sub_info["metrics"]["rmse_vs_capped_truth"],
+            "share_true_rul_above_cap": sub_info["metrics"]["share_true_rul_above_cap"],
+            "rmse_on_true_rul_le_cap": sub_info["metrics"]["rmse_on_true_rul_le_cap"],
+            "rul_cap": sub_info["metrics"]["rul_cap"],
             "mae": sub_info["metrics"]["mae"],
             "nasa_score": sub_info["metrics"]["nasa_score"],
             "early_rate": sub_info["metrics"]["early_rate"],
@@ -391,9 +452,25 @@ def main():
             "pr_auc": sub_info["metrics"]["pr_auc"],
             "train_time_sec": sub_info["train_time_sec"],
             "target_rmse": sub_info["target_rmse"],
+            "target_metric": sub_info["target_metric"],
+            "target_metric_value": sub_info["target_metric_value"],
             "target_met": sub_info["target_met"],
             "status": sub_info["status"],
+            "coverage_metric": sub_info["coverage_metric"],
+            "coverage_metric_value": sub_info["coverage_metric_value"],
+            "target_coverage": sub_info["target_coverage"],
+            "target_coverage_met": sub_info["target_coverage_met"],
+            "coverage_status": sub_info["coverage_status"],
             "interval_coverage": sub_info["metrics"]["interval_coverage"],
+            "coverage_all": sub_info["metrics"]["coverage_all"],
+            "coverage_all_n": sub_info["metrics"]["coverage_all_n"],
+            "coverage_all_wilson_ci_95": sub_info["metrics"]["coverage_all_wilson_ci_95"],
+            "coverage_le_cap": sub_info["metrics"]["coverage_le_cap"],
+            "coverage_le_cap_n": sub_info["metrics"]["coverage_le_cap_n"],
+            "coverage_le_cap_wilson_ci_95": sub_info["metrics"]["coverage_le_cap_wilson_ci_95"],
+            "coverage_above_cap": sub_info["metrics"]["coverage_above_cap"],
+            "coverage_above_cap_n": sub_info["metrics"]["coverage_above_cap_n"],
+            "coverage_above_cap_wilson_ci_95": sub_info["metrics"]["coverage_above_cap_wilson_ci_95"],
             "mean_interval_width": sub_info["metrics"]["mean_interval_width"],
             "multi_seed": sub_info.get("multi_seed", {}),
             "deep_comparison": sub_info.get("comparison_rows", [])
@@ -406,6 +483,13 @@ def main():
         if info.get("regime_mix_gap", {}).get("gap_flag")
     ]
 
+    targets_cfg = load_yaml(root_dir / "configs" / "targets.yaml", raw=True)
+    target_metric_cfg = targets_cfg["target_metric"]
+    coverage_metric_cfg = targets_cfg["coverage_metric"]
+    target_coverage_cfg = load_yaml(
+        root_dir / "configs" / "pipeline.yaml", raw=True
+    )["conformal"]["target_coverage"]
+
     # Assemble complete manifest
     manifest_data = {
         "run_id": run_id,
@@ -413,6 +497,23 @@ def main():
         "config_hash": config_hash,
         "data_sha256": data_sha256,
         "created_at": time.time(),
+        "target_metric": {
+            "value": target_metric_cfg["value"],
+            "kind": target_metric_cfg.get("kind"),
+            "source": target_metric_cfg.get("source"),
+            "allowed_metrics": target_metric_cfg.get("allowed_metrics", []),
+        },
+        "coverage_metric": {
+            "value": coverage_metric_cfg["value"],
+            "kind": coverage_metric_cfg.get("kind"),
+            "source": coverage_metric_cfg.get("source"),
+            "allowed_metrics": coverage_metric_cfg.get("allowed_metrics", []),
+        },
+        "target_coverage": {
+            **target_coverage_cfg,
+            "config": "configs/pipeline.yaml",
+        },
+        "rul_buckets": targets_cfg["rul_buckets"],
         "subsets": manifest_subsets,
         "regime_mix_gap": {
             "flagged_subsets": flagged_regimes,
@@ -450,11 +551,26 @@ def main():
     summary_file = root_dir / "artifacts" / "reports" / "benchmark_summary.json"
     summary_file.parent.mkdir(parents=True, exist_ok=True)
     with open(summary_file, "w", encoding="utf-8") as f:
-        json.dump({"benchmarks": benchmarks}, f, indent=2)
+        json.dump({
+            "run_id": run_id,
+            "target_metric": manifest_data["target_metric"],
+            "coverage_metric": manifest_data["coverage_metric"],
+            "target_coverage": manifest_data["target_coverage"],
+            "benchmarks": benchmarks,
+        }, f, indent=2)
 
     for sub, sinfo in manifest_subsets.items():
         m = sinfo["metrics"]
-        print(f"  [{sub}] Champion: {sinfo['algorithm']} | RMSE: {m['rmse']:.2f} | MAE: {m['mae']:.2f} | NASA: {m['nasa_score']:.1f} | Cov: {m['interval_coverage']*100:.1f}%")
+        print(
+            f"  [{sub}] Champion: {sinfo['algorithm']} | "
+            f"{sinfo['target_metric']}: {sinfo['target_metric_value']:.2f} | "
+            f"raw RMSE: {m['rmse_vs_raw_truth']:.2f} | "
+            f"capped RMSE: {m['rmse_vs_capped_truth']:.2f} | "
+            f"MAE: {m['mae']:.2f} | NASA: {m['nasa_score']:.1f} | "
+            f"Cov(all): {m['coverage_all']*100:.1f}% | "
+            f"Cov(<=cap): {m['coverage_le_cap']*100:.1f}% | "
+            f"Coverage policy met: {sinfo['target_coverage_met']}"
+        )
 
 if __name__ == "__main__":
     main()

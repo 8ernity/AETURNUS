@@ -21,12 +21,13 @@ def render_metrics_block(manifest: dict) -> str:
         "### 🏆 C-MAPSS Empirical Benchmark Performance (FD001–FD004)",
         "",
         "> [!NOTE]",
-        "> **Canonical Run Provenance**  ",
-        f"> **Run ID**: `{manifest.get('run_id', 'N/A')}` | **Git SHA**: `{manifest.get('git_sha', 'N/A')[:10]}` | **Config Hash**: `{manifest.get('config_hash', 'N/A')[:10]}`  ",
-        "> *All figures are derived directly from model bundles and authentic C-MAPSS evaluation parquets at run time.*",
+        "> **Canonical Run Provenance**<br>",
+        f"> **Run ID**: `{manifest.get('run_id', 'N/A')}` | **Git SHA**: `{manifest.get('git_sha', 'N/A')[:10]}` | **Config Hash**: `{manifest.get('config_hash', 'N/A')[:10]}`<br>",
+        f"> **Target Metric**: `{manifest.get('target_metric', {}).get('value', 'N/A')}` | **Coverage Metric**: `{manifest.get('coverage_metric', {}).get('value', 'N/A')}` | **Coverage Target**: `{manifest.get('target_coverage', {}).get('value', 'N/A')}` | **RUL Cap**: `{next((s.get('metrics', {}).get('rul_cap') for s in manifest.get('subsets', {}).values() if s.get('metrics', {}).get('rul_cap') is not None), 'N/A')}`<br>",
+        "> *All figures are derived directly from model bundles and authentic C-MAPSS evaluation parquets at run time. Censored predictions cover any true RUL at or above p10 and are never rendered as closed intervals.*",
         "",
-        "| Dataset Subset | Operating Conditions | Fault Modes | Test Engines | Champion Model | Test RMSE | Test MAE | NASA Asymmetric Score | PR-AUC (Fail $\\le 30$) | Conformal Coverage | Target Status |",
-        "|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|"
+        "| Dataset Subset | Operating Conditions | Fault Modes | Test Engines | Champion Model | Test RMSE (Raw Truth) | Test RMSE (Capped Truth) | True RUL Above Cap | RMSE (True RUL $\\le$ Cap) | Test MAE | NASA Asymmetric Score | PR-AUC (Fail $\\le 30$) | Coverage All (Censored) | Coverage (True RUL $\\le$ Cap) | Coverage Status | RMSE Target Status |",
+        "|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|"
     ]
 
     subsets = manifest.get("subsets", {})
@@ -41,12 +42,18 @@ def render_metrics_block(manifest: dict) -> str:
         n_eng = s_data["n_engines"] if "n_engines" in s_data else len(loader.load_raw_data()[2])
         algo = s_data["algorithm"].upper()
         
-        rmse = f"**{m['rmse']:.2f}**" if "rmse" in m else "N/A"
+        raw_rmse = f"**{m['rmse_vs_raw_truth']:.2f}**" if m.get("rmse_vs_raw_truth") is not None else "N/A"
+        capped_rmse = f"{m['rmse_vs_capped_truth']:.2f}" if m.get("rmse_vs_capped_truth") is not None else "N/A"
+        cap_share = f"{m['share_true_rul_above_cap'] * 100:.1f}%" if m.get("share_true_rul_above_cap") is not None else "N/A"
+        le_cap_rmse = f"{m['rmse_on_true_rul_le_cap']:.2f}" if m.get("rmse_on_true_rul_le_cap") is not None else "N/A"
         mae = f"{m['mae']:.2f}" if "mae" in m else "N/A"
         nasa = f"**{m['nasa_score']:,.1f}**" if "nasa_score" in m else "N/A"
         pr_auc = f"{m['pr_auc']:.3f}" if "pr_auc" in m else "N/A"
-        cov = f"{m['interval_coverage'] * 100:.1f}%" if "interval_coverage" in m else "N/A"
-        
+        cov_all_value = m.get("coverage_all", m.get("interval_coverage"))
+        cov_all = f"{cov_all_value * 100:.1f}%" if cov_all_value is not None else "N/A"
+        cov_cap_value = m.get("coverage_le_cap")
+        cov_cap = f"{cov_cap_value * 100:.1f}%" if cov_cap_value is not None else "N/A"
+
         # Read target_met strictly from manifest; never infer or default it here.
         target_met = s_data["target_met"]
         if target_met is True:
@@ -55,8 +62,42 @@ def render_metrics_block(manifest: dict) -> str:
             status = '<span style="color:#ef4444;font-weight:bold;">TARGET MISSED</span>'
         else:
             status = '<span style="color:#94a3b8;font-weight:bold;">NO DATA</span>'
-        
-        lines.append(f"| **{sub}** | {cond} | {faults} | {n_eng} | **{algo}** | {rmse} | {mae} | {nasa} | {pr_auc} | {cov} | {status} |")
+
+        coverage_met = s_data.get("target_coverage_met")
+        if coverage_met is True:
+            coverage_status = '<span style="color:#22c55e;font-weight:bold;">COVERAGE MET</span>'
+        elif coverage_met is False:
+            coverage_status = '<span style="color:#ef4444;font-weight:bold;">COVERAGE MISSED</span>'
+        else:
+            coverage_status = '<span style="color:#94a3b8;font-weight:bold;">NO DATA</span>'
+
+        lines.append(
+            f"| **{sub}** | {cond} | {faults} | {n_eng} | **{algo}** | {raw_rmse} | "
+            f"{capped_rmse} | {cap_share} | {le_cap_rmse} | {mae} | {nasa} | {pr_auc} | "
+            f"{cov_all} | {cov_cap} | {coverage_status} | {status} |"
+        )
+
+    lines.extend([
+        "",
+        "### 🧪 RUL-Bucket Error Breakdown (Raw vs Capped Truth)",
+        "",
+        "Target metric and cap are declared in `configs/targets.yaml` and `configs/pipeline.yaml`; this table is rendered from the same manifest.",
+        "",
+        "| Subset | RUL Bucket | Test Engines | RMSE (Raw Truth) | RMSE (Capped Truth) | True RUL Above Cap | RMSE (True RUL $\\le$ Cap) |",
+        "|:---:|:---:|:---:|:---:|:---:|:---:|:---:|"
+    ])
+
+    for sub in ["FD001", "FD002", "FD003", "FD004"]:
+        s_data = subsets.get(sub, {})
+        for bucket in s_data.get("metrics", {}).get("rul_bucket_metrics", []):
+            bucket_raw = f"{bucket['rmse_vs_raw_truth']:.2f}" if bucket.get("rmse_vs_raw_truth") is not None else "N/A"
+            bucket_capped = f"{bucket['rmse_vs_capped_truth']:.2f}" if bucket.get("rmse_vs_capped_truth") is not None else "N/A"
+            bucket_share = f"{bucket['share_true_rul_above_cap'] * 100:.1f}%" if bucket.get("share_true_rul_above_cap") is not None else "N/A"
+            bucket_le_cap = f"{bucket['rmse_on_true_rul_le_cap']:.2f}" if bucket.get("rmse_on_true_rul_le_cap") is not None else "N/A"
+            lines.append(
+                f"| **{sub}** | {bucket['bucket']} | {bucket['sample_count']} | "
+                f"{bucket_raw} | {bucket_capped} | {bucket_share} | {bucket_le_cap} |"
+            )
 
     lines.extend([
         "",

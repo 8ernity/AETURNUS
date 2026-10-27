@@ -78,8 +78,17 @@ To run reliably within free-tier resource boundaries (e.g., 512 MB RAM limit):
 3. **Render Setup**:
    - Environment: Docker
    - Instance Type: Free (512 MB RAM, 0.1 CPU)
+   - Start Command: `python run_app.py`
    - Health Check Path: `/api/v1/health`
-   - Port: `8000`
+   - Port: Render-injected `$PORT` (local default `8000`)
+
+4. **Fast Port Binding**:
+   - FastAPI does not load datasets or models during lifespan startup. It
+     returns from startup immediately and warms all configured subsets
+     sequentially in a background thread, so Render's `$PORT` opens without
+     waiting for model/data work.
+   - Each subset's telemetry frames are evicted after its fleet prediction cache
+     is primed, keeping peak memory bounded on 512 MB instances.
 
 ---
 

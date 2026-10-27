@@ -480,9 +480,14 @@ class AlertManager:
             "timestamp": now
         })
 
-        # 3. Rule: Conformal Coverage Dip (read strictly from manifest subsets.*.metrics.interval_coverage)
+        # 3. Rule: Conformal Coverage Dip. Read the policy metric named in the
+        # manifest (configs/targets.yaml coverage_metric), never a hard-coded
+        # all-engine coverage key.
         cov_map: Dict[str, float] = {}
+        targets_cfg = load_yaml("configs/targets.yaml", raw=True)
+        coverage_metric = str(targets_cfg["coverage_metric"]["value"])
         if "coverage_metrics" in ctx:
+            coverage_metric = str(ctx.get("coverage_metric", coverage_metric))
             cov_map = ctx["coverage_metrics"]
         else:
             manifest_file = self.root_dir / "artifacts" / "run_manifest.json"
@@ -490,10 +495,13 @@ class AlertManager:
                 try:
                     with open(manifest_file, "r", encoding="utf-8") as f:
                         m_data = json.load(f)
+                    coverage_metric = str(
+                        m_data.get("coverage_metric", {}).get("value", coverage_metric)
+                    )
                     for s_k, s_v in m_data.get("subsets", {}).items():
                         m_obj = s_v.get("metrics")
-                        if isinstance(m_obj, dict) and "interval_coverage" in m_obj:
-                            cov_map[s_k] = float(m_obj["interval_coverage"])
+                        if isinstance(m_obj, dict) and m_obj.get(coverage_metric) is not None:
+                            cov_map[s_k] = float(m_obj[coverage_metric])
                 except Exception:
                     cov_map = {}
 
@@ -506,6 +514,7 @@ class AlertManager:
                 "state": "no data",
                 "firing": False,
                 "metric_value": None,
+                "metric_name": coverage_metric,
                 "threshold": self.cov_min_thresh,
                 "message": "no data",
                 "timestamp": now
@@ -522,8 +531,15 @@ class AlertManager:
                 "state": "firing" if cov_firing else "passing",
                 "firing": cov_firing,
                 "metric_value": round(float(min_cov), 3),
+                "metric_name": coverage_metric,
                 "threshold": self.cov_min_thresh,
-                "message": f"Interval coverage for {lowest_sub} ({min_cov*100:.1f}%) dropped below nominal threshold ({self.cov_min_thresh*100:.1f}%)" if cov_firing else "Conformal prediction intervals meet empirical coverage targets.",
+                "message": (
+                    f"Policy coverage {coverage_metric} for {lowest_sub} "
+                    f"({min_cov*100:.1f}%) dropped below nominal threshold "
+                    f"({self.cov_min_thresh*100:.1f}%)"
+                    if cov_firing
+                    else f"Policy coverage {coverage_metric} meets empirical coverage targets."
+                ),
                 "timestamp": now
             })
 

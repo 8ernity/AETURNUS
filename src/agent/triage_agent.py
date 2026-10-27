@@ -1,4 +1,5 @@
 import os
+import copy
 import json
 import uuid
 import sqlite3
@@ -262,6 +263,11 @@ class TriageAgent:
             p50 = pred_rul.get("p50")
         if p90 is None:
             p90 = pred_rul.get("p90")
+        if p90 is None:
+            # SQLite's persisted contract requires a numeric bound. The in-memory
+            # order keeps p90=None and its open-ended label; this fallback prevents
+            # a NULL write without pretending the served interval is closed.
+            p90 = p10
         if p10 is None or p50 is None or p90 is None:
             raise ValueError("Work order is missing required RUL quantiles p10/p50/p90")
         with self._get_db() as conn:
@@ -276,9 +282,9 @@ class TriageAgent:
             """, (
                 order["work_order_id"],
                 order["engine_id"],
-                int(order.get("unit", 1)),
-                order.get("subset", "FD001"),
-                int(order.get("created_at_cycle", 1)),
+                int(order["unit"]),
+                order["subset"],
+                int(order["created_at_cycle"]),
                 int(order.get("current_cycle", order.get("created_at_cycle", 1))),
                 order.get("closed_at_cycle"),
                 order["severity"],
@@ -326,7 +332,8 @@ class TriageAgent:
     def evaluate_and_persist(
         self,
         engine: Dict[str, Any],
-        db_session: Optional[Any] = None
+        db_session: Optional[Any] = None,
+        dry_run: bool = False
     ) -> Tuple[Optional[Dict[str, Any]], List[str]]:
         """
         Executes the 9-step decision pipeline on an engine prediction/state and guarantees
@@ -336,15 +343,17 @@ class TriageAgent:
             engine: Engine prediction dictionary containing keys like engine_id, unit, cycle,
                     conservative_rul, rul_p10, fail_prob_30, anomaly_score.
             db_session: Optional database session object (e.g. SQLAlchemy session or connection).
+            dry_run: Evaluate and return the proposed work order without mutating state or
+                    writing to SQLite.
         
         Returns:
             Tuple of (work_order, decision_trace).
         """
         if "conservative_rul" not in engine and "rul_p10" in engine:
-            engine["conservative_rul"] = engine["rul_p10"]
+            engine = {**engine, "conservative_rul": engine["rul_p10"]}
 
-        order, trace = self.evaluate_engine_cycle(engine)
-        if order is not None:
+        order, trace = self.evaluate_engine_cycle(engine, dry_run=dry_run)
+        if order is not None and not dry_run:
             self._persist_order(order)
             if db_session is not None:
                 try:
@@ -358,7 +367,8 @@ class TriageAgent:
         self,
         prediction: Optional[Dict[str, Any]],
         recent_history: Optional[List[Dict[str, Any]]] = None,
-        data_quality_flags: Optional[Dict[str, Any]] = None
+        data_quality_flags: Optional[Dict[str, Any]] = None,
+        dry_run: bool = False
     ) -> Tuple[Optional[Dict[str, Any]], List[str]]:
         """
         Executes the 9-step decision pipeline:
@@ -379,21 +389,40 @@ class TriageAgent:
             trace.append("X0:prediction_is_none")
             return None, trace
 
+        missing_identifiers = [
+            key for key in ("unit", "cycle")
+            if key not in prediction or prediction[key] is None
+        ]
+        if missing_identifiers:
+            raise ValueError(
+                "TriageAgent input is missing required identifier(s): "
+                + ", ".join(missing_identifiers)
+            )
+
         if "engine_id" not in prediction or "cycle" not in prediction:
             trace.append("X0:invalid_prediction_format")
             return None, trace
 
         engine_id = str(prediction["engine_id"])
+        unit = int(prediction["unit"])
         cycle = int(prediction["cycle"])
         subset = str(prediction.get("subset", "FD001"))
 
-        if engine_id not in self.engine_state_history:
-            self.engine_state_history[engine_id] = []
-        hist = self.engine_state_history[engine_id]
+        if dry_run:
+            hist = copy.deepcopy(self.engine_state_history.get(engine_id, []))
+        else:
+            if engine_id not in self.engine_state_history:
+                self.engine_state_history[engine_id] = []
+            hist = self.engine_state_history[engine_id]
 
         if "conservative_rul" not in prediction:
             trace.append("X0:missing_conservative_rul->exception")
-            order = self._create_exception_order(prediction, "Missing conservative_rul in prediction input", trace)
+            order = self._create_exception_order(
+                prediction,
+                "Missing conservative_rul in prediction input",
+                trace,
+                dry_run=dry_run,
+            )
             return order, trace
 
         # Read thresholds dynamically from agent_rules.yaml. Every policy value is
@@ -428,15 +457,18 @@ class TriageAgent:
         cons_rul = float(prediction["conservative_rul"])
         p10_value = prediction.get("rul_p10")
         p90_value = prediction.get("rul_p90")
+        censored_at_cap = bool(prediction.get("censored_at_cap", False))
         rul_p10 = float(cons_rul if p10_value is None else p10_value)
         rul_p90 = float(rul_p10 if p90_value is None else p90_value)
+        interval_label = ">cap" if censored_at_cap else "p10-p90"
         fail_prob_value = prediction.get("fail_prob_30")
         anomaly_value = prediction.get("anomaly_score")
         fail_prob = float(0.0 if fail_prob_value is None else fail_prob_value)
         anomaly_score = float(0.0 if anomaly_value is None else anomaly_value)
 
-        # Step 3: Degradation trend
-        rul_drop = 0.0
+        # Step 3: Degradation trend. Null means there is not enough history; it is
+        # never coerced to 0.0, which would look like a measured flat trend.
+        rul_drop: Optional[float] = None
         if len(hist) >= 5:
             past_rul = hist[-min(drop_window, len(hist))]["conservative_rul"]
             rul_drop = past_rul - cons_rul
@@ -458,10 +490,11 @@ class TriageAgent:
         sev_idx = SEVERITY_ORDER.index(base_severity)
 
         # M1: Rapid RUL drop
-        if rul_drop >= drop_thresh:
+        if rul_drop is not None and rul_drop >= drop_thresh:
             sev_idx = min(len(SEVERITY_ORDER) - 1, sev_idx + 1)
             trace.append(f"M1:fired(drop={rul_drop:.1f}->{SEVERITY_ORDER[sev_idx]})")
-            self._dispatch_rule_webhook("M1", engine_id, cycle, SEVERITY_ORDER[sev_idx], cons_rul, {"rul_drop": round(float(rul_drop), 1), "drop_thresh": drop_thresh})
+            if not dry_run:
+                self._dispatch_rule_webhook("M1", engine_id, cycle, SEVERITY_ORDER[sev_idx], cons_rul, {"rul_drop": round(float(rul_drop), 1), "drop_thresh": drop_thresh})
         else:
             trace.append("M1:not_fired")
 
@@ -469,7 +502,8 @@ class TriageAgent:
         if anomaly_score >= anom_thresh and sev_idx <= SEVERITY_ORDER.index("MEDIUM"):
             sev_idx = min(len(SEVERITY_ORDER) - 1, sev_idx + 1)
             trace.append(f"M2:fired(anomaly={anomaly_score:.2f}->{SEVERITY_ORDER[sev_idx]})")
-            self._dispatch_rule_webhook("M2", engine_id, cycle, SEVERITY_ORDER[sev_idx], cons_rul, {"anomaly_score": round(float(anomaly_score), 2), "anom_thresh": anom_thresh})
+            if not dry_run:
+                self._dispatch_rule_webhook("M2", engine_id, cycle, SEVERITY_ORDER[sev_idx], cons_rul, {"anomaly_score": round(float(anomaly_score), 2), "anom_thresh": anom_thresh})
         else:
             trace.append("M2:not_fired")
 
@@ -483,26 +517,36 @@ class TriageAgent:
         if fail_prob_10 is not None and fail_prob_10 >= effective_tau_10:
             sev_idx = max(sev_idx, SEVERITY_ORDER.index("CRITICAL"))
             trace.append(f"M3:fired(fail_prob_10={fail_prob_10:.2f}->CRITICAL)")
-            self._dispatch_rule_webhook("M3", engine_id, cycle, "CRITICAL", cons_rul, {"fail_prob_10": round(float(fail_prob_10), 2), "threshold": round(float(effective_tau_10), 2)})
+            if not dry_run:
+                self._dispatch_rule_webhook("M3", engine_id, cycle, "CRITICAL", cons_rul, {"fail_prob_10": round(float(fail_prob_10), 2), "threshold": round(float(effective_tau_10), 2)})
         elif fail_prob >= effective_tau_30:
             sev_idx = max(sev_idx, SEVERITY_ORDER.index("HIGH"))
             trace.append(f"M3:fired(fail_prob={fail_prob:.2f}>={effective_tau_30:.2f}->HIGH)")
-            self._dispatch_rule_webhook("M3", engine_id, cycle, "HIGH", cons_rul, {"fail_prob_30": round(float(fail_prob), 2), "threshold": round(float(effective_tau_30), 2)})
+            if not dry_run:
+                self._dispatch_rule_webhook("M3", engine_id, cycle, "HIGH", cons_rul, {"fail_prob_30": round(float(fail_prob), 2), "threshold": round(float(effective_tau_30), 2)})
         else:
             trace.append("M3:not_fired")
 
         raw_severity = SEVERITY_ORDER[sev_idx]
 
         # Step 6: Hysteresis (store raw severity, allow de-escalation after N cycles)
-        if engine_id not in self.engine_hysteresis:
-            self.engine_hysteresis[engine_id] = {
+        if dry_run:
+            existing_hyst = self.engine_hysteresis.get(engine_id)
+            hyst = copy.deepcopy(existing_hyst) if existing_hyst else {
                 "held_severity": raw_severity,
                 "raw_severity": raw_severity,
                 "consecutive_lower_cycles": 0,
-                "last_cycle": cycle
+                "last_cycle": cycle,
             }
-
-        hyst = self.engine_hysteresis[engine_id]
+        else:
+            if engine_id not in self.engine_hysteresis:
+                self.engine_hysteresis[engine_id] = {
+                    "held_severity": raw_severity,
+                    "raw_severity": raw_severity,
+                    "consecutive_lower_cycles": 0,
+                    "last_cycle": cycle
+                }
+            hyst = self.engine_hysteresis[engine_id]
         held_idx = SEVERITY_ORDER.index(hyst["held_severity"])
         raw_idx = SEVERITY_ORDER.index(raw_severity)
 
@@ -524,15 +568,19 @@ class TriageAgent:
 
         hyst["raw_severity"] = raw_severity
         hyst["last_cycle"] = cycle
-        self._persist_hysteresis(engine_id, hyst)
+        if not dry_run:
+            self._persist_hysteresis(engine_id, hyst)
         final_severity = hyst["held_severity"]
 
         # Step 7: Independent Exception Checks (X1 - X7)
         triggered_exceptions: List[str] = []
 
-        # X1: High prediction uncertainty
+        # X1: High prediction uncertainty. A censored interval has no finite upper
+        # width, so width-based quality checks do not apply.
         interval_width = rul_p90 - rul_p10
-        if interval_width > max_interval_width and SEVERITY_ORDER.index(final_severity) >= SEVERITY_ORDER.index("MEDIUM"):
+        if censored_at_cap:
+            trace.append("X1:not_applicable_censored_open_interval")
+        elif interval_width > max_interval_width and SEVERITY_ORDER.index(final_severity) >= SEVERITY_ORDER.index("MEDIUM"):
             triggered_exceptions.append(f"X1: High prediction uncertainty (interval width = {interval_width:.1f} > {max_interval_width})")
 
         # X2: Model disagreement
@@ -567,7 +615,7 @@ class TriageAgent:
             triggered_exceptions.append(f"X6: Insufficient telemetry history (cycle {cycle} < {min_hist_cycles}) for high-urgency alert")
 
         # X7: Telemetry data gap, out-of-order cycles, or missing model specification
-        last_recorded_cycle = hist[-1].get("cycle", 0) if len(hist) > 0 else 0
+        last_recorded_cycle = hist[-1]["cycle"] if len(hist) > 0 else 0
         if last_recorded_cycle > 0 and (cycle - last_recorded_cycle) > data_gap_cycles:
             triggered_exceptions.append(f"X7: Telemetry data gap detected ({cycle - last_recorded_cycle} cycles > {data_gap_cycles})")
         elif last_recorded_cycle > 0 and cycle < last_recorded_cycle:
@@ -595,11 +643,12 @@ class TriageAgent:
             "anomaly_score": anomaly_score,
             "exceptions": triggered_exceptions
         }
-        hist.append(hist_entry)
-        self._persist_state_history_entry(engine_id, hist_entry)
+        if not dry_run:
+            hist.append(hist_entry)
+            self._persist_state_history_entry(engine_id, hist_entry)
 
         # Step 8: Suppression window, recovery, & cooldown check
-        existing_order = self.open_orders.get(engine_id)
+        existing_order = self.open_orders.get(engine_id) if not dry_run else None
 
         # Auto-close on sustained recovery to HEALTHY or LOW
         if existing_order and final_severity in ["HEALTHY", "LOW"] and not triggered_exceptions:
@@ -631,7 +680,7 @@ class TriageAgent:
                 return existing_order, trace
 
         # Check human REJECT suppression window
-        suppress_until = self.suppressed_engines.get(engine_id) or 0
+        suppress_until = 0 if dry_run else (self.suppressed_engines.get(engine_id) or 0)
         if cycle <= suppress_until and final_severity != "CRITICAL":
             trace.append(f"suppression:active_until_cycle_{suppress_until}")
             return None, trace
@@ -642,7 +691,7 @@ class TriageAgent:
             return None, trace
 
         # Check real closure cooldown
-        closed_orders = self.closed_orders_history.get(engine_id, [])
+        closed_orders = [] if dry_run else self.closed_orders_history.get(engine_id, [])
         if closed_orders:
             last_closure_cycle = max(o.get("closed_at_cycle", o.get("created_at_cycle", 0)) for o in closed_orders)
             if (cycle - last_closure_cycle) < cooldown_cycles and final_severity != "CRITICAL":
@@ -650,11 +699,11 @@ class TriageAgent:
                 return None, trace
 
         # Subsystem & action mapping
-        top_sensors = prediction.get("top_sensors", ["s2", "s3", "s4"])
-        suspected_subsystem = "HPC"
+        top_sensors = prediction.get("top_sensors") or []
+        suspected_subsystem = "Unknown"
         sensor_info = self.sensor_cfg.get("sensors", {})
         if top_sensors and top_sensors[0] in sensor_info:
-            suspected_subsystem = sensor_info[top_sensors[0]].get("subsystem", "HPC")
+            suspected_subsystem = sensor_info[top_sensors[0]].get("subsystem", "Unknown")
 
         due_by_cycle = int(cycle + max(1, int(due_by_factor * cons_rul)))
         actions = {
@@ -673,12 +722,14 @@ class TriageAgent:
             existing_order["predicted_rul"] = {
                 "p10": rul_p10,
                 "p50": prediction.get("rul_p50", cons_rul + 10.0),
-                "p90": rul_p90
+                "p90": None if censored_at_cap else rul_p90
             }
             existing_order["fail_prob_30"] = fail_prob
             existing_order["anomaly_score"] = anomaly_score
             existing_order["rul_p10"] = rul_p10
             existing_order["rul_drop"] = rul_drop
+            existing_order["censored_at_cap"] = censored_at_cap
+            existing_order["interval_label"] = interval_label
             existing_order["decision_trace"] = trace
 
             # NEVER overwrite human status
@@ -733,7 +784,7 @@ class TriageAgent:
         work_order = {
             "work_order_id": work_order_id,
             "engine_id": engine_id,
-            "unit": int(prediction.get("unit", 1)),
+            "unit": unit,
             "subset": subset,
             "created_at_cycle": cycle,
             "current_cycle": cycle,
@@ -744,13 +795,15 @@ class TriageAgent:
             "predicted_rul": {
                 "p10": rul_p10,
                 "p50": float(cons_rul if prediction.get("rul_p50") is None else prediction["rul_p50"]),
-                "p90": rul_p90
+                "p90": None if censored_at_cap else rul_p90
             },
             "conservative_rul": cons_rul,
             "rul_p10": rul_p10,
             "fail_prob_30": fail_prob,
             "anomaly_score": anomaly_score,
             "rul_drop": rul_drop,
+            "censored_at_cap": censored_at_cap,
+            "interval_label": interval_label,
             "due_by_cycle": due_by_cycle,
             "suspected_subsystem": suspected_subsystem,
             "top_sensors": top_sensors,
@@ -766,28 +819,38 @@ class TriageAgent:
             }]
         }
 
-        self.open_orders[engine_id] = work_order
-        self._persist_order(work_order)
-        self._log_audit_event(
-            engine_id=engine_id,
-            action="CREATE",
-            actor="TriageAgent",
-            cycle=cycle,
-            work_order_id=work_order_id,
-            reason=f"Initial alert: {final_severity}",
-            trace=trace
-        )
+        if dry_run:
+            trace.append("dry_run:not_persisted")
+        else:
+            self.open_orders[engine_id] = work_order
+            self._persist_order(work_order)
+            self._log_audit_event(
+                engine_id=engine_id,
+                action="CREATE",
+                actor="TriageAgent",
+                cycle=cycle,
+                work_order_id=work_order_id,
+                reason=f"Initial alert: {final_severity}",
+                trace=trace
+            )
         trace.append("dedupe:new_order_created")
         return work_order, trace
 
-    def _create_exception_order(self, pred: Dict[str, Any], reason: str, trace: List[str]) -> Dict[str, Any]:
+    def _create_exception_order(
+        self,
+        pred: Dict[str, Any],
+        reason: str,
+        trace: List[str],
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
         engine_id = pred.get("engine_id", "UNKNOWN")
-        cycle = int(pred.get("cycle", 1))
+        unit = int(pred["unit"])
+        cycle = int(pred["cycle"])
         work_order_id = f"WO-{uuid.uuid4()}"
         wo = {
             "work_order_id": work_order_id,
             "engine_id": engine_id,
-            "unit": int(pred.get("unit", 0)),
+            "unit": unit,
             "subset": pred.get("subset", "FD001"),
             "created_at_cycle": cycle,
             "current_cycle": cycle,
@@ -799,6 +862,9 @@ class TriageAgent:
             "conservative_rul": 0.0,
             "fail_prob_30": 1.0,
             "anomaly_score": 1.0,
+            "rul_drop": None,
+            "censored_at_cap": False,
+            "interval_label": "p10-p90",
             "due_by_cycle": cycle + 1,
             "suspected_subsystem": "Unknown",
             "top_sensors": ["s2", "s3"],
@@ -809,9 +875,12 @@ class TriageAgent:
             "exception": reason,
             "events": [{"cycle": cycle, "event": f"Exception created: {reason}", "actor": "TriageAgent"}]
         }
-        self.open_orders[engine_id] = wo
-        self._persist_order(wo)
-        self._log_audit_event(engine_id=engine_id, action="EXCEPTION_CREATE", actor="TriageAgent", cycle=cycle, work_order_id=work_order_id, reason=reason, trace=trace)
+        if not dry_run:
+            self.open_orders[engine_id] = wo
+            self._persist_order(wo)
+            self._log_audit_event(engine_id=engine_id, action="EXCEPTION_CREATE", actor="TriageAgent", cycle=cycle, work_order_id=work_order_id, reason=reason, trace=trace)
+        else:
+            trace.append("dry_run:not_persisted")
         return wo
 
     def get_active_work_orders(self) -> List[Dict[str, Any]]:
@@ -953,7 +1022,7 @@ class TriageAgent:
         severity: str,
         cons_rul: float,
         details: Optional[Dict[str, Any]] = None,
-        suspected_subsystem: str = "HPC Compressor"
+        suspected_subsystem: str = "Unknown"
     ):
         """
         Dispatches external webhook alert (Slack/Teams/PagerDuty) when Rule M1, M2, or M3 fires.

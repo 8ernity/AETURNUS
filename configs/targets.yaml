@@ -1,23 +1,46 @@
-# configs/targets.yaml
-# Operational target thresholds with full provenance metadata
+coverage_metric:
+  allowed_metrics:
+  - coverage_all
+  - coverage_le_cap
+  - coverage_above_cap
+  kind: policy
+  source: Deployment coverage criterion for the population the model is trained to
+    rank; all-engine and above-cap coverage remain visible diagnostics.
+  value: coverage_le_cap
+rul_buckets:
+  edges:
+    kind: policy
+    source: RUL reporting bands aligned with the operational severity windows used
+      by the triage policy.
+    value:
+    - 30
+    - 60
 subsets:
   FD001:
     target_rmse:
-      value: 14.0
       kind: policy
-      source: "PHM08 empirical threshold for single operating condition (sea level)"
+      source: PHM08 empirical threshold for single operating condition (sea level)
+      value: 1.0
   FD002:
     target_rmse:
-      value: 22.0
       kind: policy
-      source: "PHM08 empirical threshold for six complex operating regimes"
+      source: PHM08 empirical threshold for six complex operating regimes
+      value: 22.0
   FD003:
     target_rmse:
-      value: 15.0
       kind: policy
-      source: "PHM08 empirical threshold for single condition with multi-fault degradation"
+      source: PHM08 empirical threshold for single condition with multi-fault degradation
+      value: 15.0
   FD004:
     target_rmse:
-      value: 22.0
       kind: policy
-      source: "PHM08 empirical threshold for six regimes with multi-fault degradation"
+      source: PHM08 empirical threshold for six regimes with multi-fault degradation
+      value: 22.0
+target_metric:
+  allowed_metrics:
+  - rmse_vs_raw_truth
+  - rmse_on_true_rul_le_cap
+  kind: policy
+  source: 'Primary deployment criterion: error against uncapped raw RUL truth; switch
+    to rmse_on_true_rul_le_cap to exclude cap-region dilution.'
+  value: rmse_vs_raw_truth

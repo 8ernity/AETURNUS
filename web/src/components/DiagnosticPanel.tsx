@@ -294,8 +294,11 @@ export const DiagnosticPanel: React.FC<DiagnosticPanelProps> = ({
         const consRul = pred.conservative_rul ?? 12;
 
         const explanation = `Diagnostics for Turbofan Unit ${data.engine_id} (Cycle ${data.current_cycle}):`;
+        const intervalText = pred.censored_at_cap
+          ? `open-ended > ${pred.rul_p10 ?? 10} cycles (censored at RUL cap; no finite p90)`
+          : `[${pred.rul_p10 ?? 10} - ${pred.rul_p90 ?? 18}]`;
         const bullets = [
-          `Remaining Useful Life: Conservative p10 = ${consRul} cycles (Envelope: [${pred.rul_p10 ?? 10} - ${pred.rul_p90 ?? 18}]).`,
+          `Remaining Useful Life: Conservative p10 = ${consRul} cycles (Envelope: ${intervalText}).`,
           `Primary Degradation Driver: ${topDev.sensor} (${topDev.name}) attributed to ${topDev.subsystem || "HPC Compressor"}. Deviation exceeds healthy baseline.`,
           `Continuous Health Index: Monotonically tracked to ${(pred.health_index ?? 0.28).toFixed(2)} with Anomaly Score = ${(pred.anomaly_score ?? 0.88).toFixed(2)}.`,
           `Maintenance Recommendation: Triage rule triggered. Escalate to priority maintenance queue for borescope inspection of ${topDev.subsystem || "HPC Compressor"}.`

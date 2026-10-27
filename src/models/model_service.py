@@ -14,6 +14,7 @@ from sklearn.ensemble import IsolationForest, HistGradientBoostingRegressor, His
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import precision_recall_curve, auc, average_precision_score, precision_score, recall_score
 from sklearn.inspection import permutation_importance
+from sklearn.base import clone
 from sklearn.model_selection import GroupKFold
 import lightgbm as lgb
 
@@ -94,6 +95,291 @@ def wilson_ci(p: float, n: int, confidence: float = 0.95) -> Tuple[float, float]
     half_width = z * np.sqrt((p * (1.0 - p) + (z ** 2) / (4 * n)) / n) / denominator
     return max(0.0, float(centre - half_width)), min(1.0, float(centre + half_width))
 
+def get_rul_cap() -> float:
+    """RUL target/reporting cap shared by evaluation and rendering."""
+    cfg = load_yaml("configs/pipeline.yaml")
+    return float(cfg["features"]["rul_cap"])
+
+
+def get_rul_bucket_definitions(cap: Optional[float] = None) -> List[Dict[str, Any]]:
+    """Builds RUL reporting buckets from configs/targets.yaml.
+
+    The final bucket is open-ended (all truth above the last configured edge), so
+    cap-region reporting remains explicit rather than silently dropping engines.
+    """
+    cap_value = float(cap if cap is not None else get_rul_cap())
+    cfg = load_yaml("configs/targets.yaml", raw=True)
+    edges = [float(e) for e in cfg["rul_buckets"]["edges"]["value"]]
+    edges = sorted(edge for edge in edges if 0.0 < edge < cap_value)
+    bounds = [0.0, *edges]
+    buckets = []
+    for index, lower in enumerate(bounds):
+        is_last = index == len(bounds) - 1
+        upper = None if is_last else float(bounds[index + 1])
+        if is_last:
+            label = f"> {lower:g} cycles"
+        elif index == 0:
+            label = f"0 - {upper:g} cycles"
+        else:
+            label = f"{lower:g} - {upper:g} cycles"
+        buckets.append({"bucket": label, "lower": lower, "upper": upper, "is_first": index == 0})
+    return buckets
+
+
+def _rmse(y_true: np.ndarray, y_pred: np.ndarray) -> Optional[float]:
+    if len(y_true) == 0:
+        return None
+    return float(np.sqrt(np.mean((np.asarray(y_pred, dtype=float) - np.asarray(y_true, dtype=float)) ** 2)))
+
+
+def _mae(y_true: np.ndarray, y_pred: np.ndarray) -> Optional[float]:
+    if len(y_true) == 0:
+        return None
+    return float(np.mean(np.abs(np.asarray(y_pred, dtype=float) - np.asarray(y_true, dtype=float))))
+
+
+def compute_cap_aware_metrics(
+    y_true_raw: np.ndarray,
+    pred_p50: np.ndarray,
+    cap: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Computes raw/capped-truth RMSE and the same breakdown by RUL bucket."""
+    raw = np.asarray(y_true_raw, dtype=float)
+    pred = np.asarray(pred_p50, dtype=float)
+    cap_value = float(cap if cap is not None else get_rul_cap())
+    capped = np.minimum(raw, cap_value)
+    le_cap_mask = raw <= cap_value
+    bucket_defs = get_rul_bucket_definitions(cap_value)
+
+    def bucket_mask(bucket: Dict[str, Any]) -> np.ndarray:
+        if bucket["upper"] is None:
+            return raw > float(bucket["lower"])
+        if bucket["is_first"]:
+            return raw <= float(bucket["upper"])
+        return (raw > float(bucket["lower"])) & (raw <= float(bucket["upper"]))
+
+    bucket_metrics = []
+    for bucket in bucket_defs:
+        mask = bucket_mask(bucket)
+        bucket_raw = raw[mask]
+        bucket_pred = pred[mask]
+        bucket_capped = capped[mask]
+        bucket_le_cap = mask & le_cap_mask
+        bucket_metrics.append({
+            "bucket": bucket["bucket"],
+            "lower": bucket["lower"],
+            "upper": bucket["upper"],
+            "sample_count": int(np.sum(mask)),
+            "rmse_vs_raw_truth": _rmse(bucket_raw, bucket_pred),
+            "rmse_vs_capped_truth": _rmse(bucket_capped, bucket_pred),
+            "share_true_rul_above_cap": float(np.mean(bucket_raw > cap_value)) if bucket_raw.size else None,
+            "rmse_on_true_rul_le_cap": _rmse(raw[bucket_le_cap], pred[bucket_le_cap]),
+            "n_true_rul_le_cap": int(np.sum(bucket_le_cap)),
+            "n_true_rul_above_cap": int(np.sum(mask & ~le_cap_mask)),
+            "mae_vs_raw_truth": _mae(bucket_raw, bucket_pred),
+            "mae_vs_capped_truth": _mae(bucket_capped, bucket_pred),
+        })
+
+    return {
+        "rul_cap": cap_value,
+        "rmse_vs_raw_truth": _rmse(raw, pred),
+        "rmse_vs_capped_truth": _rmse(capped, pred),
+        "share_true_rul_above_cap": float(np.mean(raw > cap_value)) if raw.size else 0.0,
+        "rmse_on_true_rul_le_cap": _rmse(raw[le_cap_mask], pred[le_cap_mask]),
+        "n_true_rul_le_cap": int(np.sum(le_cap_mask)),
+        "n_true_rul_above_cap": int(np.sum(~le_cap_mask)),
+        "rul_bucket_metrics": bucket_metrics,
+    }
+
+
+def censored_coverage_mask(
+    y_true_raw: np.ndarray,
+    pred_p10: np.ndarray,
+    pred_p90: np.ndarray,
+    censored_at_cap: np.ndarray,
+) -> np.ndarray:
+    """Coverage under the open-ended cap rule.
+
+    A censored prediction has no finite upper bound, so it covers every true RUL
+    at or above its lower bound. Non-censored predictions remain closed intervals.
+    """
+    y = np.asarray(y_true_raw, dtype=float)
+    p10 = np.asarray(pred_p10, dtype=float)
+    p90 = np.array(
+        [np.nan if value is None else float(value) for value in np.asarray(pred_p90, dtype=object)],
+        dtype=float,
+    )
+    censored = np.asarray(censored_at_cap, dtype=bool)
+    covered = np.zeros(len(y), dtype=bool)
+
+    if censored.any():
+        covered[censored] = y[censored] >= p10[censored]
+    closed = ~censored
+    if closed.any():
+        covered[closed] = (y[closed] >= p10[closed]) & (y[closed] <= p90[closed])
+    return covered
+
+
+def compute_coverage_split(
+    y_true_raw: np.ndarray,
+    pred_p10: np.ndarray,
+    pred_p90: np.ndarray,
+    censored_at_cap: np.ndarray,
+    cap: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Computes all-engine, at-or-below-cap, and above-cap coverage with Wilson CIs."""
+    y = np.asarray(y_true_raw, dtype=float)
+    p10 = np.asarray(pred_p10, dtype=float)
+    p90 = np.array(
+        [np.nan if value is None else float(value) for value in np.asarray(pred_p90, dtype=object)],
+        dtype=float,
+    )
+    censored = np.asarray(censored_at_cap, dtype=bool)
+    cap_value = float(cap if cap is not None else get_rul_cap())
+    covered = censored_coverage_mask(y, p10, p90, censored)
+
+    def stats(mask: np.ndarray) -> Dict[str, Any]:
+        n = int(np.sum(mask))
+        if n == 0:
+            return {
+                "coverage": None,
+                "n": 0,
+                "wilson_ci_95": [None, None],
+                "wilson_ci": [None, None],
+            }
+        value = float(np.mean(covered[mask]))
+        lower, upper = wilson_ci(value, n, confidence=0.95)
+        return {
+            "coverage": value,
+            "n": n,
+            "wilson_ci_95": [round(lower, 4), round(upper, 4)],
+            "wilson_ci": [round(lower, 4), round(upper, 4)],
+        }
+
+    masks = {
+        "all": np.ones(len(y), dtype=bool),
+        "le_cap": y <= cap_value,
+        "above_cap": y > cap_value,
+    }
+    split = {name: stats(mask) for name, mask in masks.items()}
+
+    closed = ~censored
+    closed_widths = p90[closed] - p10[closed]
+    mean_closed_width = float(np.mean(closed_widths)) if closed_widths.size else None
+    above_cap_share = float(np.mean(y > cap_value)) if len(y) else 0.0
+
+    result: Dict[str, Any] = {
+        "rul_cap": cap_value,
+        "coverage_rule": "censored_open_upper_bound",
+        "coverage_all": split["all"]["coverage"],
+        "coverage_all_n": split["all"]["n"],
+        "coverage_all_wilson_ci_95": split["all"]["wilson_ci_95"],
+        "coverage_le_cap": split["le_cap"]["coverage"],
+        "coverage_le_cap_n": split["le_cap"]["n"],
+        "coverage_le_cap_wilson_ci_95": split["le_cap"]["wilson_ci_95"],
+        "coverage_above_cap": split["above_cap"]["coverage"],
+        "coverage_above_cap_n": split["above_cap"]["n"],
+        "coverage_above_cap_wilson_ci_95": split["above_cap"]["wilson_ci_95"],
+        "coverage_split": split,
+        "share_true_rul_above_cap": above_cap_share,
+        "n_censored_intervals": int(np.sum(censored)),
+        "n_closed_intervals": int(np.sum(closed)),
+        "censored_interval_rate": float(np.mean(censored)) if len(censored) else 0.0,
+        "mean_closed_interval_width": mean_closed_width,
+    }
+    return result
+
+
+def resolve_target_policy(subset: str, metrics: Dict[str, Any]) -> Dict[str, Any]:
+    """Resolves target_met from the named target metric in configs/targets.yaml."""
+    cfg = load_yaml("configs/targets.yaml", raw=True)
+    target_metric_cfg = cfg["target_metric"]
+    metric_name = str(target_metric_cfg["value"])
+    allowed = [str(m) for m in target_metric_cfg.get("allowed_metrics", [])]
+    if allowed and metric_name not in allowed:
+        raise ValueError(
+            f"target_metric '{metric_name}' is not listed in target_metric.allowed_metrics: {allowed}"
+        )
+    if metric_name not in metrics:
+        raise ValueError(
+            f"target_metric '{metric_name}' is not produced by evaluation; "
+            f"available metrics: {sorted(metrics)}"
+        )
+    metric_value = metrics[metric_name]
+    if metric_value is None:
+        raise ValueError(f"target_metric '{metric_name}' is unavailable for subset {subset}")
+    metric_value = float(metric_value)
+    target_rmse = float(cfg["subsets"][subset]["target_rmse"]["value"])
+    return {
+        "target_rmse": target_rmse,
+        "target_metric": metric_name,
+        "target_metric_value": metric_value,
+        "target_metric_provenance": {
+            "value": metric_name,
+            "kind": target_metric_cfg.get("kind"),
+            "source": target_metric_cfg.get("source"),
+        },
+        "target_provenance": cfg["subsets"][subset]["target_rmse"],
+        "target_met": bool(metric_value <= target_rmse),
+    }
+
+
+def resolve_coverage_policy(subset: str, metrics: Dict[str, Any]) -> Dict[str, Any]:
+    """Resolves coverage attainment from the named policy metric in targets.yaml."""
+    targets_cfg = load_yaml("configs/targets.yaml", raw=True)
+    coverage_cfg = targets_cfg["coverage_metric"]
+    metric_name = str(coverage_cfg["value"])
+    allowed = [str(m) for m in coverage_cfg.get("allowed_metrics", [])]
+    if allowed and metric_name not in allowed:
+        raise ValueError(
+            f"coverage_metric '{metric_name}' is not listed in "
+            f"coverage_metric.allowed_metrics: {allowed}"
+        )
+    if metric_name not in metrics:
+        raise ValueError(
+            f"coverage_metric '{metric_name}' is not produced by evaluation; "
+            f"available metrics: {sorted(metrics)}"
+        )
+    metric_value = metrics[metric_name]
+    if metric_value is None:
+        raise ValueError(f"coverage_metric '{metric_name}' is unavailable for subset {subset}")
+    metric_value = float(metric_value)
+
+    pipeline_cfg = load_yaml("configs/pipeline.yaml", raw=True)
+    target_cfg = pipeline_cfg["conformal"]["target_coverage"]
+    target_coverage = float(target_cfg["value"])
+    ci = metrics.get(f"{metric_name}_wilson_ci_95")
+    ci_lower = float(ci[0]) if ci and ci[0] is not None else None
+    ci_upper = float(ci[1]) if ci and ci[1] is not None else None
+
+    return {
+        "coverage_metric": metric_name,
+        "coverage_metric_value": metric_value,
+        "coverage_metric_wilson_ci_95": [ci_lower, ci_upper],
+        "coverage_metric_ci_lower": ci_lower,
+        "coverage_metric_ci_upper": ci_upper,
+        "coverage_metric_provenance": {
+            "value": metric_name,
+            "kind": coverage_cfg.get("kind"),
+            "source": coverage_cfg.get("source"),
+            "config": "configs/targets.yaml",
+        },
+        "target_coverage": target_coverage,
+        "target_coverage_provenance": {
+            **target_cfg,
+            "config": "configs/pipeline.yaml",
+        },
+        "target_coverage_met": bool(metric_value >= target_coverage),
+        "coverage_ci_lower_meets_target": bool(
+            ci_lower is not None and ci_lower >= target_coverage
+        ),
+        "coverage_ci_excludes_target": bool(
+            ci_lower is not None
+            and (ci_lower > target_coverage or (ci_upper is not None and ci_upper < target_coverage))
+        ),
+    }
+
+
 def bootstrap_rmse_ci(y_true: np.ndarray, y_pred: np.ndarray, n_boot: int = 1000, seed: int = 42) -> Tuple[float, float]:
     """Computes a 1000-resample bootstrap 95% CI for RMSE."""
     rng = np.random.RandomState(seed)
@@ -157,14 +443,37 @@ class ModelService:
 
     @staticmethod
     def _conformal_settings() -> Dict[str, Any]:
-        """Reads conformal target/nominal coverage policy from pipeline config."""
+        """Reads conformal coverage policy and candidate levels from config."""
         cfg = load_yaml("configs/pipeline.yaml")
         conformal = cfg["conformal"]
+        target_coverage = float(conformal["target_coverage"])
+        nominal_levels = sorted(float(v) for v in conformal["nominal_levels"])
+        validation_draws = int(conformal["validation_draws"])
+        selection_tolerance = float(conformal["selection_tolerance"])
+        cross_folds = int(conformal["cross_conformal_folds"])
+        n_buckets = int(conformal["n_buckets"])
+        if not 0.0 < target_coverage < 1.0:
+            raise ValueError(f"Conformal target_coverage must be in (0, 1); got {target_coverage}")
+        if not nominal_levels or any(not 0.0 < level < 1.0 for level in nominal_levels):
+            raise ValueError(f"Conformal nominal_levels must be non-empty and in (0, 1); got {nominal_levels}")
+        if validation_draws < 10:
+            raise ValueError(
+                f"Conformal validation_draws must be at least 10 per engine; got {validation_draws}"
+            )
+        if not 0.0 <= selection_tolerance < target_coverage:
+            raise ValueError(
+                f"Conformal selection_tolerance must be in [0, {target_coverage}); "
+                f"got {selection_tolerance}"
+            )
+        if cross_folds < 2:
+            raise ValueError(f"cross_conformal_folds must be at least 2; got {cross_folds}")
         return {
-            "target_coverage": float(conformal["target_coverage"]),
-            "calibration_alpha": float(conformal["calibration_alpha"]),
-            "calibration_alpha_single_regime": float(conformal["calibration_alpha_single_regime"]),
-            "n_buckets": int(conformal["n_buckets"]),
+            "target_coverage": target_coverage,
+            "nominal_levels": nominal_levels,
+            "validation_draws": validation_draws,
+            "selection_tolerance": selection_tolerance,
+            "cross_conformal_folds": cross_folds,
+            "n_buckets": n_buckets,
         }
 
     def _bucket_indices(self, predicted_p50: np.ndarray) -> np.ndarray:
@@ -196,94 +505,312 @@ class ModelService:
     def _offset_for_p50(self, predicted_p50: float) -> float:
         return float(self._interval_offsets(np.asarray([predicted_p50], dtype=float))[0])
 
-    def _fit_conformal_buckets(self, calibration_df: pd.DataFrame) -> Dict[str, Any]:
-        """Computes split-conformal bucket offsets on disjoint calibration engines.
+    def _conformal_components(
+        self,
+        frame: pd.DataFrame,
+        models: Optional[Tuple[Any, Any, Any]] = None,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Returns p50, uncalibrated interval bounds, conformity scores, and truth."""
+        p10_model, p50_model, p90_model = models or (
+            self.rul_p10_model,
+            self.rul_p50_model,
+            self.rul_p90_model,
+        )
+        X = frame[self.feature_cols].to_numpy(dtype=np.float32)
+        y = frame["rul_capped"].to_numpy(dtype=float)
+        raw_p10 = p10_model.predict(X)
+        pred_p50 = np.maximum(0.0, p50_model.predict(X))
+        raw_p90 = p90_model.predict(X)
+        base_p10 = np.maximum(0.0, np.minimum(raw_p10, pred_p50))
+        base_p90 = np.maximum(pred_p50, np.maximum(raw_p90, pred_p50))
+        scores = np.maximum(base_p10 - y, y - base_p90)
+        return pred_p50, base_p10, base_p90, scores, y
 
-        The calibration targets are generated by the canonical CV truncation
-        protocol (not the last cycle), matching the censored test distribution.
-        A nominal coverage slightly above the target is used as a finite-sample
-        safety margin; the target coverage (0.80) is stored separately.
+    @staticmethod
+    def _conformal_quantile(values: np.ndarray, nominal_level: float) -> float:
+        n = len(values)
+        if n == 0:
+            return 0.0
+        q_level = min(1.0, np.ceil((n + 1) * nominal_level) / n)
+        return float(np.quantile(values, q_level))
+
+    def _cross_conformal_scores(
+        self,
+        all_non_test_df: pd.DataFrame,
+        folds: int,
+    ) -> Tuple[np.ndarray, np.ndarray, int]:
+        """Generates out-of-fold quantile residuals across all non-test engines.
+
+        Each engine belongs to exactly one validation fold, so its conformity
+        score comes from a model that never saw that engine. This is a true
+        cross-conformal calibration rather than reusing in-sample residuals.
+        """
+        units = sorted(int(u) for u in np.unique(all_non_test_df["unit"].values))
+        n_folds = min(int(folds), len(units))
+        if n_folds < 2:
+            raise ValueError(
+                f"[{self.subset}] cross-conformal requires at least two non-test engines; "
+                f"got {len(units)}"
+            )
+
+        protocol = load_cv_protocol()
+        splitter = GroupKFold(n_splits=n_folds)
+        oof_pred: List[np.ndarray] = []
+        oof_scores: List[np.ndarray] = []
+        completed_folds = 0
+
+        for train_idx, validation_idx in splitter.split(
+            all_non_test_df, groups=all_non_test_df["unit"]
+        ):
+            train_fold = all_non_test_df.iloc[train_idx]
+            validation_fold = all_non_test_df.iloc[validation_idx]
+            if train_fold.empty or validation_fold.empty:
+                continue
+
+            X_fold_train = train_fold[self.feature_cols].to_numpy(dtype=np.float32)
+            y_fold_train = train_fold["rul_capped"].to_numpy(dtype=float)
+            fold_models = (
+                clone(self.rul_p10_model),
+                clone(self.rul_p50_model),
+                clone(self.rul_p90_model),
+            )
+            for model in fold_models:
+                model.fit(X_fold_train, y_fold_train)
+
+            validation_frame = pd.concat(
+                eval_frames(
+                    validation_fold,
+                    mode=protocol["mode"],
+                    seed=DEFAULT_SEED,
+                    n_draws=protocol["n_draws"],
+                    min_cycles=protocol["min_cycles"],
+                ),
+                ignore_index=True,
+            )
+            pred_p50, _, _, scores, _ = self._conformal_components(
+                validation_frame, models=fold_models
+            )
+            oof_pred.append(pred_p50)
+            oof_scores.append(scores)
+            completed_folds += 1
+
+        if not oof_scores:
+            raise ValueError(f"[{self.subset}] cross-conformal produced no validation folds")
+        return np.concatenate(oof_pred), np.concatenate(oof_scores), completed_folds
+
+    def _fit_conformal_buckets(
+        self,
+        calibration_df: pd.DataFrame,
+        train_df: Optional[pd.DataFrame] = None,
+        validation_df: Optional[pd.DataFrame] = None,
+    ) -> Dict[str, Any]:
+        """Selects the nominal level on validation engines and calibrates cross-conformally.
+
+        The candidate nominal levels come from configs/pipeline.yaml. Selection
+        requires the Wilson lower bound of censored validation coverage to reach
+        ``target_coverage - selection_tolerance``; the final quantile is then
+        estimated from out-of-fold residuals across all non-test engines.
         """
         if calibration_df.empty:
             raise ValueError(
                 f"[{self.subset}] Calibration requires non-empty calibration engines; "
                 "the persistent split must provide calib_units disjoint from val_units."
             )
+        if validation_df is None or validation_df.empty:
+            raise ValueError(
+                f"[{self.subset}] Conformal nominal-level selection requires a held-out "
+                "validation-engine fold."
+            )
 
         settings = self._conformal_settings()
         target_coverage = settings["target_coverage"]
+        nominal_levels = settings["nominal_levels"]
+        validation_draws = settings["validation_draws"]
+        selection_tolerance = settings["selection_tolerance"]
+        selection_floor = target_coverage - selection_tolerance
         n_buckets = max(1, settings["n_buckets"])
-        regime_count = (
-            int(calibration_df["regime"].nunique())
-            if "regime" in calibration_df.columns
-            else 0
-        )
-        if regime_count <= 1:
-            alpha = settings["calibration_alpha_single_regime"]
-            alpha_policy = "single_regime_nominal_80"
-        else:
-            alpha = settings["calibration_alpha"]
-            alpha_policy = "multi_regime_nominal_90"
-
+        cap = get_rul_cap()
         protocol = load_cv_protocol()
-        frames = eval_frames(
-            calibration_df,
-            mode=protocol["mode"],
-            seed=DEFAULT_SEED,
-            n_draws=protocol["n_draws"],
-            min_cycles=protocol["min_cycles"],
-        )
-        calibration_frame = pd.concat(frames, ignore_index=True)
-        X_cal = calibration_frame[self.feature_cols].to_numpy(dtype=np.float32)
-        y_cal = calibration_frame["rul_capped"].to_numpy(dtype=float)
 
-        raw_p10 = self.rul_p10_model.predict(X_cal)
-        pred_p50 = np.maximum(0.0, self.rul_p50_model.predict(X_cal))
-        raw_p90 = self.rul_p90_model.predict(X_cal)
-        base_p10 = np.maximum(0.0, np.minimum(raw_p10, pred_p50))
-        base_p90 = np.maximum(pred_p50, np.maximum(raw_p90, pred_p50))
-        scores = np.maximum(base_p10 - y_cal, y_cal - base_p90)
+        calibration_frame = pd.concat(
+            eval_frames(
+                calibration_df,
+                mode=protocol["mode"],
+                seed=DEFAULT_SEED,
+                n_draws=protocol["n_draws"],
+                min_cycles=protocol["min_cycles"],
+            ),
+            ignore_index=True,
+        )
+        validation_frame = pd.concat(
+            eval_frames(
+                validation_df,
+                mode=protocol["mode"],
+                seed=DEFAULT_SEED,
+                n_draws=validation_draws,
+                min_cycles=protocol["min_cycles"],
+            ),
+            ignore_index=True,
+        )
+
+        cal_pred_p50, _, _, cal_scores, _ = self._conformal_components(calibration_frame)
+        val_pred_p50, val_base_p10, val_base_p90, _, val_truth = self._conformal_components(
+            validation_frame
+        )
+
+        validation_levels = []
+        selected_level: Optional[float] = None
+        selected_coverage: Optional[float] = None
+        selected_ci: Optional[Tuple[float, float]] = None
+        selected_n = 0
+        for level in nominal_levels:
+            q = self._conformal_quantile(cal_scores, level)
+            lower = np.maximum(0.0, val_base_p10 - q)
+            upper = val_base_p90 + q
+            censored = val_pred_p50 >= (cap - q)
+            covered = censored_coverage_mask(val_truth, lower, upper, censored)
+            coverage = float(np.mean(covered))
+            n_validation = int(len(val_truth))
+            ci_lower, ci_upper = wilson_ci(coverage, n_validation, confidence=0.95)
+            passes_floor = bool(ci_lower >= selection_floor)
+            validation_levels.append({
+                "nominal_level": round(float(level), 4),
+                "coverage": round(coverage, 4),
+                "n": n_validation,
+                "wilson_ci_95": [round(ci_lower, 4), round(ci_upper, 4)],
+                "ci_lower": round(ci_lower, 4),
+                "passes_floor": passes_floor,
+                "censored_count": int(np.sum(censored)),
+            })
+            if selected_level is None and passes_floor:
+                selected_level = float(level)
+                selected_coverage = coverage
+                selected_ci = (ci_lower, ci_upper)
+                selected_n = n_validation
+
+        if selected_level is None:
+            detail = "; ".join(
+                f"{item['nominal_level']:.2f}: cov={item['coverage']:.4f}, "
+                f"CI_low={item['ci_lower']:.4f}"
+                for item in validation_levels
+            )
+            raise ValueError(
+                f"[{self.subset}] No nominal level reaches the validation coverage floor "
+                f"{selection_floor:.4f} (target {target_coverage:.4f} - tolerance "
+                f"{selection_tolerance:.4f}). {detail}"
+            )
+
+        cross_method = "cross_conformal_all_non_test_engines"
+        cross_folds = 0
+        calibration_source = calibration_df
+        if train_df is not None and not train_df.empty:
+            try:
+                oof_pred_p50, scores, cross_folds = self._cross_conformal_scores(
+                    train_df, settings["cross_conformal_folds"]
+                )
+                calibration_source = train_df
+            except Exception as exc:
+                print(
+                    f"[{self.subset}] Cross-conformal fallback to calibration engines: {exc}"
+                )
+                oof_pred_p50 = cal_pred_p50
+                scores = cal_scores
+                cross_method = "split_conformal_cv_protocol_fallback"
+        else:
+            oof_pred_p50 = cal_pred_p50
+            scores = cal_scores
+            cross_method = "split_conformal_cv_protocol_fallback"
 
         n_scores = len(scores)
         effective_buckets = n_buckets if n_scores >= 2 * n_buckets else 1
         if effective_buckets > 1:
-            edges = np.quantile(pred_p50, np.linspace(0.0, 1.0, effective_buckets + 1)[1:-1])
+            edges = np.quantile(oof_pred_p50, np.linspace(0.0, 1.0, effective_buckets + 1)[1:-1])
             edges = np.unique(np.round(edges, 4))
             effective_buckets = len(edges) + 1
         else:
             edges = np.asarray([], dtype=float)
 
-        bucket_indices = np.searchsorted(edges, pred_p50, side="right") if edges.size else np.zeros(n_scores, dtype=int)
+        bucket_indices = (
+            np.searchsorted(edges, oof_pred_p50, side="right")
+            if edges.size
+            else np.zeros(n_scores, dtype=int)
+        )
 
-        def conformal_quantile(values: np.ndarray) -> float:
-            n = len(values)
-            if n == 0:
-                return 0.0
-            q_level = min(1.0, np.ceil((n + 1) * (1.0 - alpha)) / n)
-            return float(np.quantile(values, q_level))
+        # Cross-fitting can be mildly optimistic because its fold models see more
+        # non-test engines than the served model. Keep the held-out calibration
+        # quantile as a conservative floor so the selected nominal level still
+        # delivers covered intervals rather than silently shrinking them.
+        cross_global_q = self._conformal_quantile(scores, float(selected_level))
+        calibration_global_q = self._conformal_quantile(cal_scores, float(selected_level))
+        global_q = max(cross_global_q, calibration_global_q)
 
-        global_q = conformal_quantile(scores)
+        calibration_bucket_indices = (
+            np.searchsorted(edges, cal_pred_p50, side="right")
+            if edges.size
+            else np.zeros(len(cal_scores), dtype=int)
+        )
         bucket_q = []
         bucket_counts = []
         bucket_score_counts = []
         for b in range(effective_buckets):
             mask = bucket_indices == b
             bucket_scores = scores[mask]
+            calibration_mask = calibration_bucket_indices == b
+            calibration_bucket_scores = cal_scores[calibration_mask]
             bucket_counts.append(int(np.sum(mask)))
             bucket_score_counts.append(int(len(bucket_scores)))
-            bucket_q.append(conformal_quantile(bucket_scores) if len(bucket_scores) else global_q)
+            cross_bucket_q = (
+                self._conformal_quantile(bucket_scores, float(selected_level))
+                if len(bucket_scores)
+                else cross_global_q
+            )
+            calibration_bucket_q = (
+                self._conformal_quantile(calibration_bucket_scores, float(selected_level))
+                if len(calibration_bucket_scores)
+                else calibration_global_q
+            )
+            bucket_q.append(max(cross_bucket_q, calibration_bucket_q))
 
+        regime_count = (
+            int(calibration_source["regime"].nunique())
+            if "regime" in calibration_source.columns
+            else 0
+        )
+        selected_ci = selected_ci or (0.0, 1.0)
         metadata = {
-            "method": "split_conformal_cv_protocol",
-            "calibration_engine_count": int(calibration_df["unit"].nunique()),
+            "method": cross_method,
+            "calibration_engine_count": int(calibration_source["unit"].nunique()),
+            "n_calibration_engines": int(calibration_source["unit"].nunique()),
             "calibration_sample_count": int(n_scores),
             "target_coverage": target_coverage,
-            "calibration_alpha": alpha,
-            "alpha_policy": alpha_policy,
+            "selection_tolerance": selection_tolerance,
+            "selection_floor": round(float(selection_floor), 4),
+            "nominal_level": round(float(selected_level), 4),
+            "validation_coverage": round(float(selected_coverage), 4),
+            "validation_coverage_wilson_ci_95": [
+                round(float(selected_ci[0]), 4),
+                round(float(selected_ci[1]), 4),
+            ],
+            "validation_coverage_ci_lower": round(float(selected_ci[0]), 4),
+            "validation_coverage_ci_upper": round(float(selected_ci[1]), 4),
+            "validation_sample_count": int(selected_n or len(val_truth)),
+            "validation_engine_count": int(validation_df["unit"].nunique()),
+            "validation_draws": validation_draws,
+            "validation_truth_mode": "rul_capped",
+            "validation_coverage_rule": "censored_open_upper_bound",
+            "validation_levels": validation_levels,
+            "selection_policy": (
+                "smallest_nominal_level_with_validation_wilson_lower_bound_at_least_"
+                "target_minus_tolerance"
+            ),
+            "cross_conformal_folds": int(cross_folds),
             "calibration_regime_count": regime_count,
-            "nominal_coverage": round(1.0 - alpha, 4),
+            "n_calibration": int(n_scores),
             "protocol_id": get_protocol_id(
                 mode=protocol["mode"], seed=DEFAULT_SEED, n_draws=protocol["n_draws"]
+            ),
+            "validation_protocol_id": get_protocol_id(
+                mode=protocol["mode"], seed=DEFAULT_SEED, n_draws=validation_draws
             ),
             "n_buckets": effective_buckets,
             "edges": [float(e) for e in edges],
@@ -291,11 +818,35 @@ class ModelService:
             "bucket_counts": bucket_counts,
             "bucket_score_counts": bucket_score_counts,
             "global_q": global_q,
+            "cross_conformal_global_q": cross_global_q,
+            "calibration_global_q": calibration_global_q,
+            "coverage_floor_policy": "max_cross_conformal_and_held_out_calibration_quantile",
         }
         self.conformal_buckets = metadata
         self.conformal_q = global_q
         self.interval_calibration_offset = global_q
         return metadata
+
+    def recalibrate_conformal(self, train_df: pd.DataFrame) -> Dict[str, Any]:
+        """Recomputes conformal metadata for an already-loaded bundle."""
+        from src.common.splits import get_persistent_split
+
+        all_units = [int(u) for u in np.unique(train_df["unit"].values)]
+        split = get_persistent_split(self.subset, all_units=all_units)
+        calib_units = set(split.get("calib_units", []))
+        val_units = set(split["val_units"])
+        if not calib_units or not val_units:
+            raise ValueError(
+                f"[{self.subset}] Cannot recalibrate without distinct calibration and "
+                "validation engine folds."
+            )
+        calibration_df = train_df[train_df["unit"].isin(calib_units)].copy()
+        validation_df = train_df[train_df["unit"].isin(val_units)].copy()
+        return self._fit_conformal_buckets(
+            calibration_df,
+            train_df=train_df,
+            validation_df=validation_df,
+        )
 
     def train(self, train_df: pd.DataFrame, random_state: int = 42) -> Dict[str, Any]:
         """
@@ -303,7 +854,7 @@ class ModelService:
         1. Isolation Forest on healthy cycles
         2. Quantile RUL Regressors (p10, p50, p90) via LightGBM (or HistGB)
         3. Multi-horizon Calibrated Classifiers (10, 30, 60) with validation-tuned thresholds
-        4. Split-conformal interval calibration on validation engines (5 draws, seed 42)
+        4. Validation-selected, cross-conformal interval calibration across all non-test engines
         """
         t0 = time.time()
         print(f"[{self.subset}] Selecting features for model training...")
@@ -469,12 +1020,17 @@ class ModelService:
         self._train_val_rmse = val_rmse
         self._train_mean_baseline_rmse = mean_baseline_rmse
 
-        # 4. Split-conformal calibration on dedicated CALIBRATION engines.
-        # Calibration engines are strictly disjoint from validation engines, whose
-        # targets remain available for threshold tuning and promotion decisions.
+        # 4. Validation-selected nominal level, then cross-conformal calibration
+        # across every non-test engine. Validation engines remain held out from
+        # training and are only used to choose the nominal coverage level.
         calibration_df = train_df.loc[calib_mask].copy()
-        conformal_metadata = self._fit_conformal_buckets(calibration_df)
-        del calibration_df
+        validation_df = train_df.loc[val_mask].copy()
+        conformal_metadata = self._fit_conformal_buckets(
+            calibration_df,
+            train_df=train_df,
+            validation_df=validation_df,
+        )
+        del calibration_df, validation_df
         gc.collect()
 
         # 5. Multi-horizon Classifiers [10, 30, 60] with Validation-Tuned Thresholds
@@ -739,24 +1295,56 @@ class ModelService:
         pred_p10 = np.maximum(0.0, np.minimum(pred_p50, base_p10 - cal_offsets))
         pred_p90 = np.maximum(pred_p50, base_p90 + cal_offsets)
 
-        # Regression metrics
+        # Regression metrics. Keep the legacy `rmse` key (raw truth) and expose
+        # raw/capped-truth metrics side by side for policy and presentation.
         metrics = calculate_metrics(y_true, pred_p50)
-        
+        metrics.update(compute_cap_aware_metrics(y_true, pred_p50))
+
         # 1000-resample bootstrap 95% CI for last-window test RMSE
         boot_lower, boot_upper = bootstrap_rmse_ci(y_true, pred_p50, n_boot=1000, seed=DEFAULT_SEED)
 
-        # Coverage rate and Wilson 95% CI
-        covered = (y_true >= pred_p10) & (y_true <= pred_p90)
-        interval_coverage = float(np.mean(covered))
-        mean_interval_width = float(np.mean(pred_p90 - pred_p10))
-        wilson_lower, wilson_upper = wilson_ci(interval_coverage, len(y_true), confidence=0.95)
+        # Coverage under the censored open-upper-bound rule, split by true-RUL cap
+        # region so cap effects are visible rather than diluted into one number.
+        cap_value = float(metrics["rul_cap"])
+        censored = pred_p50 >= (cap_value - cal_offsets)
+        coverage_stats = compute_coverage_split(
+            y_true,
+            pred_p10,
+            pred_p90,
+            censored,
+            cap=cap_value,
+        )
+        metrics.update(coverage_stats)
+        covered = censored_coverage_mask(y_true, pred_p10, pred_p90, censored)
+        interval_coverage = float(coverage_stats["coverage_all"])
+        mean_interval_width = coverage_stats["mean_closed_interval_width"]
+        wilson_lower, wilson_upper = coverage_stats["coverage_all_wilson_ci_95"]
         conformal_meta = getattr(self, "conformal_buckets", None) or {}
         target_value = conformal_meta.get("target_coverage")
         if target_value is None:
             target_value = self._conformal_settings()["target_coverage"]
         target_coverage = float(target_value)
-        ci_excludes_target = bool(wilson_lower > target_coverage or wilson_upper < target_coverage)
-        ci_contains_target = bool(wilson_lower <= target_coverage <= wilson_upper)
+        coverage_policy = resolve_coverage_policy(self.subset, metrics)
+        policy_lower = coverage_policy["coverage_metric_ci_lower"]
+        policy_upper = coverage_policy["coverage_metric_ci_upper"]
+        ci_excludes_target = bool(
+            policy_lower is not None
+            and (policy_lower > target_coverage or (policy_upper is not None and policy_upper < target_coverage))
+        )
+        ci_contains_target = bool(
+            policy_lower is not None
+            and policy_upper is not None
+            and policy_lower <= target_coverage <= policy_upper
+        )
+        all_ci_excludes_target = bool(
+            wilson_lower is not None
+            and (wilson_lower > target_coverage or wilson_upper < target_coverage)
+        )
+        all_ci_contains_target = bool(
+            wilson_lower is not None
+            and wilson_upper is not None
+            and wilson_lower <= target_coverage <= wilson_upper
+        )
 
         # Per-bucket held-out coverage diagnostics.
         bucket_indices = self._bucket_indices(pred_p50)
@@ -770,6 +1358,8 @@ class ModelService:
             b_lower, b_upper = wilson_ci(bucket_cov, n_bucket, confidence=0.95) if n_bucket else (0.0, 1.0)
             lower_edge = float(edges[bucket_idx - 1]) if bucket_idx > 0 and bucket_idx - 1 < len(edges) else None
             upper_edge = float(edges[bucket_idx]) if bucket_idx < len(edges) else None
+            closed_bucket = bucket_mask & ~censored
+            bucket_widths = (pred_p90 - pred_p10)[closed_bucket]
             coverage_by_bucket.append({
                 "bucket_index": int(bucket_idx),
                 "predicted_p50_lower": lower_edge,
@@ -777,7 +1367,8 @@ class ModelService:
                 "sample_count": n_bucket,
                 "coverage": round(bucket_cov, 4),
                 "wilson_ci_95": [round(b_lower, 4), round(b_upper, 4)],
-                "mean_interval_width": round(float(np.mean((pred_p90 - pred_p10)[bucket_mask])), 2) if n_bucket else 0.0,
+                "n_censored_intervals": int(np.sum(bucket_mask & censored)),
+                "mean_interval_width": round(float(np.mean(bucket_widths)), 2) if bucket_widths.size else None,
                 "conformal_q": round(bucket_q[bucket_idx], 4) if bucket_idx < len(bucket_q) else round(float(self._require_calibration_offset()), 4),
             })
         test_by_regime = summarize_by_regime(
@@ -815,27 +1406,31 @@ class ModelService:
                 "positive_count": int(np.sum(y_true_h))
             }
 
-        pr_auc_30 = multi_horizon_metrics.get("30", {}).get("pr_auc", 0.96)
+        if "30" not in multi_horizon_metrics:
+            raise ValueError(
+                f"[{self.subset}] multi-horizon evaluation did not produce a 30-cycle metric"
+            )
+        pr_auc_30 = multi_horizon_metrics["30"]["pr_auc"]
 
-        # Real Bucket Errors
+        # Real Bucket Errors, derived from the same config-driven RUL buckets as
+        # the raw/capped metrics block.
         bucket_errors = []
-        buckets_def = [
-            ("0 - 30 cycles (Critical)", y_true <= 30),
-            ("30 - 60 cycles (High)", (y_true > 30) & (y_true <= 60)),
-            ("60 - 125 cycles (Healthy)", y_true > 60)
-        ]
-        for name, mask in buckets_def:
-            if np.any(mask):
-                diff = pred_p50[mask] - y_true[mask]
-                b_rmse = round(float(np.sqrt(np.mean(diff ** 2))), 2)
-                b_mae = round(float(np.mean(np.abs(diff))), 2)
-            else:
-                b_rmse, b_mae = 0.0, 0.0
+        for bucket in metrics["rul_bucket_metrics"]:
+            raw_rmse = bucket["rmse_vs_raw_truth"]
+            raw_mae = bucket["mae_vs_raw_truth"]
             bucket_errors.append({
-                "bucket": name,
-                "rmse": b_rmse,
-                "mae": b_mae,
-                "sample_count": int(np.sum(mask))
+                "bucket": bucket["bucket"],
+                "lower": bucket["lower"],
+                "upper": bucket["upper"],
+                "rmse": round(raw_rmse, 2) if raw_rmse is not None else 0.0,
+                "mae": round(raw_mae, 2) if raw_mae is not None else 0.0,
+                "sample_count": bucket["sample_count"],
+                "rmse_vs_raw_truth": bucket["rmse_vs_raw_truth"],
+                "rmse_vs_capped_truth": bucket["rmse_vs_capped_truth"],
+                "share_true_rul_above_cap": bucket["share_true_rul_above_cap"],
+                "rmse_on_true_rul_le_cap": bucket["rmse_on_true_rul_le_cap"],
+                "n_true_rul_le_cap": bucket["n_true_rul_le_cap"],
+                "n_true_rul_above_cap": bucket["n_true_rul_above_cap"],
             })
 
         # Real Feature Importance (Permutation on test sample)
@@ -877,10 +1472,11 @@ class ModelService:
                 "color": colors[i % len(colors)]
             })
 
-        targets_cfg = load_yaml(self.root_dir / "configs" / "targets.yaml", raw=True)
-        raw_target = targets_cfg["subsets"][self.subset]["target_rmse"]
-        target_rmse = float(raw_target["value"])
-        target_met = bool(metrics["rmse"] <= target_rmse)
+        target_policy = resolve_target_policy(self.subset, metrics)
+        target_rmse = target_policy["target_rmse"]
+        target_metric = target_policy["target_metric"]
+        target_metric_value = target_policy["target_metric_value"]
+        target_met = target_policy["target_met"]
         loader = CMAPSSLoader(subset=self.subset)
         cond, faults = loader.operating_conditions, loader.fault_modes
         status = "Target Met" if target_met else "Target Missed"
@@ -895,12 +1491,15 @@ class ModelService:
             cat = "early_safe" if diff < 0 else "late_penalty"
             
             unit_val = int(eval_rows.iloc[i]["unit"]) if "unit" in eval_rows.columns else (i + 1)
+            is_censored = bool(censored[i])
             parity_scatter.append({
                 "unit": unit_val,
                 "actual": act,
                 "predicted": pr,
                 "p10": round(float(pred_p10[i]), 1),
-                "p90": round(float(pred_p90[i]), 1),
+                "p90": None if is_censored else round(float(pred_p90[i]), 1),
+                "censored_at_cap": is_censored,
+                "interval_label": ">cap" if is_censored else "p10-p90",
                 "diff": diff,
                 "penalty": pen,
                 "category": cat
@@ -959,15 +1558,58 @@ class ModelService:
             "generalization_gap": generalization_gap,
             "pr_auc": round(pr_auc_30, 3),
             "target_rmse": target_rmse,
+            "target_metric": target_metric,
+            "target_metric_value": round(float(target_metric_value), 4),
+            "target_metric_provenance": target_policy["target_metric_provenance"],
+            "target_provenance": target_policy["target_provenance"],
             "target_met": target_met,
             "status": status,
             "interval_coverage": round(interval_coverage, 4),
-            "mean_interval_width": round(mean_interval_width, 2),
+            "mean_interval_width": (
+                round(float(mean_interval_width), 2)
+                if mean_interval_width is not None
+                else None
+            ),
             "coverage_target": target_coverage,
             "coverage_wilson_ci_95": [round(wilson_lower, 4), round(wilson_upper, 4)],
-            "coverage_wilson_ci_contains_target": ci_contains_target,
-            "coverage_ci_excludes_80": ci_excludes_target,
+            "coverage_wilson_ci_contains_target": all_ci_contains_target,
+            "coverage_all_ci_excludes_target": all_ci_excludes_target,
+            "coverage_all_ci_contains_target": all_ci_contains_target,
+            "coverage_ci_excludes_80": all_ci_excludes_target,
             "coverage_ci_excludes_target": ci_excludes_target,
+            "coverage_ci_contains_target": ci_contains_target,
+            "coverage_metric": coverage_policy["coverage_metric"],
+            "coverage_metric_value": round(float(coverage_policy["coverage_metric_value"]), 4),
+            "coverage_metric_wilson_ci_95": coverage_policy["coverage_metric_wilson_ci_95"],
+            "coverage_metric_ci_lower": coverage_policy["coverage_metric_ci_lower"],
+            "coverage_metric_ci_upper": coverage_policy["coverage_metric_ci_upper"],
+            "coverage_metric_provenance": coverage_policy["coverage_metric_provenance"],
+            "target_coverage": coverage_policy["target_coverage"],
+            "target_coverage_provenance": coverage_policy["target_coverage_provenance"],
+            "target_coverage_met": coverage_policy["target_coverage_met"],
+            "coverage_ci_lower_meets_target": coverage_policy["coverage_ci_lower_meets_target"],
+            "coverage_all": round(float(coverage_stats["coverage_all"]), 4),
+            "coverage_all_n": coverage_stats["coverage_all_n"],
+            "coverage_all_wilson_ci_95": coverage_stats["coverage_all_wilson_ci_95"],
+            "coverage_le_cap": (
+                round(float(coverage_stats["coverage_le_cap"]), 4)
+                if coverage_stats["coverage_le_cap"] is not None
+                else None
+            ),
+            "coverage_le_cap_n": coverage_stats["coverage_le_cap_n"],
+            "coverage_le_cap_wilson_ci_95": coverage_stats["coverage_le_cap_wilson_ci_95"],
+            "coverage_above_cap": (
+                round(float(coverage_stats["coverage_above_cap"]), 4)
+                if coverage_stats["coverage_above_cap"] is not None
+                else None
+            ),
+            "coverage_above_cap_n": coverage_stats["coverage_above_cap_n"],
+            "coverage_above_cap_wilson_ci_95": coverage_stats["coverage_above_cap_wilson_ci_95"],
+            "coverage_split": coverage_stats["coverage_split"],
+            "coverage_rule": coverage_stats["coverage_rule"],
+            "n_censored_intervals": coverage_stats["n_censored_intervals"],
+            "n_closed_intervals": coverage_stats["n_closed_intervals"],
+            "censored_interval_rate": round(float(coverage_stats["censored_interval_rate"]), 4),
             "coverage_by_bucket": coverage_by_bucket,
             "conformal_buckets": conformal_meta,
             "test_by_regime": test_by_regime,
@@ -996,7 +1638,12 @@ class ModelService:
             with open(report_file, "w", encoding="utf-8") as f:
                 json.dump(results, f, indent=2)
 
-        print(f"[{self.subset}] Real Evaluation: RMSE={metrics['rmse']} (target<={target_rmse}), NASA={metrics['nasa_score']}, Status={status}")
+        print(
+            f"[{self.subset}] Real Evaluation: {target_metric}={target_metric_value:.4f} "
+            f"(target<={target_rmse}), raw_rmse={metrics['rmse_vs_raw_truth']}, "
+            f"capped_rmse={metrics['rmse_vs_capped_truth']}, "
+            f"NASA={metrics['nasa_score']}, Status={status}"
+        )
         return results
 
     def evaluate_dataframe(self, df: pd.DataFrame) -> Dict[str, Any]:
@@ -1048,6 +1695,8 @@ class ModelService:
         rul_p50 = float(np.maximum(0.0, self.rul_p50_model.predict(feats)[0]))
         raw_p90 = float(self.rul_p90_model.predict(feats)[0])
 
+        cal_offset: Optional[float] = None
+        censored_at_cap = False
         if self.interval_calibration_offset is None and not self.conformal_buckets:
             # Uncalibrated model (e.g. hand-built unit model): report a degenerate interval
             # rather than inventing an offset.
@@ -1056,6 +1705,13 @@ class ModelService:
             cal_offset = self._offset_for_p50(rul_p50)
             rul_p10 = float(np.maximum(0.0, min(rul_p50, min(raw_p10, rul_p50) - cal_offset)))
             rul_p90 = float(max(rul_p50, max(raw_p90, rul_p50) + cal_offset))
+            censored_at_cap = bool(rul_p50 >= (get_rul_cap() - cal_offset))
+            if censored_at_cap:
+                # The calibrated upper bound reaches the RUL cap: the honest interval
+                # is open-ended and must never be rendered as a closed p10-p90 range.
+                rul_p90 = None
+
+        interval_label = ">cap" if censored_at_cap else "p10-p90"
 
         # Multi-horizon probabilities [10, 30, 60]
         horizons = [10, 30, 60]
@@ -1105,7 +1761,7 @@ class ModelService:
                 sorted_sensors = sorted(sensor_abs_shap.keys(), key=lambda s: sensor_abs_shap[s], reverse=True)
                 for s in sorted_sensors[:3]:
                     val = sensor_shap[s]
-                    subsystem = self.sensor_cfg.get("sensors", {}).get(s, {}).get("subsystem", "HPC")
+                    subsystem = self.sensor_cfg.get("sensors", {}).get(s, {}).get("subsystem", "Unknown")
                     s_name = self.sensor_cfg.get("sensors", {}).get(s, {}).get("name", s)
                     top_contributors.append({
                         "sensor": s,
@@ -1127,7 +1783,7 @@ class ModelService:
                     top_deviations.append((s, val, abs(val)))
             top_deviations.sort(key=lambda x: x[2], reverse=True)
             for s, val, _ in top_deviations[:3]:
-                subsystem = self.sensor_cfg.get("sensors", {}).get(s, {}).get("subsystem", "HPC")
+                subsystem = self.sensor_cfg.get("sensors", {}).get(s, {}).get("subsystem", "Unknown")
                 s_name = self.sensor_cfg.get("sensors", {}).get(s, {}).get("name", s)
                 top_contributors.append({
                     "sensor": s,
@@ -1143,7 +1799,7 @@ class ModelService:
                 m = re.match(r"^(s\d+)", f)
                 s_id = m.group(1) if m else f
                 if not any(tc.get("sensor") == s_id for tc in top_contributors):
-                    subsystem = self.sensor_cfg.get("sensors", {}).get(s_id, {}).get("subsystem", "HPC")
+                    subsystem = self.sensor_cfg.get("sensors", {}).get(s_id, {}).get("subsystem", "Unknown")
                     s_name = self.sensor_cfg.get("sensors", {}).get(s_id, {}).get("name", s_id)
                     top_contributors.append({
                         "sensor": s_id,
@@ -1159,13 +1815,21 @@ class ModelService:
         top_sensors = [c["sensor"] for c in top_contributors]
 
         return {
-            "engine_id": f"{self.subset}-{int(row_dict.get('unit', 1)):03d}",
-            "unit": int(row_dict.get("unit", 1)),
+            "engine_id": f"{self.subset}-{int(row_dict['unit']):03d}",
+            "unit": int(row_dict["unit"]),
             "subset": self.subset,
-            "cycle": int(row_dict.get("cycle", 1)),
+            "cycle": int(row_dict["cycle"]),
             "rul_p10": round(rul_p10, 1),
             "rul_p50": round(rul_p50, 1),
-            "rul_p90": round(rul_p90, 1),
+            "rul_p90": round(rul_p90, 1) if rul_p90 is not None else None,
+            "censored_at_cap": censored_at_cap,
+            "interval_label": interval_label,
+            "rul_interval_label": interval_label,
+            "interval_width": (
+                round(float(rul_p90 - rul_p10), 1)
+                if rul_p90 is not None
+                else None
+            ),
             "conservative_rul": round(conservative_rul, 1),
             "fail_prob_10": fail_prob_10,
             "fail_prob_30": fail_prob_30,
@@ -1205,6 +1869,7 @@ class ModelService:
         rul_p50 = np.maximum(0.0, self.rul_p50_model.predict(feats)) if self.rul_p50_model else np.zeros(n)
         raw_p90 = self.rul_p90_model.predict(feats) if self.rul_p90_model else np.zeros(n)
 
+        censored_at_cap = np.zeros(n, dtype=bool)
         if self.interval_calibration_offset is None and not self.conformal_buckets:
             # Uncalibrated model: degenerate intervals instead of a typed default offset.
             rul_p10, rul_p90 = rul_p50, rul_p50
@@ -1212,6 +1877,7 @@ class ModelService:
             cal_offsets = self._interval_offsets(rul_p50)
             rul_p10 = np.maximum(0.0, np.minimum(rul_p50, np.minimum(raw_p10, rul_p50) - cal_offsets))
             rul_p90 = np.maximum(rul_p50, np.maximum(raw_p90, rul_p50) + cal_offsets)
+            censored_at_cap = rul_p50 >= (get_rul_cap() - cal_offsets)
 
         # Multi-horizon probabilities [10, 30, 60]
         fail_prob_10 = np.zeros(n, dtype=np.float32)
@@ -1244,11 +1910,14 @@ class ModelService:
 
         trajectory = []
         for i in range(n):
+            is_censored = bool(censored_at_cap[i])
             trajectory.append({
                 "cycle": int(cycles[i]),
                 "rul_p10": round(float(rul_p10[i]), 1),
                 "rul_p50": round(float(rul_p50[i]), 1),
-                "rul_p90": round(float(rul_p90[i]), 1),
+                "rul_p90": None if is_censored else round(float(rul_p90[i]), 1),
+                "censored_at_cap": is_censored,
+                "interval_label": ">cap" if is_censored else "p10-p90",
                 "true_rul": round(float(true_ruls[i]), 1),
                 "health_index": round(float(health_indices[i]), 3),
                 "anomaly_score": round(float(anomaly_scores[i]), 3),
@@ -1296,7 +1965,8 @@ class ModelService:
             cal_offsets = eval_ms._interval_offsets(pred_p50)
             cal_p10 = np.maximum(0.0, np.minimum(pred_p50, np.minimum(raw_p10, pred_p50) - cal_offsets))
             cal_p90 = np.maximum(pred_p50, np.maximum(raw_p90, pred_p50) + cal_offsets)
-            cov = float(np.mean((y_true >= cal_p10) & (y_true <= cal_p90)))
+            censored = pred_p50 >= (get_rul_cap() - cal_offsets)
+            cov = float(np.mean(censored_coverage_mask(y_true, cal_p10, cal_p90, censored)))
             coverages.append(cov)
 
             probs_mat = eval_ms.classifier.predict_proba(X_test)

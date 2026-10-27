@@ -52,8 +52,13 @@ class MaintenanceQueue:
         anom_score = float(item["anomaly_score"])
         anom_term = max(0.0, min(1.0, anom_score))
 
-        rul_drop = float(item["rul_drop"])
-        trend_term = max(0.0, min(1.0, rul_drop / self.max_rul_drop))
+        # Missing history is represented as null, not a synthetic zero trend.
+        rul_drop_value = item.get("rul_drop")
+        if rul_drop_value is None:
+            trend_term = 0.0
+        else:
+            rul_drop = float(rul_drop_value)
+            trend_term = max(0.0, min(1.0, rul_drop / self.max_rul_drop))
 
         score = (
             self.w_rul * rul_term +

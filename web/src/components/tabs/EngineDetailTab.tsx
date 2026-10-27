@@ -219,9 +219,11 @@ export const EngineDetailTab: React.FC<EngineDetailTabProps> = ({
             <div className="text-right">
               <div className="text-[11px] text-slate-400 uppercase tracking-wider">Uncertainty Envelope</div>
               <div className="text-xs font-mono text-cyan-300">
-                [{pred.rul_p10} - {pred.rul_p90}]
+                {pred.censored_at_cap ? `> ${pred.rul_p10} cycles (upper open)` : `[${pred.rul_p10} - ${pred.rul_p90}]`}
               </div>
-              <div className="text-[10px] text-slate-500">p10 to p90 interval</div>
+              <div className="text-[10px] text-slate-500">
+                {pred.censored_at_cap ? "Censored at RUL cap · no finite p90" : "p10 to p90 interval"}
+              </div>
             </div>
           </div>
 
@@ -261,7 +263,7 @@ export const EngineDetailTab: React.FC<EngineDetailTabProps> = ({
             </div>
           </div>
           <p className="text-[11px] text-slate-400">
-            Shaded blue envelope represents 80% confidence interval [p10–p90]. Model tracks linear degradation.
+            Shaded blue envelope represents the 80% confidence interval. Predictions whose calibrated upper bound reaches the RUL cap are censored and rendered as open-ended <span className="font-mono text-cyan-300">&gt;cap</span> intervals with no finite p90.
           </p>
 
           <div className="h-72 w-full pt-2">
@@ -272,6 +274,19 @@ export const EngineDetailTab: React.FC<EngineDetailTabProps> = ({
                 <YAxis stroke="#6b7280" fontSize={11} tickLine={false} domain={[0, 'auto']} />
                 <Tooltip 
                   contentStyle={{ backgroundColor: "#0f172a", borderColor: "#374151", borderRadius: "12px", fontSize: "12px" }}
+                  content={({ active, payload }) => {
+                    if (!active || !payload || !payload.length) return null;
+                    const d: any = payload[0].payload;
+                    return (
+                      <div className="bg-slate-900/95 border border-slate-700 rounded-xl p-3 text-xs space-y-1 font-mono shadow-xl">
+                        <div className="text-slate-400">Cycle {d.cycle}</div>
+                        <div className="text-indigo-300">p50: {d.rul_p50} cycles</div>
+                        <div className="text-cyan-300">
+                          {d.censored_at_cap ? `> ${d.rul_p10} cycles (upper open)` : `80% interval: [${d.rul_p10} - ${d.rul_p90}]`}
+                        </div>
+                      </div>
+                    );
+                  }}
                 />
                 <Area 
                   type="monotone" 

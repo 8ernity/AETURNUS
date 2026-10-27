@@ -118,3 +118,11 @@ settings:
   setting_3:
     name: "Throttle Resolver Angle"
     units: "deg"
+
+# Presentation-only aggregation of sensor-map subsystems into radar groups.
+subsystem_groups:
+  "Fan / LPC": ["Fan", "LPC"]
+  "HPC": ["HPC"]
+  "Combustor": ["Combustor"]
+  "HPT": ["Core", "HPT"]
+  "LPT / Exhaust": ["LPT", "Bleed"]
