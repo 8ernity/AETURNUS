@@ -111,12 +111,19 @@ def run_model_gate() -> bool:
         rmse_gate_passed = rmse_diff <= TOLERANCE_RMSE
 
         # 5. Verify Monotonicity (p10 <= p50 <= p90)
+        # A null p90 is the documented open-ended interval for predictions
+        # censored at the RUL cap; it is not a quantile crossing.
         monotonic_violations = 0
         sample_rows = test_df.sample(min(100, len(test_df)), random_state=42)
         for _, row in sample_rows.iterrows():
             pred = ms.predict_point(row.to_dict())
             p10, p50, p90 = pred["rul_p10"], pred["rul_p50"], pred["rul_p90"]
-            if not (0.0 <= p10 <= p50 <= p90):
+            if p10 is None or p50 is None:
+                monotonic_violations += 1
+            elif p90 is None:
+                if not pred.get("censored_at_cap") or not (0.0 <= p10 <= p50):
+                    monotonic_violations += 1
+            elif not (0.0 <= p10 <= p50 <= p90):
                 monotonic_violations += 1
 
         monotonic_passed = (monotonic_violations == 0)

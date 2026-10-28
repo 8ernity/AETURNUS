@@ -26,11 +26,19 @@ import io
 import re
 
 def trim_memory():
-    """Forces garbage collection and releases glibc heap memory back to the Linux OS."""
+    """Release freed Python, glibc, and PyArrow memory back to the OS."""
     gc.collect()
     try:
         libc = ctypes.CDLL("libc.so.6")
         libc.malloc_trim(0)
+    except Exception:
+        pass
+    try:
+        # Parquet reads use PyArrow's mimalloc/jemalloc pools, which retain
+        # large freed buffers after wide dataframes are evicted.
+        import pyarrow as pa
+
+        pa.default_memory_pool().release_unused()
     except Exception:
         pass
 
@@ -190,8 +198,28 @@ class ReplayState:
 replay_state = ReplayState()
 active_websockets: List[WebSocket] = []
 
-# Cached processed dataframes (Single-subset active cache to keep RAM < 200MB)
+# Cached processed dataframes (single-subset active cache to keep RAM < 200MB)
 loaded_dfs: Dict[str, pd.DataFrame] = {}
+
+def _evict_other_subset_dataframes(keep_subset: str) -> None:
+    """Keep only the requested subset's frames resident.
+
+    The FD002/FD004 parquets are large (tens of thousands of rows and hundreds
+    of engineered columns). Retaining frames for every subset visited by the UI
+    can exceed a 512 MB instance even though each individual load succeeds.
+    """
+    evicted = False
+    for key in list(loaded_dfs):
+        if not key.endswith(f"_{keep_subset}"):
+            loaded_dfs.pop(key, None)
+            evicted = True
+    with _trajectory_cache_lock:
+        for key in list(engine_trajectory_cache):
+            if key[0] != keep_subset:
+                engine_trajectory_cache.pop(key, None)
+                evicted = True
+    if evicted:
+        trim_memory()
 
 def _load_downcasted_parquet(path: Path) -> pd.DataFrame:
     df = pd.read_parquet(path)
@@ -249,6 +277,7 @@ def get_test_df(subset: str = "FD001") -> pd.DataFrame:
     validate_subset(subset)
     key = f"test_{subset}"
     if key not in loaded_dfs:
+        _evict_other_subset_dataframes(subset)
         proc_path = ROOT_DIR / "data" / "processed" / subset / "test.parquet"
         if not proc_path.exists():
             from src.features.pipeline import DataPipeline
@@ -261,6 +290,7 @@ def get_train_df(subset: str = "FD001") -> pd.DataFrame:
     validate_subset(subset)
     key = f"train_{subset}"
     if key not in loaded_dfs:
+        _evict_other_subset_dataframes(subset)
         proc_path = ROOT_DIR / "data" / "processed" / subset / "train.parquet"
         if not proc_path.exists():
             from src.features.pipeline import DataPipeline
@@ -431,8 +461,25 @@ def bootstrap_fleet_triage(subsets: Optional[List[str]] = None):
         except Exception as e:
             print(f"Bootstrap triage notice for {sub}: {e}")
 
+def _startup_warmup_subsets() -> List[str]:
+    """Return the subsets to warm, defaulting to the active subset only.
+
+    Warming all four subsets on a 512 MB instance is what previously caused the
+    web service to exceed its memory limit. Deployments that can afford it may
+    opt in with ``AETURNUS_WARM_SUBSETS=all`` or a comma-separated list.
+    """
+    configured = os.getenv("AETURNUS_WARM_SUBSETS", "").strip()
+    if not configured:
+        return [current_subset]
+    if configured.lower() == "all":
+        return list(CONFIGURED_SUBSETS)
+    requested = [item.strip().upper() for item in configured.split(",") if item.strip()]
+    valid = [item for item in requested if item in VALID_SUBSETS]
+    return valid or [current_subset]
+
+
 def _warm_startup_caches() -> None:
-    """Warm every configured subset after Uvicorn has bound its port.
+    """Warm the configured startup subsets after Uvicorn has bound its port.
 
     Port binding must never wait for dataset/model loading. Each subset is
     warmed sequentially in this background worker so peak memory stays bounded;
@@ -443,7 +490,7 @@ def _warm_startup_caches() -> None:
     # must not replay stale fleet state into an otherwise empty work-order DB.
     bootstrap_enabled = os.getenv("AETURNUS_BOOTSTRAP_TRIAGE", "0").lower() in ("1", "true", "yes")
 
-    for subset in CONFIGURED_SUBSETS:
+    for subset in _startup_warmup_subsets():
         try:
             print(f"[STARTUP] Warming {subset} in background...", flush=True)
             ms = get_model_service(subset)

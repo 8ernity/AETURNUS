@@ -21,7 +21,7 @@ subsets:
     target_rmse:
       kind: policy
       source: PHM08 empirical threshold for single operating condition (sea level)
-      value: 1.0
+      value: 14.0
   FD002:
     target_rmse:
       kind: policy

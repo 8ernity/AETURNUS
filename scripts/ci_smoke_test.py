@@ -30,6 +30,7 @@ def run_smoke_test():
     assert "cleaning" in pipeline_cfg, "pipeline.yaml missing cleaning"
     monitoring_cfg = load_yaml("configs/monitoring.yaml")
     assert "drift" in monitoring_cfg, "monitoring.yaml missing drift"
+    targets_cfg = load_yaml("configs/targets.yaml")
     print("  --> Configurations loaded successfully.")
 
     # 2. Manifest & model artifacts
@@ -51,6 +52,12 @@ def run_smoke_test():
         metrics = info.get("metrics") or {}
         assert float(metrics.get("rmse", 0.0)) > 0.0, f"Invalid RMSE in manifest for {sub}"
         assert "multi_seed" in info, f"Missing multi_seed in manifest for {sub}"
+
+        configured_target = targets_cfg["subsets"][sub]["target_rmse"]
+        assert float(configured_target) == float(info["target_rmse"]), (
+            f"Configured target for {sub} ({configured_target}) does not match "
+            f"the manifest ({info['target_rmse']})"
+        )
 
         bundle_f = models_dir / f"model_bundle_{sub}.joblib"
         assert bundle_f.exists(), f"Missing model bundle: {bundle_f}"

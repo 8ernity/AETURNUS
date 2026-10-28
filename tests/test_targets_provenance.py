@@ -32,15 +32,20 @@ def test_change_target_in_yaml_propagates_without_code_edits():
     try:
         # Load targets
         targets_data = yaml.safe_load(targets_orig)
-        # Flip FD001 target to an impossibly low value (e.g. 1.0) so target_met is guaranteed False
-        targets_data["subsets"]["FD001"]["target_rmse"]["value"] = 1.0
+        original_target = float(
+            targets_data["subsets"]["FD001"]["target_rmse"]["value"]
+        )
+        # Use an impossibly low target so target_met is guaranteed False, while
+        # still exercising a real config change even if the shipped target is 1.0.
+        test_target = 1.0 if original_target != 1.0 else 14.0
+        targets_data["subsets"]["FD001"]["target_rmse"]["value"] = test_target
         with open(targets_file, "w", encoding="utf-8") as f:
             yaml.dump(targets_data, f)
 
-        # Rerun evaluate for FD001
-        res = evaluate_subset("FD001", root_dir)
+        # Rerun evaluate for FD001 without promoting over the tracked serving bundle.
+        res = evaluate_subset("FD001", root_dir, persist_active=False)
         assert res["target_met"] is False
-        assert res["target_rmse"] == 1.0
+        assert res["target_rmse"] == test_target
 
         # Update manifest file with this evaluation
         with open(manifest_file, "r", encoding="utf-8") as f:
@@ -55,7 +60,7 @@ def test_change_target_in_yaml_propagates_without_code_edits():
         benchmarks = resp.json()["benchmarks"]
         fd001_bench = next(b for b in benchmarks if b["subset"] == "FD001")
         assert fd001_bench["target_met"] is False
-        assert fd001_bench["target_rmse"] == 1.0
+        assert fd001_bench["target_rmse"] == test_target
 
         # 2. README render must reflect target status
         success = update_or_check_readme(check_only=False)

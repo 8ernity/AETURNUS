@@ -82,13 +82,17 @@ To run reliably within free-tier resource boundaries (e.g., 512 MB RAM limit):
    - Health Check Path: `/api/v1/health`
    - Port: Render-injected `$PORT` (local default `8000`)
 
-4. **Fast Port Binding**:
+4. **Fast Port Binding & Bounded Warmup**:
    - FastAPI does not load datasets or models during lifespan startup. It
-     returns from startup immediately and warms all configured subsets
-     sequentially in a background thread, so Render's `$PORT` opens without
+     returns from startup immediately and warms only the active subset
+     (`FD001`) in a background thread, so Render's `$PORT` opens without
      waiting for model/data work.
-   - Each subset's telemetry frames are evicted after its fleet prediction cache
-     is primed, keeping peak memory bounded on 512 MB instances.
+   - Set `AETURNUS_WARM_SUBSETS=all` (or a comma-separated subset list) only on
+     instances with enough RAM. Warming all four subsets can exceed a 512 MB
+     limit.
+   - Only one subset's telemetry frames stay resident at a time; frames for
+     other subsets are evicted before a new subset is loaded and after its
+     fleet prediction cache is primed.
 
 ---
 

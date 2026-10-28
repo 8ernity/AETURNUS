@@ -209,7 +209,9 @@ def build_manifest_metrics(res: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def evaluate_subset(sub: str, root_dir: Path, force: bool = False) -> Dict[str, Any]:
+def evaluate_subset(
+    sub: str, root_dir: Path, force: bool = False, persist_active: bool = True
+) -> Dict[str, Any]:
     test_path = root_dir / "data" / "processed" / sub / "test.parquet"
     train_path = root_dir / "data" / "processed" / sub / "train.parquet"
     test_df = pd.read_parquet(test_path)
@@ -258,12 +260,19 @@ def evaluate_subset(sub: str, root_dir: Path, force: bool = False) -> Dict[str, 
     ms.algorithm = selected_algo
     ms.train(train_df)
     version = getattr(ms, "version", "v1.0")
-    ms.save(version=version)
-    ms.promote(version=version)
-    ms.load()
+    versioned_bundle_path = ms.save(version=version)
+    if persist_active:
+        ms.promote(version=version)
+        ms.load()
+        served_bundle_path = (
+            root_dir / "artifacts" / "models" / f"model_bundle_{sub}.joblib"
+        )
+    else:
+        # Evaluation-only callers must not rewrite the tracked serving artifact.
+        ms.load(version=version)
+        served_bundle_path = versioned_bundle_path
 
-    active_bundle_path = root_dir / "artifacts" / "models" / f"model_bundle_{sub}.joblib"
-    bundle = joblib.load(active_bundle_path)
+    bundle = joblib.load(served_bundle_path)
     p50_model_class = type(bundle["rul_p50_model"]).__name__
     served_algo = algorithm_for_p50_model(bundle["rul_p50_model"])
     if served_algo != selected_algo:
@@ -316,7 +325,7 @@ def evaluate_subset(sub: str, root_dir: Path, force: bool = False) -> Dict[str, 
     res = ms.evaluate_test(test_df, rul_truth)
 
     # Compute full bundle sha256
-    bundle_sha256 = hashlib.sha256(active_bundle_path.read_bytes()).hexdigest()
+    bundle_sha256 = hashlib.sha256(served_bundle_path.read_bytes()).hexdigest()
 
     # Resolve target_met from the named metric policies in configs/targets.yaml.
     target_policy = resolve_target_policy(sub, res["metrics"])
