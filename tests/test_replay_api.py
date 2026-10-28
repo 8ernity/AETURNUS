@@ -5,7 +5,9 @@ from src.api.server import app, replay_state, current_subset
 from src.common.utils import get_root_dir
 from src.features.streaming import StreamingEnginePipeline
 
-client = TestClient(app)
+from tests.auth_helpers import ADMIN_HEADERS
+
+client = TestClient(app, headers=ADMIN_HEADERS)
 
 
 @pytest.fixture(autouse=True)

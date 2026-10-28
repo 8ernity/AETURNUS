@@ -11,7 +11,9 @@ from src.common.utils import get_root_dir
 import joblib
 import pandas as pd
 
-client = TestClient(app)
+from tests.auth_helpers import ADMIN_HEADERS
+
+client = TestClient(app, headers=ADMIN_HEADERS)
 root_dir = get_root_dir()
 
 def test_get_registry_is_strictly_read_only():

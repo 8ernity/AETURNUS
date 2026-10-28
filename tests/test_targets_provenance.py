@@ -7,7 +7,9 @@ from src.common.utils import get_root_dir, load_yaml
 from scripts.evaluate_all_models import evaluate_subset
 from scripts.render_readme import update_or_check_readme
 
-client = TestClient(app)
+from tests.auth_helpers import ADMIN_HEADERS
+
+client = TestClient(app, headers=ADMIN_HEADERS)
 
 def test_change_target_in_yaml_propagates_without_code_edits():
     """

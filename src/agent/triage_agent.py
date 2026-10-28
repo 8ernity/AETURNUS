@@ -887,11 +887,20 @@ class TriageAgent:
         """Returns a list of all currently active/open work orders."""
         return list(self.open_orders.values())
 
-    def human_action(self, work_order_id: str, action: str, new_severity: Optional[str] = None, reason: str = "", current_cycle: Optional[int] = None) -> bool:
+    def human_action(
+        self,
+        work_order_id: str,
+        action: str,
+        new_severity: Optional[str] = None,
+        reason: str = "",
+        current_cycle: Optional[int] = None,
+        actor: str = "HumanOperator",
+    ) -> bool:
         """
         Human-in-the-loop exception handling:
         Actions: APPROVE, REJECT, OVERRIDE, CLOSE
         Persists action in SQLite audit_events and updates work order state.
+        The authenticated API actor is recorded instead of a placeholder role.
         """
         target_order = None
         target_engine = None
@@ -915,7 +924,7 @@ class TriageAgent:
                 "cycle": cycle,
                 "event": f"Advanced to lifecycle stage {next_stage}",
                 "reason": reason or "Standard maintenance progression",
-                "actor": "MaintenanceEngineer"
+                "actor": actor
             })
             if next_stage == "CLOSED":
                 target_order["closed_at_cycle"] = cycle
@@ -927,7 +936,7 @@ class TriageAgent:
             self._log_audit_event(
                 engine_id=target_engine,
                 action=f"STAGE_{next_stage}",
-                actor="MaintenanceEngineer",
+                actor=actor,
                 cycle=cycle,
                 work_order_id=work_order_id,
                 reason=reason or f"Advanced to {next_stage}"
@@ -940,7 +949,7 @@ class TriageAgent:
                 "cycle": cycle,
                 "event": f"Lifecycle stage set to {action}",
                 "reason": reason or "Operator stage transition",
-                "actor": "HumanOperator"
+                "actor": actor
             })
             if action == "CLOSED":
                 target_order["closed_at_cycle"] = cycle
@@ -952,7 +961,7 @@ class TriageAgent:
             self._log_audit_event(
                 engine_id=target_engine,
                 action=f"STAGE_{action}",
-                actor="HumanOperator",
+                actor=actor,
                 cycle=cycle,
                 work_order_id=work_order_id,
                 reason=reason or f"Status set to {action}"
@@ -961,14 +970,14 @@ class TriageAgent:
 
         elif action == "APPROVE":
             target_order["status"] = "APPROVED"
-            target_order["events"].append({"cycle": cycle, "event": "Approved by human engineer", "reason": reason, "actor": "HumanOperator"})
+            target_order["events"].append({"cycle": cycle, "event": "Approved by human engineer", "reason": reason, "actor": actor})
             self._persist_order(target_order)
-            self._log_audit_event(engine_id=target_engine, action="APPROVE", actor="HumanOperator", cycle=cycle, work_order_id=work_order_id, reason=reason)
+            self._log_audit_event(engine_id=target_engine, action="APPROVE", actor=actor, cycle=cycle, work_order_id=work_order_id, reason=reason)
 
         elif action == "REJECT":
             target_order["status"] = "REJECTED"
             target_order["closed_at_cycle"] = cycle
-            target_order["events"].append({"cycle": cycle, "event": "Rejected by human engineer", "reason": reason, "actor": "HumanOperator"})
+            target_order["events"].append({"cycle": cycle, "event": "Rejected by human engineer", "reason": reason, "actor": actor})
             # Apply suppression window
             suppression_cycles = int(self.rules_cfg["lifecycle"]["suppression_window_cycles"])
             self.suppressed_engines[target_engine] = cycle + suppression_cycles
@@ -983,7 +992,7 @@ class TriageAgent:
             self._log_audit_event(
                 engine_id=target_engine,
                 action="REJECT",
-                actor="HumanOperator",
+                actor=actor,
                 cycle=cycle,
                 work_order_id=work_order_id,
                 reason=reason
@@ -992,17 +1001,17 @@ class TriageAgent:
         elif action == "OVERRIDE" and new_severity in SEVERITY_ORDER:
             target_order["severity"] = new_severity
             target_order["status"] = "OVERRIDDEN"
-            target_order["events"].append({"cycle": cycle, "event": f"Severity manually overridden to {new_severity}", "reason": reason, "actor": "HumanOperator"})
+            target_order["events"].append({"cycle": cycle, "event": f"Severity manually overridden to {new_severity}", "reason": reason, "actor": actor})
             if target_engine in self.engine_hysteresis:
                 self.engine_hysteresis[target_engine]["held_severity"] = new_severity
                 self._persist_hysteresis(target_engine, self.engine_hysteresis[target_engine])
             self._persist_order(target_order)
-            self._log_audit_event(engine_id=target_engine, action="OVERRIDE", actor="HumanOperator", cycle=cycle, work_order_id=work_order_id, reason=reason)
+            self._log_audit_event(engine_id=target_engine, action="OVERRIDE", actor=actor, cycle=cycle, work_order_id=work_order_id, reason=reason)
 
         elif action == "CLOSE":
             target_order["status"] = "CLOSED"
             target_order["closed_at_cycle"] = cycle
-            target_order["events"].append({"cycle": cycle, "event": "Work order closed", "reason": reason, "actor": "HumanOperator"})
+            target_order["events"].append({"cycle": cycle, "event": "Work order closed", "reason": reason, "actor": actor})
             
             if target_engine not in self.closed_orders_history:
                 self.closed_orders_history[target_engine] = []
@@ -1010,7 +1019,12 @@ class TriageAgent:
             del self.open_orders[target_engine]
 
             self._persist_order(target_order)
-            self._log_audit_event(engine_id=target_engine, action="CLOSE", actor="HumanOperator", cycle=cycle, work_order_id=work_order_id, reason=reason)
+            self._log_audit_event(engine_id=target_engine, action="CLOSE", actor=actor, cycle=cycle, work_order_id=work_order_id, reason=reason)
+
+        else:
+            # Unknown action or an OVERRIDE without a valid severity must be a
+            # failed call, not a silent 200 with no state change.
+            return False
 
         return True
 

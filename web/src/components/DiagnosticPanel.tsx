@@ -78,6 +78,8 @@ export const DiagnosticPanel: React.FC<DiagnosticPanelProps> = ({
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const avatarRef = useRef<AvatarController | null>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
+  const animationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const animationIdRef = useRef<number>(0);
 
   // Derived metrics from fleet data
   const engines = fleetData?.engines || [];
@@ -105,14 +107,28 @@ export const DiagnosticPanel: React.FC<DiagnosticPanelProps> = ({
     }
   ]);
 
-  // Trigger avatar animation
+  // Trigger avatar animation. Reactions are transient and settle back to idle;
+  // a persistent critical fleet should not pin the copilot in an angry state.
   const triggerAnimation = (anim: AnimationName, durationMs: number = 3500) => {
+    if (animationTimerRef.current !== null) {
+      clearTimeout(animationTimerRef.current);
+      animationTimerRef.current = null;
+    }
+
+    const animationId = ++animationIdRef.current;
     setCurrentAnimation(anim);
-    setManualOverride(true);
-    setTimeout(() => {
-      setManualOverride(false);
-      setCurrentAnimation(criticalCount > 0 ? "angry" : "idle");
-    }, durationMs);
+    setManualOverride(durationMs > 0);
+
+    if (durationMs > 0) {
+      animationTimerRef.current = setTimeout(() => {
+        if (animationIdRef.current !== animationId) return;
+        animationTimerRef.current = null;
+        setManualOverride(false);
+        setCurrentAnimation("idle");
+      }, durationMs);
+    }
+
+    return animationId;
   };
 
   // Audio / Speech Synthesis (Avionics chime + Web Speech API)
@@ -159,18 +175,19 @@ export const DiagnosticPanel: React.FC<DiagnosticPanelProps> = ({
       playCockpitChime();
       
       setTimeout(() => {
+        if (!window.speechSynthesis) return;
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.rate = 1.05;
         utterance.pitch = 1.0;
-        setCurrentAnimation("excited");
+        const speechAnimationId = triggerAnimation("excited", 5000);
         utterance.onend = () => {
-          if (!manualOverride) {
-            setCurrentAnimation(criticalCount > 0 ? "angry" : "idle");
+          if (animationIdRef.current === speechAnimationId) {
+            triggerAnimation("idle", 0);
           }
         };
         utterance.onerror = () => {
-          if (!manualOverride) {
-            setCurrentAnimation(criticalCount > 0 ? "angry" : "idle");
+          if (animationIdRef.current === speechAnimationId) {
+            triggerAnimation("idle", 0);
           }
         };
         window.speechSynthesis.speak(utterance);
@@ -188,22 +205,37 @@ export const DiagnosticPanel: React.FC<DiagnosticPanelProps> = ({
       const alertKey = `${top.engine_id}-${top.severity}-${top.cycle}`;
       if (top.severity === "CRITICAL" && alertKey !== lastAlertIdRef.current) {
         lastAlertIdRef.current = alertKey;
-        setCurrentAnimation("angry");
+        triggerAnimation("angry", 5000);
         speakCockpitWarning(`Master Warning. Critical severity detected on Turbofan Unit ${top.engine_id}. Remaining useful life under 15 cycles.`);
       }
     }
   }, [recentAlerts, voiceEnabled]);
 
-  // Expression updates based on fleet state
+  // Only a *new* critical detection triggers anger. A fleet that already has
+  // critical engines should not leave the copilot permanently angry.
+  const previousCriticalCountRef = useRef<number>(0);
   useEffect(() => {
-    if (!manualOverride && !isProcessing) {
-      if (criticalCount > 0) {
-        setCurrentAnimation("angry");
-      } else {
-        setCurrentAnimation("idle");
-      }
+    const previousCount = previousCriticalCountRef.current;
+    previousCriticalCountRef.current = criticalCount;
+
+    if (isProcessing) return;
+
+    if (criticalCount > previousCount) {
+      triggerAnimation("angry", 5000);
+    } else if (criticalCount === 0 && previousCount > 0 && !manualOverride) {
+      setCurrentAnimation("idle");
     }
-  }, [criticalCount, manualOverride, isProcessing]);
+  }, [criticalCount, isProcessing, manualOverride]);
+
+  // Clear any pending expression reset when the panel unmounts.
+  useEffect(() => {
+    return () => {
+      if (animationTimerRef.current !== null) {
+        clearTimeout(animationTimerRef.current);
+        animationTimerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (chatScrollRef.current) {
@@ -225,7 +257,7 @@ export const DiagnosticPanel: React.FC<DiagnosticPanelProps> = ({
     setMessages((prev) => [...prev, userMsg]);
     setInputQuery("");
     setIsProcessing(true);
-    setCurrentAnimation("thinking");
+    triggerAnimation("thinking", 0);
 
     const lower = queryText.toLowerCase();
 
@@ -245,7 +277,7 @@ export const DiagnosticPanel: React.FC<DiagnosticPanelProps> = ({
               `Average RUL: ${avgRul} cycles across ${currentSubset}`,
               `Zero engines currently breached the 30-cycle alert threshold`
             ];
-            setCurrentAnimation("happy");
+            triggerAnimation("happy", 5000);
           } else {
             replyText = `Identified ${critList.length} CRITICAL and ${highList.length} HIGH severity engines requiring intervention:`;
             bullets = [
@@ -256,7 +288,7 @@ export const DiagnosticPanel: React.FC<DiagnosticPanelProps> = ({
                 `HIGH Unit ${e.engine_id}: RUL = ${e.conservative_rul} cycles. Prioritized for scheduled inspection.`
               )
             ];
-            setCurrentAnimation("angry");
+            triggerAnimation("angry", 5000);
             if (critList.length > 0) {
               speakCockpitWarning(`Alert: ${critList.length} critical turbofan engines detected in fleet. Unit ${critList[0].engine_id} has conservative life of ${critList[0].conservative_rul} cycles.`);
             }
@@ -305,10 +337,10 @@ export const DiagnosticPanel: React.FC<DiagnosticPanelProps> = ({
         ];
 
         if (consRul <= 15) {
-          setCurrentAnimation("angry");
+          triggerAnimation("angry", 5000);
           speakCockpitWarning(`Warning. Engine ${data.engine_id} is critical. Degradation driven by ${topDev.subsystem || "HPC"}. Priority queue escalation advised.`);
         } else {
-          setCurrentAnimation("working");
+          triggerAnimation("working", 4000);
         }
 
         setMessages((prev) => [
@@ -325,7 +357,7 @@ export const DiagnosticPanel: React.FC<DiagnosticPanelProps> = ({
         ]);
       } else {
         // Fallback for general engines from fleet summary
-        setCurrentAnimation("searching");
+        triggerAnimation("searching", 4000);
         setMessages((prev) => [
           ...prev,
           {
@@ -354,7 +386,7 @@ export const DiagnosticPanel: React.FC<DiagnosticPanelProps> = ({
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
         }
       ]);
-      setCurrentAnimation("idle");
+      triggerAnimation("idle", 0);
     } finally {
       setIsProcessing(false);
     }

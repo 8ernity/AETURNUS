@@ -6,7 +6,9 @@ from src.mlops.drift_and_retrain import MLOpsManager
 from src.common.utils import get_root_dir
 from src.common.state import state_db_path
 
-client = TestClient(app)
+from tests.auth_helpers import ADMIN_HEADERS
+
+client = TestClient(app, headers=ADMIN_HEADERS)
 root_dir = get_root_dir()
 
 def test_default_state_must_not_alarm():

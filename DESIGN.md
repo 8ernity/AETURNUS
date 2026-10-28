@@ -1,7 +1,7 @@
 # AETURNUS Design System: Glassmorphic Aviation Cockpit (HUD PdM)
 
 ## 1. Design Concept & Aerospace Vibe
-AETURNUS is engineered as an **industrial-grade aviation cockpit and telemetry station** — combining the aesthetics of modern aerospace flight displays (SpaceX Crew Dragon, F-35 panoramic cockpit displays) with the precision of professional acoustic/telemetry hardware analyzers.
+AETURNUS is engineered as an **end-to-end aviation cockpit and telemetry station** — combining the aesthetics of modern aerospace flight displays (SpaceX Crew Dragon, F-35 panoramic cockpit displays) with the precision of professional acoustic/telemetry hardware analyzers.
 
 - **Theme**: Dark mode by default, ultra-high-contrast industrial flight telemetry.
 - **Surface Depth**: Obsidian void backgrounds layered with multi-tier frosted glass panels (`backdrop-blur-xl`), razor-sharp micro-borders, and subtle cockpit mesh gradients.

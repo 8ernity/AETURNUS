@@ -1,0 +1,34 @@
+# configs/auth.yaml
+# Authentication roles and API surface policy.
+#
+# Credentials are never stored in this file. Provide them through environment
+# variables:
+#   AETURNUS_API_KEYS='{"key":"admin"}'            # JSON key -> role or {role, actor}
+#   AETURNUS_API_KEY_ADMIN=...                     # per-role convenience keys
+#   AETURNUS_API_KEY_ADMIN_ACTOR=...               # optional actor label for audit
+#   AETURNUS_JWT_SECRET=...                        # HS256 signing secret
+#
+# A JWT must carry `sub` and `role` claims and may carry `exp`/`nbf` Unix
+# timestamps. API keys are accepted through the `X-API-Key` header or as a
+# Bearer token when the value is not a JWT.
+
+roles:
+  admin:
+    description: "Full administrative access, including model promotion and rollback."
+  operator:
+    description: "Fleet operations, replay controls, retraining, uploads, and maintenance actions."
+  technician:
+    description: "Maintenance execution, work-order lifecycle, and self-healing recommendation completion."
+  viewer:
+    description: "Read-only telemetry access and authenticated WebSocket streaming."
+
+api_key:
+  header: "X-API-Key"
+  env_prefix: "AETURNUS_API_KEY_"
+  json_env: "AETURNUS_API_KEYS"
+
+jwt:
+  algorithm: "HS256"
+  secret_env: "AETURNUS_JWT_SECRET"
+  issuer_env: "AETURNUS_JWT_ISSUER"
+  audience_env: "AETURNUS_JWT_AUDIENCE"

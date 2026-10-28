@@ -1,7 +1,15 @@
-# ⚡ AETURNUS
+<p align="center">
+  <img src="web/public/aeturnus-mark.png" alt="AETURNUS logo" width="160" />
+</p>
 
-> **Autonomous Equipment Tracking and Uptime Restoration through Networked Unified Systems**  
-> An industrial-grade, closed-loop predictive maintenance (PdM) ecosystem for commercial aircraft turbofans. Combines regime-aware signal processing, multi-head probabilistic machine learning, deep learning baselines, and a deterministic triage agent on the NASA C-MAPSS benchmark — with empirical verification from artifact reports.
+<p align="center">
+  <img src="web/src/assets/aeturnus-name.png" alt="AETURNUS" width="440" />
+</p>
+
+<p align="center">
+  <strong>Autonomous Equipment Tracking and Uptime Restoration through Networked Unified Systems</strong><br />
+  An end-to-end, closed-loop predictive maintenance (PdM) ecosystem for commercial aircraft turbofans. Combines regime-aware signal processing, multi-head probabilistic machine learning, deep learning baselines, and a deterministic triage agent on the NASA C-MAPSS benchmark — with empirical verification from artifact reports.
+</p>
 
 <div align="center">
 
@@ -15,7 +23,9 @@
 [![MLflow](https://img.shields.io/badge/MLflow-3.0+-0194E2.svg?style=flat&logo=mlflow)](https://mlflow.org/)
 [![SQLite](https://img.shields.io/badge/SQLite-3-003B57.svg?style=flat&logo=sqlite)](https://sqlite.org/)
 [![Dataset](https://img.shields.io/badge/Dataset-NASA%20C--MAPSS-0B3D91.svg?style=flat&logo=nasa)](https://data.nasa.gov/)
-[![Tests](https://img.shields.io/badge/Tests-69%20Passed-brightgreen.svg?style=flat&logo=pytest)](https://docs.pytest.org/)
+<!-- AUTO-TEST-BADGE-START -->
+[![Tests](https://img.shields.io/badge/Tests-183%20Collected-brightgreen.svg?style=flat&logo=pytest)](https://docs.pytest.org/)
+<!-- AUTO-TEST-BADGE-END -->
 [![CI](https://img.shields.io/badge/CI-Smoke%20Passed-brightgreen.svg?style=flat&logo=githubactions)](https://github.com/features/actions)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat)](LICENSE)
 
@@ -25,14 +35,14 @@
 
 ## 📌 Executive Summary
 
-Modern aerospace maintenance incurs tens of billions of dollars annually in unexpected component groundings and premature engine overhauls. **AETURNUS** (**A**utonomous **E**quipment **T**racking and **U**ptime **R**estoration through **N**etworked **U**nified **S**ystems) is an industrial-grade, closed-loop predictive maintenance (PdM) ecosystem designed to monitor fleets of gas turbine turbofans continuously across operating regimes.
+Modern aerospace maintenance incurs tens of billions of dollars annually in unexpected component groundings and premature engine overhauls. **AETURNUS** (**A**utonomous **E**quipment **T**racking and **U**ptime **R**estoration through **N**etworked **U**nified **S**ystems) is an end-to-end, closed-loop predictive maintenance (PdM) ecosystem designed to monitor fleets of gas turbine turbofans continuously across operating regimes.
 
 Built on the benchmark **NASA C-MAPSS dataset** (subsets `FD001` through `FD004`), AETURNUS unifies:
 1. **Regime-Normalized Data Engineering**: Operational regime clustering ($k=6$), strictly causal missing value imputation, and robust outlier clipping with zero lookahead leakage.
 2. **Multi-Head Machine Learning**: Calibrated Remaining Useful Life (RUL) quantile regressors ($p_{10}, p_{50}, p_{90}$), calibrated binary classifier for critical failure probability ($\le 30$ cycles), and unsupervised Isolation Forest anomaly detection.
 3. **Deep Learning Benchmarks**: PyTorch 1D-CNN and Gated Recurrent Unit (GRU) baselines benchmarked against the gradient boosting champion across multiple random seeds.
 4. **Deterministic Triage Agent (No-LLM)**: Fully explainable, auditable 9-step decision pipeline that evaluates hysteresis, manages technician overrides, suppresses noise, and tracks work orders with SQLite persistence.
-5. **Self-Healing MLOps**: Streaming drift monitoring (Population Stability Index & Kolmogorov-Smirnov test), automated retrain triggers with WebSocket streaming, and a strict 3-criteria holdout gate.
+5. **Self-Healing MLOps**: Streaming drift monitoring (Population Stability Index & Kolmogorov-Smirnov test), automated retrain triggers with WebSocket streaming, and a configured promotion gate.
 6. **Empirically Verified Metrics**: Every metric, badge, bucket breakdown, and curve displayed in the UI traces directly to real code-generated disk reports (`artifacts/reports/*.json`).
 
 ---
@@ -73,7 +83,7 @@ Built on the benchmark **NASA C-MAPSS dataset** (subsets `FD001` through `FD004`
 | **Deep Learning Baselines** | PyTorch 1D-Convolutional Neural Network and GRU recurrent models trained on sequential sensor slices. | Allows direct empirical comparison between tabular gradient boosting and deep sequential architectures. |
 | **Deterministic Triage Agent** | 9-step decision engine reading rules from `agent_rules.yaml`. Hysteresis hold, REJECT suppression window, and UUID tracking. | Fully deterministic, explainable, and sub-millisecond execution without reliance on LLMs or hallucinations. |
 | **Continuous Drift Detection** | Multi-sensor Population Stability Index (PSI) and 2-sample Kolmogorov-Smirnov tests comparing reference training sets against recent streaming windows. | Detects subtle sensor degradation and environmental drift before catastrophic failure. |
-| **Self-Healing Retraining Loop** | Automated retraining pipeline with real SHA-256 data hashing and a 3-criteria validation holdout gate. | Automatically validates challengers against champions, rolling back degrading models seamlessly. |
+| **Self-Healing Retraining Loop** | Automated retraining pipeline with real SHA-256 data hashing and a configured validation holdout gate. | Automatically validates challengers against champions, rolling back degrading models seamlessly. |
 | **Glassmorphic Cockpit UI** | High-performance React 18 + Vite dashboard with 7 comprehensive tabs inspired by professional audio telemetry hardware. | Real-time fleet health, engine telemetry, model comparison, MLOps registry, and maintenance work orders. |
 
 ---
@@ -336,11 +346,23 @@ flowchart LR
 
     Trigger --> Train["⚡ Retrain Challenger Model (v2.0)<br/>Cryptographic SHA-256 Data Fingerprint"]:::trainStyle
     
-    Train --> Gate{"🛡️ Fixed Holdout Validation Gate<br/>1. Holdout RMSE &le; Champion<br/>2. Holdout NASA Score &le; Champion<br/>3. Late Prediction Rate &le; 0.50"}:::gateStyle
+    Train --> Gate{"Fixed Holdout Validation Gate<br/>Criteria rendered from configs/monitoring.yaml"}:::gateStyle
 
-    Gate -->|"Passes All 3 Criteria"| Promote["✅ Promote Challenger to Champion<br/>Rotate Alias in MLflow Registry"]:::successStyle
+    Gate -->|"Passes configured criteria"| Promote["✅ Promote Challenger to Champion<br/>Rotate Alias in MLflow Registry"]:::successStyle
     Gate -->|"Fails Any Criterion"| Reject["❌ Reject Challenger Model<br/>Retain Active Champion"]:::rejectStyle
 ```
+
+<!-- AUTO-PROMOTION-GATE-START -->
+### Promotion Gate Criteria
+
+Rendered from [`configs/monitoring.yaml`](configs/monitoring.yaml) at documentation-build time. The gate evaluates **3 configured criteria**; no threshold is typed into this README.
+
+| Criterion | Configured Requirement | Provenance |
+|---|---|---|
+| **Rmse Min Improvement Pct** | `>= 2.0%` | Configured starting value; Challenger must reduce holdout validation RMSE by at least 2.0% over champion |
+| **Nasa Score Max Degradation Pct** | `<= 5.0%` | Configured starting value; Challenger NASA PHM'08 score must not degrade by more than 5.0% on holdout validation |
+| **Late Prediction Max Increase Pp** | `<= 3.0 percentage points` | Configured starting value; Challenger late prediction percentage must not increase by more than 3.0 percentage points |
+<!-- AUTO-PROMOTION-GATE-END -->
 
 1. **Drift Computation**: Compares true training reference distributions against the dynamic recent replay telemetry window (not artificial head-to-tail slices).
 2. **Real SHA-256 Hashes**: Every model bundle saved in `artifacts/models/` records the cryptographic hash of its exact training dataset.
@@ -404,7 +426,7 @@ AETURNUS/
 │   └── models/
 │       ├── model_service.py           # Multi-head quantile model inference & calibration
 │       └── neural_baseline.py         # PyTorch 1D-CNN and GRU deep learning architectures
-├── tests/                             # Comprehensive 158-test test suite
+├── tests/                             # Comprehensive Pytest test suite
 │   ├── test_benchmark_and_reports.py  # Report disk verification tests
 │   ├── test_cleaner.py                # Causal cleaning & regex sensor tests
 │   ├── test_metrics.py                # NASA score & metric verification tests
@@ -506,7 +528,9 @@ make package
 
 ## 🧪 Testing & CI Validation
 
-The platform includes a rigorous **158-test Pytest suite across 40 test modules** and an autonomous **CI smoke test**:
+<!-- AUTO-TEST-SUMMARY-START -->
+The platform includes a rigorous **183-test Pytest suite across 43 test modules** and an autonomous **CI smoke test**:
+<!-- AUTO-TEST-SUMMARY-END -->
 
 ```bash
 # Run the complete test suite across all test modules
@@ -524,35 +548,59 @@ Every commit and pull request triggers [.github/workflows/ci.yml](.github/workfl
 2. Dependency installation (`pip install -r requirements.txt`).
 3. Frontend bundle compilation (`npm run build`).
 4. Lightning CI smoke test verification (`scripts/ci_smoke_test.py`).
-5. Complete 157-test Pytest suite (`pytest tests/ -v`).
+5. Complete Pytest suite (`pytest tests/ -v`).
 
-### Test Suite Verification Matrix (20 Modules, 69 Passing Tests)
+<!-- AUTO-TEST-TABLE-START -->
+### Test Coverage by Module (43 Modules, 183 Collected Tests)
 
-The test suite rigorously verifies all system invariants across data engineering, ML quality, deterministic triage, MLOps, and API contracts:
+Counts are generated by `pytest --collect-only`; descriptions are retained from the maintained test map.
 
-| Test File | Verified Functionality & Invariants | Test Count |
-|---|---|:---:|
-| `tests/test_agent_auto_close_and_x7.py` | Automatic work order resolution on recovery, idempotency of transitions, model version verification, and X7 unknown model exception handling. | 4 |
-| `tests/test_benchmark_and_reports.py` | Verifies existence, integrity, schema conformity, and metric bounds of all artifact disk reports (`evaluation_*.json`, `benchmark_summary.json`). | 5 |
-| `tests/test_cleaner.py` | Causal forward-fill without lookahead leakage, regex sensor isolation (`^s\d+$`), missing telemetry fallback, and post-norm outlier clipping. | 4 |
-| `tests/test_drift_matched_age.py` | Population Stability Index (PSI) and Kolmogorov-Smirnov drift scoring against age-matched baseline cohorts to isolate sensor drift from operating age. | 2 |
-| `tests/test_fleet_threading_and_caching.py` | Concurrency and thread safety of `/api/v1/fleet` endpoint, memory cache invalidation, and sub-100ms response latencies across 100+ engines. | 3 |
-| `tests/test_metrics.py` | Asymmetric penalty formulation of NASA scoring function ($s \ge 0$ late penalty vs $s < 0$ early penalty), MAE, RMSE, and PR-AUC precision. | 3 |
-| `tests/test_ml_quality.py` | Multi-head model quality: monotonic quantiles ($p_{10} \le p_{50} \le p_{90}$), Brier score calibration of failure classifier, and baseline shapes. | 6 |
-| `tests/test_mlops.py` | Statistical drift monitoring, retrain triggers, MLflow model registry aliases (`champion`, `challenger`, `previous`), and audit metadata tracking. | 4 |
-| `tests/test_model_service_promotion.py` | Zero-downtime model hot-reloading, cache flushing, and live serving bundle transitions in `ModelService`. | 1 |
-| `tests/test_persistent_engine_split.py` | Engine unit grouping in dataset splits (`train_test_split(by="unit")`), ensuring zero unit leakage between train, validation, and holdout. | 2 |
-| `tests/test_pipeline.py` | Full data pipeline execution: raw C-MAPSS ingestion, parquet feature generation, multi-regime K-Means clustering ($k=6$), and causal EWMA features. | 5 |
-| `tests/test_readme_tables.py` | Automated documentation validation: ensures README benchmark tables match disk reports with zero unverified claims. | 1 |
-| `tests/test_registry_promote_rollback.py` | Model registry promotion and rollback state machine, missing bundle file validation, and HTTP 409 conflict detection. | 2 |
-| `tests/test_replay_api.py` | Telemetry streaming replay endpoints, WebSocket lifecycle broadcasts, and HTTP 400 parameter validation for invalid engines/subsets. | 6 |
-| `tests/test_self_healing.py` | End-to-end autonomous self-healing loop: drift alarm triggers retraining, fixed holdout gate evaluation, and conditional champion promotion. | 2 |
-| `tests/test_stream_vs_batch.py` | Numerical equivalence between single-cycle streaming inference pipeline (`StreamingEnginePipeline`) and batch feature extraction. | 1 |
-| `tests/test_subsystem_and_live_model_version.py` | Sensor subsystem hierarchy mapping (HPC, HPT, LPT, Fan, Core) and live model version propagation in inference payloads. | 2 |
-| `tests/test_triage_agent.py` | Deterministic 9-step decision pipeline, severity bands (Critical/High/Medium/Low), 5-cycle hysteresis hold, technician overrides, and REJECT cooldown. | 10 |
-| `tests/test_upload_validation_and_wiring.py` | Multipart file upload security, CSV/TXT schema validation, malformed file rejection, and evaluation wiring. | 4 |
-| `tests/test_windowed_neural_baseline.py` | PyTorch 1D-CNN and GRU 30-cycle sliding window sequence generation, input shape validation, and sequence inference. | 2 |
-
+| Test File | Test Count | Verified Functionality & Invariants |
+|---|---:|:---|
+| `tests/test_agent_auto_close_and_x7.py` | 4 | Automatic work order resolution on recovery, idempotency of transitions, model version verification, and X7 unknown model exception handling. |
+| `tests/test_auth_and_audit.py` | 8 | Automated test module collected by the Pytest suite. |
+| `tests/test_benchmark_and_reports.py` | 5 | Verifies existence, integrity, schema conformity, and metric bounds of all artifact disk reports (`evaluation_*.json`, `benchmark_summary.json`). |
+| `tests/test_causality_and_leakage.py` | 4 | Automated test module collected by the Pytest suite. |
+| `tests/test_cleaner.py` | 4 | Causal forward-fill without lookahead leakage, regex sensor isolation (`^s\d+$`), missing telemetry fallback, and post-norm outlier clipping. |
+| `tests/test_config_provenance.py` | 1 | Automated test module collected by the Pytest suite. |
+| `tests/test_cost_simulator.py` | 5 | Automated test module collected by the Pytest suite. |
+| `tests/test_cv_protocol.py` | 9 | Automated test module collected by the Pytest suite. |
+| `tests/test_drift_matched_age.py` | 3 | Population Stability Index (PSI) and Kolmogorov-Smirnov drift scoring against age-matched baseline cohorts to isolate sensor drift from operating age. |
+| `tests/test_fd003_fix_and_predict_validation.py` | 19 | Automated test module collected by the Pytest suite. |
+| `tests/test_fleet_threading_and_caching.py` | 3 | Concurrency and thread safety of `/api/v1/fleet` endpoint, memory cache invalidation, and sub-100ms response latencies across 100+ engines. |
+| `tests/test_metrics.py` | 3 | Asymmetric penalty formulation of NASA scoring function ($s \ge 0$ late penalty vs $s < 0$ early penalty), MAE, RMSE, and PR-AUC precision. |
+| `tests/test_ml_quality.py` | 6 | Multi-head model quality: monotonic quantiles ($p_{10} \le p_{50} \le p_{90}$), Brier score calibration of failure classifier, and baseline shapes. |
+| `tests/test_mlops.py` | 4 | Statistical drift monitoring, retrain triggers, MLflow model registry aliases (`champion`, `challenger`, `previous`), and audit metadata tracking. |
+| `tests/test_model_service_promotion.py` | 1 | Zero-downtime model hot-reloading, cache flushing, and live serving bundle transitions in `ModelService`. |
+| `tests/test_no_metric_defaults.py` | 2 | Automated test module collected by the Pytest suite. |
+| `tests/test_persistent_engine_split.py` | 2 | Engine unit grouping in dataset splits (`train_test_split(by="unit")`), ensuring zero unit leakage between train, validation, and holdout. |
+| `tests/test_phase1_lightgbm_shap_cv.py` | 4 | Automated test module collected by the Pytest suite. |
+| `tests/test_phase2_conformal.py` | 8 | Automated test module collected by the Pytest suite. |
+| `tests/test_phase3_multi_horizon.py` | 5 | Automated test module collected by the Pytest suite. |
+| `tests/test_phase4_maintenance_queue.py` | 9 | Automated test module collected by the Pytest suite. |
+| `tests/test_phase6_batch_scoring.py` | 4 | Automated test module collected by the Pytest suite. |
+| `tests/test_phase7_observability.py` | 10 | Automated test module collected by the Pytest suite. |
+| `tests/test_pipeline.py` | 5 | Full data pipeline execution: raw C-MAPSS ingestion, parquet feature generation, multi-regime K-Means clustering ($k=6$), and causal EWMA features. |
+| `tests/test_presentation_lint.py` | 1 | Automated test module collected by the Pytest suite. |
+| `tests/test_protocol_enforcement.py` | 3 | Automated test module collected by the Pytest suite. |
+| `tests/test_provenance.py` | 1 | Automated test module collected by the Pytest suite. |
+| `tests/test_readme_rendering.py` | 2 | Automated test module collected by the Pytest suite. |
+| `tests/test_readme_tables.py` | 1 | Automated documentation validation: ensures README benchmark tables match disk reports with zero unverified claims. |
+| `tests/test_regime_mix_gap.py` | 2 | Automated test module collected by the Pytest suite. |
+| `tests/test_registry_promote_rollback.py` | 2 | Model registry promotion and rollback state machine, missing bundle file validation, and HTTP 409 conflict detection. |
+| `tests/test_replay_api.py` | 6 | Telemetry streaming replay endpoints, WebSocket lifecycle broadcasts, and HTTP 400 parameter validation for invalid engines/subsets. |
+| `tests/test_retrain_single_flight.py` | 3 | Automated test module collected by the Pytest suite. |
+| `tests/test_routes_and_drift_persistence.py` | 3 | Automated test module collected by the Pytest suite. |
+| `tests/test_self_healing.py` | 3 | End-to-end autonomous self-healing loop: drift alarm triggers retraining, fixed holdout gate evaluation, and conditional champion promotion. |
+| `tests/test_state_hygiene.py` | 3 | Automated test module collected by the Pytest suite. |
+| `tests/test_stream_vs_batch.py` | 1 | Numerical equivalence between single-cycle streaming inference pipeline (`StreamingEnginePipeline`) and batch feature extraction. |
+| `tests/test_subsystem_and_live_model_version.py` | 2 | Sensor subsystem hierarchy mapping (HPC, HPT, LPT, Fan, Core) and live model version propagation in inference payloads. |
+| `tests/test_targets_provenance.py` | 1 | Automated test module collected by the Pytest suite. |
+| `tests/test_triage_agent.py` | 11 | Deterministic 9-step decision pipeline, severity bands (Critical/High/Medium/Low), 5-cycle hysteresis hold, technician overrides, and REJECT cooldown. |
+| `tests/test_upload_validation_and_wiring.py` | 4 | Multipart file upload security, CSV/TXT schema validation, malformed file rejection, and evaluation wiring. |
+| `tests/test_windowed_neural_baseline.py` | 2 | PyTorch 1D-CNN and GRU 30-cycle sliding window sequence generation, input shape validation, and sequence inference. |
+| `tests/test_work_order_api_contract.py` | 4 | Automated test module collected by the Pytest suite. |
+<!-- AUTO-TEST-TABLE-END -->
 ---
 
 ## 📡 API Contract Reference
@@ -578,7 +626,7 @@ The test suite rigorously verifies all system invariants across data engineering
 | `POST` | `/api/v1/predict/batch` | High-throughput batch scoring for uploaded CSV or whitespace-delimited C-MAPSS text files. |
 | `GET` | `/metrics` | Prometheus metrics scrape endpoint exposing `pdm_` operational gauges, counters, and histograms. |
 | `GET` | `/api/v1/monitoring/alerts` | Operational health rule evaluations (drift on key sensors, backlog spikes, coverage dips, latency). |
-| `WS` | `/ws/replay` | Live WebSocket stream of engine telemetry, inference results, and work orders. |
+| `WS` | `/ws` | Authenticated replay WebSocket stream of engine telemetry, inference results, and work orders. |
 
 ---
 

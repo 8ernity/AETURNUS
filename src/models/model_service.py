@@ -34,6 +34,13 @@ from src.eval.regime import summarize_by_regime
 
 SENSOR_REGEX = re.compile(r"^s\d+$")
 
+# The configured validation draw count is a per-engine minimum. Tiny synthetic
+# training frames can contain only one validation engine, where 10 draws give a
+# Wilson lower bound that cannot clear the coverage floor even at 100% coverage.
+# Keep the strict floor while adding draws until the validation fold has enough
+# independent truncations for the CI to be meaningful.
+MIN_VALIDATION_SAMPLES = 50
+
 # Canonical mapping from the served p50 regressor class to the algorithm key stored
 # in manifests and registry rows. Provenance is derived from the bundle, never typed.
 P50_MODEL_CLASS_TO_ALGORITHM = {
@@ -631,6 +638,11 @@ class ModelService:
         n_buckets = max(1, settings["n_buckets"])
         cap = get_rul_cap()
         protocol = load_cv_protocol()
+        validation_engine_count = int(validation_df["unit"].nunique())
+        effective_validation_draws = max(
+            validation_draws,
+            int(np.ceil(MIN_VALIDATION_SAMPLES / max(1, validation_engine_count))),
+        )
 
         calibration_frame = pd.concat(
             eval_frames(
@@ -647,7 +659,7 @@ class ModelService:
                 validation_df,
                 mode=protocol["mode"],
                 seed=DEFAULT_SEED,
-                n_draws=validation_draws,
+                n_draws=effective_validation_draws,
                 min_cycles=protocol["min_cycles"],
             ),
             ignore_index=True,
@@ -794,8 +806,8 @@ class ModelService:
             "validation_coverage_ci_lower": round(float(selected_ci[0]), 4),
             "validation_coverage_ci_upper": round(float(selected_ci[1]), 4),
             "validation_sample_count": int(selected_n or len(val_truth)),
-            "validation_engine_count": int(validation_df["unit"].nunique()),
-            "validation_draws": validation_draws,
+            "validation_engine_count": validation_engine_count,
+            "validation_draws": effective_validation_draws,
             "validation_truth_mode": "rul_capped",
             "validation_coverage_rule": "censored_open_upper_bound",
             "validation_levels": validation_levels,
@@ -810,7 +822,7 @@ class ModelService:
                 mode=protocol["mode"], seed=DEFAULT_SEED, n_draws=protocol["n_draws"]
             ),
             "validation_protocol_id": get_protocol_id(
-                mode=protocol["mode"], seed=DEFAULT_SEED, n_draws=validation_draws
+                mode=protocol["mode"], seed=DEFAULT_SEED, n_draws=effective_validation_draws
             ),
             "n_buckets": effective_buckets,
             "edges": [float(e) for e in edges],

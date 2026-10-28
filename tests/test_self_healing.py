@@ -39,7 +39,7 @@ def test_self_healing_execution_and_ledger(engine):
         cons_rul=25.0,
         subsystem="HPT"
     )
-    assert res["status"] == "ACTIVE"
+    assert res["status"] == "RECOMMENDED"
     assert "life_extension_pct" not in res
     assert "derate_pct" not in res
     assert "extended_rul" not in res
@@ -56,3 +56,45 @@ def test_self_healing_execution_and_ledger(engine):
     assert latest["subsystem"] == "HPT"
     assert latest["action_type"] == "MAINTENANCE_INSPECTION"
     assert "recommended_action" in latest
+
+
+def test_self_healing_requires_external_completion(engine):
+    res = engine.execute_action(
+        engine_id="test_unit_completion",
+        action_type="LOGISTICS_DISPATCH",
+        cycle=52,
+        cons_rul=18.0,
+        subsystem="HPC",
+        actor="tech-1",
+        work_order_id="WO-COMPLETE-1",
+    )
+    assert res["status"] == "RECOMMENDED"
+
+    completed = engine.complete_action(
+        res["action_id"],
+        actor="external-mro",
+        note="Bench inspection completed and signed off.",
+    )
+    assert completed is not None
+    assert completed["status"] == "COMPLETED"
+    assert completed["completion_note"] == "Bench inspection completed and signed off."
+    assert completed["work_order_id"] == "WO-COMPLETE-1"
+
+    # Completing twice is idempotent and does not duplicate the audit event.
+    completed_again = engine.complete_action(res["action_id"], actor="external-mro")
+    assert completed_again["status"] == "COMPLETED"
+
+    with engine._get_db() as conn:
+        audits = conn.execute(
+            "SELECT actor, action FROM audit_events WHERE work_order_id = ? ORDER BY timestamp",
+            ("WO-COMPLETE-1",),
+        ).fetchall()
+        completion_count = conn.execute(
+            "SELECT COUNT(*) FROM audit_events WHERE action = 'ACTION_COMPLETED' AND work_order_id = ?",
+            ("WO-COMPLETE-1",),
+        ).fetchone()[0]
+
+    assert audits[0]["actor"] == "tech-1"
+    assert audits[0]["action"].startswith("ACTION_RECOMMENDED_")
+    assert completion_count == 1
+    assert any(row["actor"] == "external-mro" for row in audits)

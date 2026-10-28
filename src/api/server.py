@@ -34,17 +34,36 @@ def trim_memory():
     except Exception:
         pass
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Query, HTTPException, Body, UploadFile, File
-from fastapi.responses import FileResponse, Response
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Query, HTTPException, Body, UploadFile, File, Depends
+from fastapi.responses import FileResponse, Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from src.common.utils import get_root_dir, load_yaml
+from src.api.security import (
+    ADMIN_ONLY,
+    MODEL_ADMIN_ROLES,
+    MUTATING_METHODS,
+    PIPELINE_ROLES,
+    Principal,
+    REPLAY_ROLES,
+    RETRAIN_ROLES,
+    SELF_HEALING_ROLES,
+    SIMULATION_ROLES,
+    WEBHOOK_ROLES,
+    WORK_ORDER_ROLES,
+    authenticate_request,
+    authenticate_websocket,
+    cors_origins,
+    record_api_audit,
+    require_role,
+    roles_for_mutation,
+)
 from src.models.model_service import ModelService
 from src.agent.triage_agent import TriageAgent
 from src.agent.self_healing_engine import SelfHealingEngine
-from src.mlops.drift_and_retrain import MLOpsManager
+from src.mlops.drift_and_retrain import MLOpsManager, RetrainJobStore
 from src.features.streaming import StreamingEnginePipeline
 from src.ingest.loader import CMAPSSLoader
 
@@ -54,12 +73,52 @@ app = FastAPI(
     version="1.0.0",
 )
 
+@app.middleware("http")
+async def authenticate_and_audit_mutations(request: Request, call_next):
+    """Reject unauthenticated mutations before body parsing, then audit them.
+
+    FastAPI parses request bodies after entering the application but before
+    solving route dependencies.  A middleware check is therefore required to
+    guarantee a missing credential yields 401 even when the body is absent or
+    malformed.  Route-level ``require_role`` dependencies provide the same
+    policy in the documented dependency graph.
+    """
+    if request.method.upper() not in MUTATING_METHODS:
+        return await call_next(request)
+
+    principal: Optional[Principal] = None
+    try:
+        principal = authenticate_request(request)
+        allowed = roles_for_mutation(request.method, request.url.path)
+        if principal.role != "admin" and principal.role not in allowed:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"Role '{principal.role}' is not permitted for this endpoint; "
+                    f"allowed roles: {list(allowed)}"
+                ),
+            )
+        request.state.principal = principal
+        request.state.actor = principal.actor
+    except HTTPException as exc:
+        record_api_audit(request, principal, exc.status_code)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
+            headers=exc.headers or {},
+        )
+
+    response = await call_next(request)
+    record_api_audit(request, principal, response.status_code)
+    return response
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins(),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key"],
 )
 
 # Global singleton states
@@ -69,6 +128,7 @@ model_services: Dict[str, ModelService] = {}
 triage_agent = TriageAgent()
 self_healing_engine = SelfHealingEngine()
 mlops_managers: Dict[str, MLOpsManager] = {}
+retrain_jobs = RetrainJobStore()
 streaming_pipelines: Dict[str, StreamingEnginePipeline] = {}
 
 # Cap executor workers at 2 to conserve thread memory in 512MB containers
@@ -234,6 +294,9 @@ async def broadcast(event_type: str, data: Any):
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    principal = await authenticate_websocket(websocket)
+    if principal is None:
+        return
     await websocket.accept()
     active_websockets.append(websocket)
     try:
@@ -701,7 +764,7 @@ def get_engine_detail(engine_id: str, subset: str = Query(default="FD001")):
 
 
 # ----------------- Replay Controls -----------------
-@app.post("/api/v1/replay/start")
+@app.post("/api/v1/replay/start", dependencies=[Depends(require_role(*REPLAY_ROLES))])
 def start_replay(speed: float = Query(default=1.0), mode: str = Query(default="fleet"), unit: int = Query(default=1)):
     replay_state.is_running = True
     replay_state.speed = speed
@@ -709,12 +772,12 @@ def start_replay(speed: float = Query(default=1.0), mode: str = Query(default="f
     replay_state.selected_lifecycle_unit = unit
     return {"status": "started", "speed": replay_state.speed, "mode": replay_state.mode}
 
-@app.post("/api/v1/replay/pause")
+@app.post("/api/v1/replay/pause", dependencies=[Depends(require_role(*REPLAY_ROLES))])
 def pause_replay():
     replay_state.is_running = False
     return {"status": "paused"}
 
-@app.post("/api/v1/replay/reset")
+@app.post("/api/v1/replay/reset", dependencies=[Depends(require_role(*REPLAY_ROLES))])
 def reset_replay():
     replay_state.is_running = False
     replay_state.current_cycle = 20
@@ -730,6 +793,18 @@ def get_replay_state():
     }
 
 # ----------------- Work Orders -----------------
+def _find_work_order(work_order_id: str) -> Optional[Dict[str, Any]]:
+    """Return an open or archived work order by ID."""
+    for order in triage_agent.open_orders.values():
+        if order.get("work_order_id") == work_order_id:
+            return order
+    for history in triage_agent.closed_orders_history.values():
+        for order in history:
+            if order.get("work_order_id") == work_order_id:
+                return order
+    return None
+
+
 @app.get("/api/v1/work-orders")
 def get_work_orders(
     status: Optional[str] = None,
@@ -757,19 +832,18 @@ def get_work_orders(
 
 @app.get("/api/v1/work-orders/{work_order_id}")
 def get_work_order_detail(work_order_id: str):
-    for o in triage_agent.open_orders.values():
-        if o["work_order_id"] == work_order_id:
-            return o
-    for h_list in triage_agent.closed_orders_history.values():
-        for o in h_list:
-            if o["work_order_id"] == work_order_id:
-                return o
+    order = _find_work_order(work_order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail=f"Work order {work_order_id} not found")
+    return order
+
 @app.get("/api/v1/maintenance-queue")
-def get_maintenance_queue(subset: str = Query(default="FD001"), capacity: int = Query(default=5)):
+def get_maintenance_queue(subset: str = Query(default="FD001"), capacity: Optional[int] = Query(default=None, ge=1)):
     """Rank only work orders that the TriageAgent has already persisted."""
     validate_subset(subset)
     from src.agent.maintenance_queue import MaintenanceQueue
     mq = MaintenanceQueue()
+    effective_capacity = mq.default_capacity if capacity is None else capacity
 
     open_items = []
     for eng_id, wo in triage_agent.open_orders.items():
@@ -798,14 +872,28 @@ def get_maintenance_queue(subset: str = Query(default="FD001"), capacity: int = 
             "status": wo["status"],
         })
 
-    queue = mq.rank_items(open_items, capacity=capacity)
+    queue = mq.rank_items(open_items, capacity=effective_capacity)
     return {
         "subset": subset,
-        "capacity": capacity,
+        "capacity": effective_capacity,
         "total_open": len(queue),
-        "actionable_count": min(len(queue), capacity),
-        "backlog_count": max(0, len(queue) - capacity),
+        "actionable_count": min(len(queue), effective_capacity),
+        "backlog_count": max(0, len(queue) - effective_capacity),
         "queue": queue,
+        "config": {
+            "source": "configs/queue.yaml",
+            "weights": {
+                "w_rul": mq.w_rul,
+                "w_fail": mq.w_fail,
+                "w_anom": mq.w_anom,
+                "w_trend": mq.w_trend,
+            },
+            "normalization": {
+                "max_urgency_rul": mq.max_urgency_rul,
+                "max_rul_drop": mq.max_rul_drop,
+            },
+            "daily_service_capacity": mq.default_capacity,
+        },
         "disclaimer": mq.disclaimer
     }
 
@@ -840,7 +928,7 @@ def get_maintenance_candidates(subset: str = Query(default="FD001"), capacity: i
         if order is None:
             continue
 
-        cycle = int(pred.get("cycle", order.get("current_cycle", 1)))
+        cycle = int(pred["cycle"])
         candidate_id = f"CAND-{order['engine_id']}-{cycle}"
         p90_value = order["predicted_rul"].get("p90")
         candidates.append({
@@ -892,21 +980,51 @@ class HumanActionRequest(BaseModel):
     reason: str = "Operator decision"
     new_severity: Optional[str] = None
 
-@app.post("/api/v1/work-orders/{work_order_id}/action")
-def take_human_action(work_order_id: str, req: HumanActionRequest):
+class AdvanceWorkOrderRequest(BaseModel):
+    note: str = "Stage progression"
+
+@app.post("/api/v1/work-orders/{work_order_id}/action", dependencies=[Depends(require_role(*WORK_ORDER_ROLES))])
+def take_human_action(
+    work_order_id: str,
+    req: HumanActionRequest,
+    principal: Principal = Depends(require_role(*WORK_ORDER_ROLES)),
+):
     success = triage_agent.human_action(
-        work_order_id, req.action, req.new_severity, req.reason, current_cycle=replay_state.current_cycle
+        work_order_id,
+        req.action,
+        req.new_severity,
+        req.reason,
+        current_cycle=replay_state.current_cycle,
+        actor=principal.actor,
     )
     if not success:
         raise HTTPException(status_code=400, detail="Unable to apply action to work order")
-@app.post("/api/v1/work-orders/{work_order_id}/advance")
-def advance_work_order(work_order_id: str, reason: str = Query(default="Stage progression")):
+    return {
+        "status": "success",
+        "work_order_id": work_order_id,
+        "work_order": _find_work_order(work_order_id),
+    }
+
+@app.post("/api/v1/work-orders/{work_order_id}/advance", dependencies=[Depends(require_role(*WORK_ORDER_ROLES))])
+def advance_work_order(
+    work_order_id: str,
+    req: AdvanceWorkOrderRequest,
+    principal: Principal = Depends(require_role(*WORK_ORDER_ROLES)),
+):
     success = triage_agent.human_action(
-        work_order_id, "ADVANCE", reason=reason, current_cycle=replay_state.current_cycle
+        work_order_id,
+        "ADVANCE",
+        reason=req.note,
+        current_cycle=replay_state.current_cycle,
+        actor=principal.actor,
     )
     if not success:
         raise HTTPException(status_code=400, detail="Unable to advance work order stage")
-    return {"status": "success", "work_order_id": work_order_id}
+    return {
+        "status": "success",
+        "work_order_id": work_order_id,
+        "work_order": _find_work_order(work_order_id),
+    }
 
 @app.get("/api/v1/work-orders/{work_order_id}/maintenance-report.pdf")
 def download_maintenance_report_by_wo(work_order_id: str):
@@ -995,7 +1113,7 @@ class WhatIfRequest(BaseModel):
     high_threshold: int = 30
     anomaly_threshold: float = 0.80
 
-@app.post("/api/v1/rules/simulate")
+@app.post("/api/v1/rules/simulate", dependencies=[Depends(require_role(*SIMULATION_ROLES))])
 def simulate_what_if(req: WhatIfRequest, subset: str = Query(default="FD001")):
     validate_subset(subset)
     train_df = get_train_df(subset)
@@ -1353,7 +1471,7 @@ def get_economic_simulation(
     sim = FleetCostSimulator(subset=subset)
     return sim.simulate_fleet(threshold=threshold, use_conservative=use_conservative)
 
-@app.post("/api/v1/economics/simulate")
+@app.post("/api/v1/economics/simulate", dependencies=[Depends(require_role(*SIMULATION_ROLES))])
 def post_economic_simulation(req: SimulationRequest):
     sub = req.subset or "FD001"
     validate_subset(sub)
@@ -1394,18 +1512,34 @@ def get_registry(subset: str = Query(default="FD001")):
     return mgr.get_registry()
 
 
-@app.post("/api/v1/mlops/retrain")
-async def trigger_retrain(scenario: str = Query(default="A"), subset: str = Query(default="FD001")):
+@app.post("/api/v1/mlops/retrain", dependencies=[Depends(require_role(*RETRAIN_ROLES))])
+async def trigger_retrain(
+    scenario: str = Query(default="A"),
+    subset: str = Query(default="FD001"),
+    principal: Principal = Depends(require_role(*RETRAIN_ROLES)),
+):
     validate_subset(subset)
     mgr = get_mlops_manager(subset)
-    
+
+    job = retrain_jobs.start_job(subset=subset, scenario=scenario, actor=principal.actor)
+    if job is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"A retrain is already running for {subset}. "
+                "Wait for the current job to finish before starting another."
+            ),
+        )
+    job_id = int(job["job_id"])
+
     curr_df = pd.DataFrame(replay_state.recent_replay_window) if len(replay_state.recent_replay_window) >= 30 else None
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     def sync_progress_callback(step: int, total: int, msg: str):
         pct = round((step / total) * 100)
         asyncio.run_coroutine_threadsafe(
             broadcast("retrain_progress", {
+                "job_id": job_id,
                 "step": step,
                 "total_steps": total,
                 "progress_pct": pct,
@@ -1416,33 +1550,85 @@ async def trigger_retrain(scenario: str = Query(default="A"), subset: str = Quer
             loop
         )
 
-    result = await asyncio.to_thread(
-        mgr.run_retrain_demo,
-        scenario=scenario,
-        replay_window_df=curr_df,
-        progress_callback=sync_progress_callback
-    )
-
-    if result.get("gate_passed") and result.get("promoted_version"):
-        promoted_ver = result["promoted_version"]
-        svc = ModelService(subset)
-        svc.load(promoted_ver)
-        model_services[subset] = svc
-        clear_prediction_cache()
-        clear_engine_trajectory_cache(subset)
-        await broadcast("model_promoted", {
+    try:
+        result = await asyncio.to_thread(
+            mgr.run_retrain_demo,
+            scenario=scenario,
+            replay_window_df=curr_df,
+            progress_callback=sync_progress_callback
+        )
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        # The request was interrupted before the worker returned. Persist an
+        # explicit terminal state so the single-flight lock is released and
+        # the next caller can retry.
+        retrain_jobs.finish_job(
+            job_id,
+            "INTERRUPTED",
+            error="Retrain request was interrupted before completion.",
+        )
+        raise
+    except Exception as exc:
+        retrain_jobs.finish_job(job_id, "FAILED", error=str(exc))
+        await broadcast("retrain_failed", {
+            "job_id": job_id,
             "subset": subset,
-            "version": promoted_ver,
-            "metrics": result.get("challenger_metrics")
+            "scenario": scenario,
+            "error": str(exc),
         })
+        raise HTTPException(status_code=500, detail=f"Retrain failed: {exc}") from exc
 
+    try:
+        if result.get("gate_passed") and result.get("promoted_version"):
+            promoted_ver = result["promoted_version"]
+            svc = ModelService(subset)
+            svc.load(promoted_ver)
+            model_services[subset] = svc
+            clear_prediction_cache()
+            clear_engine_trajectory_cache(subset)
+            await broadcast("model_promoted", {
+                "subset": subset,
+                "version": promoted_ver,
+                "metrics": result.get("challenger_metrics")
+            })
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        retrain_jobs.finish_job(
+            job_id,
+            "INTERRUPTED",
+            error="Retrain post-processing was interrupted before completion.",
+        )
+        raise
+    except Exception as exc:
+        retrain_jobs.finish_job(job_id, "FAILED", error=str(exc))
+        raise HTTPException(status_code=500, detail=f"Retrain post-processing failed: {exc}") from exc
+
+    result["job_id"] = job_id
+    retrain_jobs.finish_job(job_id, "COMPLETED", result=result)
     await broadcast("retrain_completed", {
+        "job_id": job_id,
         "subset": subset,
         "scenario": scenario,
         "result": result
     })
 
     return result
+
+
+@app.get("/api/v1/mlops/retrain/jobs")
+def list_retrain_jobs(
+    subset: Optional[str] = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    if subset:
+        validate_subset(subset)
+    return {"jobs": retrain_jobs.list_jobs(subset=subset, limit=limit)}
+
+
+@app.get("/api/v1/mlops/retrain/jobs/{job_id}")
+def get_retrain_job(job_id: int):
+    job = retrain_jobs.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Retrain job {job_id} not found")
+    return job
 
 # ----------------- Data Pipeline & Quality -----------------
 @app.get("/api/v1/data/quality")
@@ -1458,10 +1644,10 @@ def get_data_quality(subset: str = Query(default="FD001")):
     raise HTTPException(status_code=404, detail=f"Data quality report for {subset} not found")
 
 # ----------------- Pipeline & Model Operations Endpoints -----------------
-@app.post("/api/v1/mlops/{name}/promote")
-@app.post("/api/v1/mlops/promote")
-@app.post("/api/v1/models/{name}/promote")
-@app.post("/api/v1/models/promote")
+@app.post("/api/v1/mlops/{name}/promote", dependencies=[Depends(require_role(*MODEL_ADMIN_ROLES))])
+@app.post("/api/v1/mlops/promote", dependencies=[Depends(require_role(*MODEL_ADMIN_ROLES))])
+@app.post("/api/v1/models/{name}/promote", dependencies=[Depends(require_role(*MODEL_ADMIN_ROLES))])
+@app.post("/api/v1/models/promote", dependencies=[Depends(require_role(*MODEL_ADMIN_ROLES))])
 def promote_model(
     name: Optional[str] = None,
     subset: str = Query(default="FD001"),
@@ -1489,10 +1675,10 @@ def promote_model(
 
     return res
 
-@app.post("/api/v1/mlops/{name}/rollback")
-@app.post("/api/v1/mlops/rollback")
-@app.post("/api/v1/models/{name}/rollback")
-@app.post("/api/v1/models/rollback")
+@app.post("/api/v1/mlops/{name}/rollback", dependencies=[Depends(require_role(*MODEL_ADMIN_ROLES))])
+@app.post("/api/v1/mlops/rollback", dependencies=[Depends(require_role(*MODEL_ADMIN_ROLES))])
+@app.post("/api/v1/models/{name}/rollback", dependencies=[Depends(require_role(*MODEL_ADMIN_ROLES))])
+@app.post("/api/v1/models/rollback", dependencies=[Depends(require_role(*MODEL_ADMIN_ROLES))])
 def rollback_model(
     name: Optional[str] = None,
     subset: str = Query(default="FD001"),
@@ -1520,7 +1706,7 @@ def rollback_model(
 
     return res
 
-@app.post("/api/v1/models/reload")
+@app.post("/api/v1/models/reload", dependencies=[Depends(require_role(*MODEL_ADMIN_ROLES))])
 def reload_models(subset: Optional[str] = Query(default=None)):
     reloaded = []
     if subset:
@@ -1541,7 +1727,7 @@ def reload_models(subset: Optional[str] = Query(default=None)):
     clear_engine_trajectory_cache()
     return {"status": "reloaded", "reloaded_subsets": reloaded}
 
-@app.post("/api/v1/pipeline/run")
+@app.post("/api/v1/pipeline/run", dependencies=[Depends(require_role(*PIPELINE_ROLES))])
 def run_pipeline_endpoint(subset: str = Query(default="FD001")):
     validate_subset(subset)
     from src.features.pipeline import DataPipeline
@@ -1563,7 +1749,7 @@ def run_pipeline_endpoint(subset: str = Query(default="FD001")):
 MAX_UPLOAD_SIZE = 25 * 1024 * 1024  # 25 MB limit
 ALLOWED_UPLOAD_EXTS = {".csv", ".txt", ".parquet"}
 
-@app.post("/api/v1/data/upload")
+@app.post("/api/v1/data/upload", dependencies=[Depends(require_role(*PIPELINE_ROLES))])
 async def upload_data(
     file: UploadFile = File(...),
     subset: str = Query(default="FD001"),
@@ -1661,7 +1847,7 @@ async def upload_data(
         "retrain_report": retrain_report
     }
 
-@app.post("/api/v1/predict/batch")
+@app.post("/api/v1/predict/batch", dependencies=[Depends(require_role(*WORK_ORDER_ROLES))])
 async def predict_batch(
     file: UploadFile = File(...),
     subset: str = Query(default="FD001")
@@ -1840,7 +2026,7 @@ def get_monitoring_drift(subset: str = Query(default="FD001"), n_cycles: int = Q
     _cache_drift_share(subset, report)
     return report
 
-@app.post("/api/v1/monitoring/drift/compute")
+@app.post("/api/v1/monitoring/drift/compute", dependencies=[Depends(require_role(*RETRAIN_ROLES))])
 def compute_monitoring_drift(subset: str = Query(default="FD001"), n_cycles: int = Query(default=100)):
     validate_subset(subset)
     if subset not in mlops_managers:
@@ -2107,15 +2293,15 @@ def get_metrics():
                     ev = json.load(f)
                 PDM_TEST_RMSE.labels(subset=sub).set(float(ev["rmse"]))
                 metric_name = ev.get("coverage_metric", "coverage_all")
-                PDM_CONFORMAL_COVERAGE.labels(subset=sub).set(
-                    float(ev.get(metric_name, ev.get("interval_coverage", 0.0)))
-                )
-                PDM_CONFORMAL_COVERAGE_ALL.labels(subset=sub).set(
-                    float(ev.get("coverage_all", ev.get("interval_coverage", 0.0)))
-                )
-                PDM_CONFORMAL_COVERAGE_LE_CAP.labels(subset=sub).set(
-                    float(ev.get("coverage_le_cap", 0.0))
-                )
+                policy_coverage = ev.get(metric_name, ev.get("interval_coverage"))
+                if policy_coverage is not None:
+                    PDM_CONFORMAL_COVERAGE.labels(subset=sub).set(float(policy_coverage))
+                all_coverage = ev.get("coverage_all", ev.get("interval_coverage"))
+                if all_coverage is not None:
+                    PDM_CONFORMAL_COVERAGE_ALL.labels(subset=sub).set(float(all_coverage))
+                le_cap_coverage = ev.get("coverage_le_cap")
+                if le_cap_coverage is not None:
+                    PDM_CONFORMAL_COVERAGE_LE_CAP.labels(subset=sub).set(float(le_cap_coverage))
             except Exception:
                 pass
 
@@ -2175,7 +2361,7 @@ def get_monitoring_webhook_status():
     alert_mgr = AlertManager()
     return alert_mgr.get_webhook_status()
 
-@app.post("/api/v1/monitoring/webhooks/test")
+@app.post("/api/v1/monitoring/webhooks/test", dependencies=[Depends(require_role(*WEBHOOK_ROLES))])
 def test_monitoring_webhook(
     rule_id: str = Query(default="M1"),
     engine_id: str = Query(default="12"),
@@ -2219,12 +2405,16 @@ def get_engine_prescriptions(engine_id: str, cycle: int = Query(default=30)):
         "prescriptions": self_healing_engine.generate_prescriptions(status_dict)
     }
 
-@app.post("/api/v1/self-healing/execute")
+class SelfHealingCompletionRequest(BaseModel):
+    note: str = "External completion recorded"
+
+@app.post("/api/v1/self-healing/execute", dependencies=[Depends(require_role(*SELF_HEALING_ROLES))])
 async def execute_self_healing_action(
     engine_id: str = Query(...),
     action_type: str = Query(default="DYNAMIC_DERATE"),
     cycle: int = Query(default=30),
-    subset: str = Query(default="FD001")
+    subset: str = Query(default="FD001"),
+    principal: Principal = Depends(require_role(*SELF_HEALING_ROLES)),
 ):
     order = triage_agent.open_orders.get(engine_id)
     cons_rul = order["conservative_rul"] if order else 35.0
@@ -2235,19 +2425,51 @@ async def execute_self_healing_action(
         action_type=action_type,
         cycle=cycle,
         cons_rul=cons_rul,
-        subsystem=subsystem
+        subsystem=subsystem,
+        actor=principal.actor,
+        work_order_id=order.get("work_order_id") if order else None,
     )
     
     if order:
-        order["status"] = "IN_PROGRESS"
         order["events"].append({
             "cycle": cycle,
-            "event": f"Action Executed: {res['title']} - {res['recommended_action']}",
-            "actor": "SelfHealingEngine"
+            "event": (
+                f"Action Recommended: {res['title']} - {res['recommended_action']} "
+                "(awaiting external completion)"
+            ),
+            "actor": principal.actor,
         })
         triage_agent._persist_order(order)
         
-    await broadcast("self_healing_executed", res)
+    await broadcast("self_healing_recommended", res)
+    return {"status": "success", "action": res}
+
+@app.post("/api/v1/self-healing/actions/{action_id}/complete", dependencies=[Depends(require_role(*SELF_HEALING_ROLES))])
+async def complete_self_healing_action(
+    action_id: str,
+    req: SelfHealingCompletionRequest,
+    principal: Principal = Depends(require_role(*SELF_HEALING_ROLES)),
+):
+    res = self_healing_engine.complete_action(
+        action_id=action_id,
+        actor=principal.actor,
+        note=req.note,
+    )
+    if res is None:
+        raise HTTPException(status_code=404, detail=f"Self-healing action {action_id} not found")
+
+    work_order_id = res.get("work_order_id")
+    order = _find_work_order(work_order_id) if work_order_id else None
+    if order:
+        order["events"].append({
+            "cycle": res.get("cycle", replay_state.current_cycle),
+            "event": f"External completion recorded for {action_id}",
+            "reason": req.note,
+            "actor": principal.actor,
+        })
+        triage_agent._persist_order(order)
+
+    await broadcast("self_healing_completed", res)
     return {"status": "success", "action": res}
 
 @app.get("/api/v1/self-healing/history")

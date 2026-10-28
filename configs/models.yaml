@@ -12,78 +12,78 @@ baselines:
     alpha:
       value: 1.0
       kind: tuned_on_validation
-      source: "L2 regularization tuned on 5-fold cross-validation"
+      source: "Configured starting value; L2 regularization tuned on 5-fold cross-validation"
       run_id: "cv_run_cmapss_baseline"
   hist_gb:
     max_iter:
       value: 150
       kind: policy
-      source: "Maximum boosting rounds for Scikit-Learn HistGradientBoosting baseline"
+      source: "Configured starting value; Maximum boosting rounds for Scikit-Learn HistGradientBoosting baseline"
     learning_rate:
       value: 0.05
       kind: policy
-      source: "Shrinkage rate for baseline boosting stability"
+      source: "Configured starting value; Shrinkage rate for baseline boosting stability"
     max_leaf_nodes:
       value: 31
       kind: policy
-      source: "Tree complexity limit matching standard GBDT capacity"
+      source: "Configured starting value; Tree complexity limit matching standard GBDT capacity"
     min_samples_leaf:
       value: 20
       kind: policy
-      source: "Minimum leaf samples to prevent leaf memorization"
+      source: "Configured starting value; Minimum leaf samples to prevent leaf memorization"
     random_state:
       value: 42
       kind: policy
-      source: "Deterministic baseline seed"
+      source: "Configured starting value; Deterministic baseline seed"
   lightgbm:
     n_estimators:
       value: 150
       kind: tuned_on_validation
-      source: "Optimal boosting rounds selected via 5-fold GroupKFold CV"
+      source: "Configured starting value; Optimal boosting rounds selected via 5-fold GroupKFold CV"
       run_id: "cv_run_cmapss_baseline"
     learning_rate:
       value: 0.05
       kind: tuned_on_validation
-      source: "Learning rate selected for minimum validation RMSE"
+      source: "Configured starting value; Learning rate selected for minimum validation RMSE"
       run_id: "cv_run_cmapss_baseline"
     num_leaves:
       value: 31
       kind: tuned_on_validation
-      source: "Leaf count tuned to balance expressiveness and generalization gap"
+      source: "Configured starting value; Leaf count tuned to balance expressiveness and generalization gap"
       run_id: "cv_run_cmapss_baseline"
     min_child_samples:
       value: 20
       kind: tuned_on_validation
-      source: "Regularization parameter tuned on validation splits"
+      source: "Configured starting value; Regularization parameter tuned on validation splits"
       run_id: "cv_run_cmapss_baseline"
     random_state:
       value: 42
       kind: policy
-      source: "Deterministic benchmark random seed"
+      source: "Configured starting value; Deterministic benchmark random seed"
 
 anomaly_detector:
   model_type: "isolation_forest"
   contamination:
     value: 0.05
     kind: tuned_on_validation
-    source: "Calibrated 95th percentile contamination on healthy initial cycles"
+    source: "Configured starting value; Calibrated 95th percentile contamination on healthy initial cycles"
     run_id: "cv_run_cmapss_baseline"
   healthy_cycle_fraction:
     value: 0.40
     kind: policy
-    source: "First 40% of engine flight cycles assumed free of severe mechanical degradation"
+    source: "Configured starting value; First 40% of engine flight cycles assumed free of severe mechanical degradation"
   n_estimators:
     value: 100
     kind: policy
-    source: "Isolation forest ensemble size for stable anomaly scoring"
+    source: "Configured starting value; Isolation forest ensemble size for stable anomaly scoring"
   random_state:
     value: 42
     kind: policy
-    source: "Deterministic anomaly detector seed"
+    source: "Configured starting value; Deterministic anomaly detector seed"
   score_threshold:
     value: 0.80
     kind: tuned_on_validation
-    source: "Anomaly threshold calibrated on validation degradation points"
+    source: "Configured starting value; Anomaly threshold calibrated on validation degradation points"
     run_id: "cv_run_cmapss_baseline"
 
 rul_regressor:
@@ -92,55 +92,55 @@ rul_regressor:
   n_estimators:
     value: 150
     kind: tuned_on_validation
-    source: "Boosting iterations tuned on 5-fold GroupKFold CV"
+    source: "Configured starting value; Boosting iterations tuned on 5-fold GroupKFold CV"
     run_id: "cv_run_cmapss_baseline"
   learning_rate:
     value: 0.05
     kind: tuned_on_validation
-    source: "Gradient boosting step size tuned on validation folds"
+    source: "Configured starting value; Gradient boosting step size tuned on validation folds"
     run_id: "cv_run_cmapss_baseline"
   num_leaves:
     value: 31
     kind: tuned_on_validation
-    source: "Max tree leaves tuned on validation folds"
+    source: "Configured starting value; Max tree leaves tuned on validation folds"
     run_id: "cv_run_cmapss_baseline"
   min_child_samples:
     value: 20
     kind: tuned_on_validation
-    source: "Minimum observations per leaf tuned to control overfitting"
+    source: "Configured starting value; Minimum observations per leaf tuned to control overfitting"
     run_id: "cv_run_cmapss_baseline"
   random_state:
     value: 42
     kind: policy
-    source: "Deterministic training seed"
+    source: "Configured starting value; Deterministic training seed"
 
 classifier:
   target_threshold_cycles:
     value: 30
     kind: policy
-    source: "Critical operational horizon defining impending functional failure"
+    source: "Configured starting value; Critical operational horizon defining impending functional failure"
   horizons: [10, 30, 60]
   target_recall:
     value: 0.90
     kind: policy
-    source: "Aviation safety requirement: at least 90% true positive failure recall"
+    source: "Configured starting value; Aviation safety requirement: at least 90% true positive failure recall"
   model_type: "lightgbm_classifier"
   n_estimators:
     value: 120
     kind: tuned_on_validation
-    source: "Classification rounds tuned on validation folds"
+    source: "Configured starting value; Classification rounds tuned on validation folds"
     run_id: "cv_run_cmapss_baseline"
   learning_rate:
     value: 0.05
     kind: tuned_on_validation
-    source: "Classifier shrinkage rate tuned on validation folds"
+    source: "Configured starting value; Classifier shrinkage rate tuned on validation folds"
     run_id: "cv_run_cmapss_baseline"
   probability_threshold:
     value: 0.70
     kind: tuned_on_validation
-    source: "Operating threshold calibrated to satisfy target recall on validation set"
+    source: "Configured starting value; Operating threshold calibrated to satisfy target recall on validation set"
     run_id: "cv_run_cmapss_baseline"
   random_state:
     value: 42
     kind: policy
-    source: "Deterministic classifier seed"
+    source: "Configured starting value; Deterministic classifier seed"

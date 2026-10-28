@@ -103,7 +103,7 @@ export const ModelLabTab: React.FC = () => {
   const avgNasaPenalty = totalEngines > 0 ? (totalNasaScore / totalEngines).toFixed(2) : "0.00";
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 min-w-0 max-w-full">
       {/* Stale Artifact Warning Banner */}
       {(benchmarkMeta?.stale || modelDetails?.stale) && (
         <div className="bg-amber-500/15 border border-amber-500/30 text-amber-300 p-4 rounded-2xl flex items-center gap-3">
@@ -212,7 +212,7 @@ export const ModelLabTab: React.FC = () => {
                   </td>
                   <td className="p-3.5 text-slate-400">{row.train_time_sec}s</td>
                   <td className="p-3.5 text-center">
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
+                    <span className={`inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
                       row.target_met === true
                         ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
                         : "bg-amber-500/20 text-amber-300 border-amber-500/30"
@@ -221,7 +221,7 @@ export const ModelLabTab: React.FC = () => {
                     </span>
                   </td>
                   <td className="p-3.5 text-center">
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
+                    <span className={`inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
                       row.target_coverage_met === true
                         ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
                         : "bg-amber-500/20 text-amber-300 border-amber-500/30"
@@ -277,9 +277,9 @@ export const ModelLabTab: React.FC = () => {
       </div>
 
       {/* Subset Selector for Deep-Dive */}
-      <div className="flex items-center gap-3 bg-slate-900/60 p-3 rounded-2xl border border-indigo-500/15">
+      <div className="flex flex-wrap items-center gap-3 bg-slate-900/60 p-3 rounded-2xl border border-indigo-500/15">
         <span className="text-xs text-slate-400 font-medium">Deep-Dive Subset Details:</span>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {["FD001", "FD002", "FD003", "FD004"].map((s) => (
             <button
               key={s}
@@ -314,7 +314,7 @@ export const ModelLabTab: React.FC = () => {
         </p>
 
         {/* Statistical Rigor & Cross-Validation Panel */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3.5">
           <div className="bg-slate-900/80 p-4 rounded-2xl border border-slate-800 space-y-1">
             <div className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">5-Fold Group CV (Train)</div>
             <div className="text-xl font-black font-mono text-cyan-300">
@@ -456,9 +456,9 @@ export const ModelLabTab: React.FC = () => {
 
       {/* Generalization Gap & Overfitting Diagnostics (Inspired by Dr-DKP) */}
       <div className="glass-panel p-6 rounded-3xl space-y-5">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
               <ShieldCheck className="w-5 h-5 text-emerald-400" />
               <h3 className="font-bold text-base text-white">
                 {selectedSub} Generalization Gap &amp; Overfitting Diagnostics
@@ -472,7 +472,7 @@ export const ModelLabTab: React.FC = () => {
             </p>
           </div>
 
-          <div className="flex items-center gap-2 self-start md:self-auto">
+          <div className="flex items-center gap-2 self-start lg:self-auto">
             <span className="px-3 py-1 rounded-full text-xs font-semibold font-mono border bg-emerald-500/15 text-emerald-300 border-emerald-500/30 flex items-center gap-1.5 shadow-sm">
               <CheckCircle2 className="w-3.5 h-3.5" />
               {genGap?.overfitting_status ?? "N/A"} (Gap: {genGap?.train_test_gap !== undefined ? (genGap.train_test_gap >= 0 ? `+${genGap.train_test_gap}` : genGap.train_test_gap) : "N/A"} cyc)
@@ -481,7 +481,7 @@ export const ModelLabTab: React.FC = () => {
         </div>
 
         {/* Diagnostic Metric Cards: Train vs. Validation vs. Test Gap */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
           <div className="bg-slate-900/80 p-4 rounded-2xl border border-slate-800 space-y-1">
             <div className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">1. Train RMSE (In-Sample)</div>
             <div className="text-2xl font-black font-mono text-cyan-300">
@@ -534,7 +534,7 @@ export const ModelLabTab: React.FC = () => {
             </span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 pt-1">
             <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1.5">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-cyan-400 font-semibold">Phase 1: In-Sample Fitting</span>
@@ -573,9 +573,9 @@ export const ModelLabTab: React.FC = () => {
 
       {/* Predicted vs. Actual RUL Parity Scatter Plot with NASA Penalty Cone */}
       <div className="glass-panel p-6 rounded-3xl space-y-5">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
               <Target className="w-5 h-5 text-indigo-400" />
               <h3 className="font-bold text-base text-white">
                 {selectedSub} Predicted vs. Actual RUL Parity Plot
@@ -590,7 +590,7 @@ export const ModelLabTab: React.FC = () => {
           </div>
 
           {/* Filter Segmented Control */}
-          <div className="flex items-center gap-1.5 bg-slate-900/80 p-1 rounded-xl border border-slate-800 text-xs self-start md:self-auto">
+          <div className="flex flex-wrap items-center gap-1.5 bg-slate-900/80 p-1 rounded-xl border border-slate-800 text-xs self-start lg:self-auto">
             <button
               onClick={() => setParityFilter("all")}
               className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
@@ -635,7 +635,7 @@ export const ModelLabTab: React.FC = () => {
         </div>
 
         {/* Parity KPI Metrics Bar */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3">
           <div className="bg-slate-900/60 p-3 rounded-2xl border border-slate-800/80">
             <div className="text-[10px] text-slate-400 font-semibold">Held-out Test Engines</div>
             <div className="text-xl font-bold text-white font-mono mt-0.5">{totalEngines}</div>
@@ -841,7 +841,7 @@ export const ModelLabTab: React.FC = () => {
         </div>
 
         {/* NASA Scoring Formula Explainer Callout */}
-        <div className="bg-slate-900/50 border border-slate-800/80 rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs text-slate-400">
+        <div className="bg-slate-900/50 border border-slate-800/80 rounded-2xl p-4 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 text-xs text-slate-400">
           <div className="flex items-center gap-2 text-slate-300 font-medium">
             <Info className="w-4 h-4 text-indigo-400 flex-shrink-0" />
             <span>NASA Asymmetric Penalty Formula:</span>

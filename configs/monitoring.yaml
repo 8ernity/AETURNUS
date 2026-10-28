@@ -3,63 +3,63 @@ drift:
   psi_threshold:
     value: 0.20
     kind: policy
-    source: "Standard statistical threshold indicating substantial population distribution shift"
+    source: "Configured starting value; Standard statistical threshold indicating substantial population distribution shift"
   ks_pvalue_threshold:
     value: 0.05
     kind: policy
-    source: "Two-sample Kolmogorov-Smirnov significance level for sensor drift rejection"
+    source: "Configured starting value; Two-sample Kolmogorov-Smirnov significance level for sensor drift rejection"
   drifting_features_ratio_threshold:
     value: 0.30
     kind: policy
-    source: "Fraction of monitored sensor features drifting before raising fleet-level alarm"
+    source: "Configured starting value; Fraction of monitored sensor features drifting before raising fleet-level alarm"
   reference_sample_size:
     value: 2000
     kind: policy
-    source: "Baseline engine cycle sample size matched by flight regime and operating age"
+    source: "Configured starting value; Baseline engine cycle sample size matched by flight regime and operating age"
 
 retraining:
   volume_labeled_engines_threshold:
     value: 20
     kind: policy
-    source: "Minimum run-to-failure completed engines required before triggering challenger retrain"
+    source: "Configured starting value; Minimum run-to-failure completed engines required before triggering challenger retrain"
   rmse_degradation_threshold_ratio:
     value: 0.15
     kind: policy
-    source: "Relative degradation in holdout validation RMSE triggering automated retrain"
+    source: "Configured starting value; Relative degradation in holdout validation RMSE triggering automated retrain"
   auto_trigger_enabled: true
 
 promotion_gate:
   rmse_min_improvement_pct:
     value: 2.0
     kind: policy
-    source: "Challenger must reduce holdout validation RMSE by at least 2.0% over champion"
+    source: "Configured starting value; Challenger must reduce holdout validation RMSE by at least 2.0% over champion"
   nasa_score_max_degradation_pct:
     value: 5.0
     kind: policy
-    source: "Challenger NASA PHM'08 score must not degrade by more than 5.0% on holdout validation"
+    source: "Configured starting value; Challenger NASA PHM'08 score must not degrade by more than 5.0% on holdout validation"
   late_prediction_max_increase_pp:
     value: 3.0
     kind: policy
-    source: "Challenger late prediction percentage must not increase by more than 3.0 percentage points"
+    source: "Configured starting value; Challenger late prediction percentage must not increase by more than 3.0 percentage points"
 
 alerts:
   drift_psi_threshold:
     value: 0.25
     kind: policy
-    source: "Alert dispatch threshold for high sensor PSI population shift"
+    source: "Configured starting value; Alert dispatch threshold for high sensor PSI population shift"
   key_drift_sensors: ["s3", "s7", "s11"]
   backlog_critical_high_threshold:
     value: 10
     kind: policy
-    source: "Critical maintenance queue backlog ceiling before escalating hangar capacity"
+    source: "Configured starting value; Critical maintenance queue backlog ceiling before escalating hangar capacity"
   coverage_min_threshold:
     value: 0.75
     kind: policy
-    source: "Minimum acceptable conformal coverage before raising miscalibration alert"
+    source: "Configured starting value; Minimum acceptable conformal coverage before raising miscalibration alert"
   latency_p95_ms_threshold:
     value: 100.0
     kind: policy
-    source: "SLA ceiling for 95th percentile real-time telemetry inference latency"
+    source: "Configured starting value; SLA ceiling for 95th percentile real-time telemetry inference latency"
 
   # External Alert Webhook Dispatcher (Slack / Teams / PagerDuty / Generic)
   webhook:
@@ -69,9 +69,9 @@ alerts:
     timeout_sec:
       value: 5.0
       kind: policy
-      source: "Network timeout limit for external alert dispatcher webhook delivery"
+      source: "Configured starting value; Network timeout limit for external alert dispatcher webhook delivery"
     retry_count:
       value: 2
       kind: policy
-      source: "Maximum retry attempts with exponential backoff on webhook failure"
+      source: "Configured starting value; Maximum retry attempts with exponential backoff on webhook failure"
     notify_rules: ["M1", "M2", "M3"]

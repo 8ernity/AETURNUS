@@ -6,7 +6,9 @@ from src.api.server import app
 from src.common.utils import get_root_dir
 from src.common.state import state_db_path
 
-client = TestClient(app)
+from tests.auth_helpers import ADMIN_HEADERS
+
+client = TestClient(app, headers=ADMIN_HEADERS)
 
 def test_routes_unique_method_and_path():
     """Assert unique (method, path) per route across entire FastAPI app."""

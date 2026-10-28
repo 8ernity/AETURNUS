@@ -70,7 +70,10 @@ class SelfHealingEngine:
                     subsystem TEXT NOT NULL,
                     status TEXT NOT NULL,
                     recommended_action TEXT NOT NULL,
-                    created_at TEXT NOT NULL
+                    work_order_id TEXT,
+                    created_at TEXT NOT NULL,
+                    completed_at TEXT,
+                    completion_note TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS audit_events (
@@ -88,6 +91,23 @@ class SelfHealingEngine:
                 CREATE INDEX IF NOT EXISTS idx_sh_engine ON self_healing_actions(engine_id);
                 CREATE INDEX IF NOT EXISTS idx_sh_status ON self_healing_actions(status);
             """)
+            # Migrate pre-existing ledgers that predate external completion
+            # tracking. SQLite cannot add multiple columns in one statement.
+            columns = {
+                row[1]
+                for row in conn.execute(
+                    "PRAGMA table_info(self_healing_actions)"
+                ).fetchall()
+            }
+            for column, ddl in (
+                ("work_order_id", "TEXT"),
+                ("completed_at", "TEXT"),
+                ("completion_note", "TEXT"),
+            ):
+                if column not in columns:
+                    conn.execute(
+                        f"ALTER TABLE self_healing_actions ADD COLUMN {column} {ddl}"
+                    )
 
     def _severity_bands(self) -> Dict[str, float]:
         """Severity thresholds are policy: every band must be present in config."""
@@ -175,11 +195,15 @@ class SelfHealingEngine:
         cycle: int,
         cons_rul: float,
         subsystem: str = "HPC",
-        custom_params: Optional[Dict[str, Any]] = None
+        custom_params: Optional[Dict[str, Any]] = None,
+        actor: str = "SelfHealingEngine",
+        work_order_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Executes a rule-based action, records in the immutable ledger,
-        and logs an audit trail event.
+        Records a rule-based maintenance *recommendation* in the immutable
+        ledger. The action remains RECOMMENDED until an external completion is
+        recorded through complete_action(); this method never claims that
+        physical work was executed.
         """
         status_dict = {
             "engine_id": engine_id,
@@ -204,21 +228,26 @@ class SelfHealingEngine:
                     subsystem TEXT NOT NULL,
                     status TEXT NOT NULL,
                     recommended_action TEXT NOT NULL,
-                    created_at TEXT NOT NULL
+                    work_order_id TEXT,
+                    created_at TEXT NOT NULL,
+                    completed_at TEXT,
+                    completion_note TEXT
                 );
             """)
             conn.execute("""
                 INSERT INTO self_healing_actions (
-                    action_id, engine_id, cycle, action_type, subsystem, status, recommended_action, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    action_id, engine_id, cycle, action_type, subsystem, status,
+                    recommended_action, work_order_id, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 action_id,
                 engine_id,
                 int(cycle),
                 chosen["action_type"],
                 subsystem,
-                "ACTIVE",
+                "RECOMMENDED",
                 chosen["description"],
+                work_order_id,
                 now
             ))
 
@@ -229,13 +258,13 @@ class SelfHealingEngine:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 event_id,
-                None,
+                work_order_id,
                 engine_id,
                 int(cycle),
-                f"ACTION_{chosen['action_type']}",
-                "SelfHealingEngine",
-                f"Executed rule-based action for {subsystem}: {chosen['description']}",
-                json.dumps([f"action:{chosen['action_type']}"]),
+                f"ACTION_RECOMMENDED_{chosen['action_type']}",
+                actor,
+                f"Recommended rule-based action for {subsystem}: {chosen['description']}",
+                json.dumps([f"action:{chosen['action_type']}", "status:RECOMMENDED"]),
                 now
             ))
 
@@ -248,9 +277,68 @@ class SelfHealingEngine:
             "subsystem": subsystem,
             "conservative_rul": cons_rul,
             "recommended_action": chosen["description"],
-            "status": "ACTIVE",
+            "status": "RECOMMENDED",
+            "work_order_id": work_order_id,
             "timestamp": now
         }
+
+    def complete_action(
+        self,
+        action_id: str,
+        actor: str = "ExternalSystem",
+        note: str = "External completion recorded",
+    ) -> Optional[Dict[str, Any]]:
+        """Record an external completion against a recommendation.
+
+        Returns ``None`` when the action does not exist. Re-completing an
+        already completed action is idempotent and returns the stored row.
+        """
+        now = time.strftime("%Y-%m-%d %H:%M:%S")
+        with self._get_db() as conn:
+            row = conn.execute(
+                "SELECT * FROM self_healing_actions WHERE action_id = ?",
+                (action_id,),
+            ).fetchone()
+            if row is None:
+                return None
+
+            if row["status"] != "COMPLETED":
+                conn.execute(
+                    """
+                    UPDATE self_healing_actions
+                    SET status = 'COMPLETED', completed_at = ?, completion_note = ?
+                    WHERE action_id = ?
+                    """,
+                    (now, note, action_id),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO audit_events (
+                        event_id, work_order_id, engine_id, cycle, action,
+                        actor, reason, trace, timestamp
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        f"EVT-{uuid.uuid4()}",
+                        row["work_order_id"],
+                        row["engine_id"],
+                        int(row["cycle"]),
+                        "ACTION_COMPLETED",
+                        actor,
+                        note,
+                        json.dumps([f"action_id:{action_id}", "status:COMPLETED"]),
+                        now,
+                    ),
+                )
+
+            completed = conn.execute(
+                "SELECT * FROM self_healing_actions WHERE action_id = ?",
+                (action_id,),
+            ).fetchone()
+            result = dict(completed)
+            result["timestamp"] = result.get("created_at")
+            result["completed_at"] = result.get("completed_at") or now
+            return result
 
     def get_history(self, engine_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
         with self._get_db() as conn:

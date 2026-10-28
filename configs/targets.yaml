@@ -4,14 +4,15 @@ coverage_metric:
   - coverage_le_cap
   - coverage_above_cap
   kind: policy
-  source: Deployment coverage criterion for the population the model is trained to
-    rank; all-engine and above-cap coverage remain visible diagnostics.
+  source: Configured starting value; Deployment coverage criterion for the population
+    the model is trained to rank; all-engine and above-cap coverage remain visible
+    diagnostics.
   value: coverage_le_cap
 rul_buckets:
   edges:
     kind: policy
-    source: RUL reporting bands aligned with the operational severity windows used
-      by the triage policy.
+    source: Configured starting value; RUL reporting bands aligned with the operational
+      severity windows used by the triage policy.
     value:
     - 30
     - 60
@@ -41,6 +42,7 @@ target_metric:
   - rmse_vs_raw_truth
   - rmse_on_true_rul_le_cap
   kind: policy
-  source: 'Primary deployment criterion: error against uncapped raw RUL truth; switch
-    to rmse_on_true_rul_le_cap to exclude cap-region dilution.'
+  source: 'Configured starting value; Primary deployment criterion: error against
+    uncapped raw RUL truth; switch to rmse_on_true_rul_le_cap to exclude cap-region
+    dilution.'
   value: rmse_vs_raw_truth

@@ -2,16 +2,32 @@ import sys
 import json
 import argparse
 import hashlib
+import re
+import subprocess
+from collections import Counter
+from functools import lru_cache
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from src.common.utils import get_root_dir
+from src.common.utils import get_root_dir, load_yaml
 
 START_MARKER = "<!-- AUTO-METRICS-START -->"
 END_MARKER = "<!-- AUTO-METRICS-END -->"
+
+PROMOTION_START_MARKER = "<!-- AUTO-PROMOTION-GATE-START -->"
+PROMOTION_END_MARKER = "<!-- AUTO-PROMOTION-GATE-END -->"
+
+TEST_BADGE_START_MARKER = "<!-- AUTO-TEST-BADGE-START -->"
+TEST_BADGE_END_MARKER = "<!-- AUTO-TEST-BADGE-END -->"
+
+TEST_SUMMARY_START_MARKER = "<!-- AUTO-TEST-SUMMARY-START -->"
+TEST_SUMMARY_END_MARKER = "<!-- AUTO-TEST-SUMMARY-END -->"
+
+TEST_TABLE_START_MARKER = "<!-- AUTO-TEST-TABLE-START -->"
+TEST_TABLE_END_MARKER = "<!-- AUTO-TEST-TABLE-END -->"
 
 from src.ingest.loader import CMAPSSLoader
 
@@ -125,6 +141,179 @@ def render_metrics_block(manifest: dict) -> str:
 
     return "\n".join(lines)
 
+def _format_criterion_requirement(key: str, value) -> str:
+    if isinstance(value, bool):
+        return "enabled" if value else "disabled"
+    if isinstance(value, (int, float)):
+        if "min" in key:
+            comparator = ">="
+        elif "max" in key:
+            comparator = "<="
+        else:
+            comparator = "="
+        if key.endswith("_pct"):
+            suffix = "%"
+        elif key.endswith("_pp"):
+            suffix = " percentage points"
+        else:
+            suffix = ""
+        return f"{comparator} {value}{suffix}"
+    return str(value)
+
+
+def render_promotion_gate_block() -> str:
+    config = load_yaml("configs/monitoring.yaml", raw=True)
+    criteria = config.get("promotion_gate", {})
+    lines = [
+        PROMOTION_START_MARKER,
+        "### Promotion Gate Criteria",
+        "",
+        "Rendered from [`configs/monitoring.yaml`](configs/monitoring.yaml) at documentation-build time. "
+        f"The gate evaluates **{len(criteria)} configured criteria**; no threshold is typed into this README.",
+        "",
+        "| Criterion | Configured Requirement | Provenance |",
+        "|---|---|---|",
+    ]
+    for key, node in criteria.items():
+        if not isinstance(node, dict) or "value" not in node:
+            continue
+        label = key.replace("_", " ").strip().title()
+        requirement = _format_criterion_requirement(key, node["value"]).replace("|", "\\|")
+        source = str(node.get("source", "Configured starting value")).replace("|", "\\|")
+        lines.append(f"| **{label}** | `{requirement}` | {source} |")
+    lines.append(PROMOTION_END_MARKER)
+    return "\n".join(lines)
+
+
+def _test_files_fingerprint() -> str:
+    digest = hashlib.sha256()
+    for path in sorted((ROOT_DIR / "tests").glob("test_*.py")):
+        stat = path.stat()
+        digest.update(path.name.encode("utf-8"))
+        digest.update(str(stat.st_size).encode("ascii"))
+        digest.update(str(stat.st_mtime_ns).encode("ascii"))
+    return digest.hexdigest()
+
+
+@lru_cache(maxsize=1)
+def collect_test_counts() -> tuple[int, dict[str, int]]:
+    """Return collected-test counts per module from pytest's own collector.
+
+    Collection imports the whole application and takes tens of seconds, so the
+    result is cached against test-file sizes and mtimes. The cache is still
+    derived exclusively from ``pytest --collect-only`` output; it prevents each
+    README check from re-importing the entire ML stack.
+    """
+    cache_path = ROOT_DIR / "artifacts" / "reports" / "test_collection.json"
+    fingerprint = _test_files_fingerprint()
+    if cache_path.exists():
+        try:
+            cached = json.loads(cache_path.read_text(encoding="utf-8"))
+            if cached.get("fingerprint") == fingerprint and cached.get("counts"):
+                counts = {str(k): int(v) for k, v in cached["counts"].items()}
+                return int(cached["total"]), dict(sorted(counts.items()))
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+            pass
+
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", "tests"],
+        cwd=ROOT_DIR,
+        capture_output=True,
+        text=True,
+    )
+    output = (result.stdout or "") + "\n" + (result.stderr or "")
+    counts: Counter[str] = Counter()
+    for line in output.splitlines():
+        match = re.match(r"^(tests[\\/][^:]+)::", line.strip())
+        if match:
+            counts[match.group(1).replace("\\", "/")] += 1
+    if not counts:
+        raise RuntimeError(
+            "pytest --collect-only produced no test IDs; cannot render README test counts.\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+    payload = {
+        "fingerprint": fingerprint,
+        "total": sum(counts.values()),
+        "counts": dict(sorted(counts.items())),
+    }
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return payload["total"], payload["counts"]
+
+
+def render_test_badge_block() -> str:
+    total, _ = collect_test_counts()
+    return "\n".join(
+        [
+            TEST_BADGE_START_MARKER,
+            f"[![Tests](https://img.shields.io/badge/Tests-{total}%20Collected-brightgreen.svg?style=flat&logo=pytest)](https://docs.pytest.org/)",
+            TEST_BADGE_END_MARKER,
+        ]
+    )
+
+
+def render_test_summary_block() -> str:
+    total, modules = collect_test_counts()
+    return "\n".join(
+        [
+            TEST_SUMMARY_START_MARKER,
+            f"The platform includes a rigorous **{total}-test Pytest suite across {len(modules)} test modules** and an autonomous **CI smoke test**:",
+            TEST_SUMMARY_END_MARKER,
+        ]
+    )
+
+
+def _existing_test_descriptions(content: str) -> dict[str, str]:
+    descriptions: dict[str, str] = {}
+    old_pattern = re.compile(
+        r"^\|\s*`(tests/[^`]+)`\s*\|\s*(.*?)\s*\|\s*\d+\s*\|$"
+    )
+    new_pattern = re.compile(
+        r"^\|\s*`(tests/[^`]+)`\s*\|\s*\d+\s*\|\s*(.*?)\s*\|$"
+    )
+    for line in content.splitlines():
+        stripped = line.strip()
+        match = old_pattern.match(stripped) or new_pattern.match(stripped)
+        if match:
+            descriptions[match.group(1)] = match.group(2)
+    return descriptions
+
+
+def render_test_table_block(content: str) -> str:
+    total, modules = collect_test_counts()
+    descriptions = _existing_test_descriptions(content)
+    lines = [
+        TEST_TABLE_START_MARKER,
+        f"### Test Coverage by Module ({len(modules)} Modules, {total} Collected Tests)",
+        "",
+        "Counts are generated by `pytest --collect-only`; descriptions are retained from the maintained test map.",
+        "",
+        "| Test File | Test Count | Verified Functionality & Invariants |",
+        "|---|---:|:---|",
+    ]
+    for module, count in sorted(modules.items()):
+        description = descriptions.get(
+            module,
+            "Automated test module collected by the Pytest suite.",
+        )
+        lines.append(f"| `{module}` | {count} | {description} |")
+    lines.append(TEST_TABLE_END_MARKER)
+    return "\n".join(lines)
+
+
+def _replace_marked_block(content: str, start: str, end: str, rendered: str) -> str:
+    if start not in content or end not in content:
+        raise ValueError(f"README.md missing {start} or {end}")
+    before_part, rest = content.split(start, 1)
+    _, after_part = rest.split(end, 1)
+    return before_part + rendered + after_part
+
+
+def _normalize_block(block: str) -> str:
+    return "\n".join(line.rstrip() for line in block.strip().splitlines())
+
+
 def update_or_check_readme(check_only: bool = False) -> bool:
     root_dir = get_root_dir()
     manifest_file = root_dir / "artifacts" / "run_manifest.json"
@@ -135,34 +324,54 @@ def update_or_check_readme(check_only: bool = False) -> bool:
     with open(manifest_file, "r", encoding="utf-8") as f:
         manifest = json.load(f)
 
-    rendered_block = render_metrics_block(manifest)
     readme_path = root_dir / "README.md"
     content = readme_path.read_text(encoding="utf-8")
 
-    if START_MARKER not in content or END_MARKER not in content:
-        print(f"[ERROR] README.md missing {START_MARKER} or {END_MARKER}", file=sys.stderr)
+    blocks = [
+        (START_MARKER, END_MARKER, render_metrics_block(manifest)),
+        (PROMOTION_START_MARKER, PROMOTION_END_MARKER, render_promotion_gate_block()),
+        (TEST_BADGE_START_MARKER, TEST_BADGE_END_MARKER, render_test_badge_block()),
+        (TEST_SUMMARY_START_MARKER, TEST_SUMMARY_END_MARKER, render_test_summary_block()),
+        (TEST_TABLE_START_MARKER, TEST_TABLE_END_MARKER, render_test_table_block(content)),
+    ]
+
+    missing = [
+        f"{start} / {end}"
+        for start, end, _ in blocks
+        if start not in content or end not in content
+    ]
+    if missing:
+        print(f"[ERROR] README.md missing required markers: {', '.join(missing)}", file=sys.stderr)
         return False
 
-    # Extract existing block
-    before_part, rest = content.split(START_MARKER, 1)
-    current_middle, after_part = rest.split(END_MARKER, 1)
-    current_block = START_MARKER + current_middle + END_MARKER
-
     if check_only:
-        # Strict comparison
-        current_norm = "\n".join(line.rstrip() for line in current_block.strip().splitlines())
-        rendered_norm = "\n".join(line.rstrip() for line in rendered_block.strip().splitlines())
-        if current_norm != rendered_norm:
-            print("[FAIL] README committed metrics differ from artifacts/run_manifest.json rendered block!", file=sys.stderr)
-            print("--- Committed in README:\n", current_norm[:300], "...\n--- Rendered from Manifest:\n", rendered_norm[:300], "...", file=sys.stderr)
-            return False
-        print("[PASS] README metrics match run manifest exactly.")
+        for start, end, rendered in blocks:
+            before_part, rest = content.split(start, 1)
+            current_middle, after_part = rest.split(end, 1)
+            current_block = start + current_middle + end
+            if _normalize_block(current_block) != _normalize_block(rendered):
+                print(
+                    f"[FAIL] README block {start} differs from its config/pytest source!",
+                    file=sys.stderr,
+                )
+                print(
+                    "--- Committed in README:\n",
+                    _normalize_block(current_block)[:300],
+                    "...\n--- Rendered:\n",
+                    _normalize_block(rendered)[:300],
+                    "...",
+                    file=sys.stderr,
+                )
+                return False
+        print("[PASS] README metrics, promotion gate, and test counts match their sources exactly.")
         return True
-    else:
-        new_content = before_part + rendered_block + after_part
-        readme_path.write_text(new_content, encoding="utf-8")
-        print("[SUCCESS] Successfully updated README.md from run_manifest.json")
-        return True
+
+    new_content = content
+    for start, end, rendered in blocks:
+        new_content = _replace_marked_block(new_content, start, end, rendered)
+    readme_path.write_text(new_content, encoding="utf-8")
+    print("[SUCCESS] Successfully updated README.md from manifest, monitoring config, and pytest collection.")
+    return True
 
 def main():
     parser = argparse.ArgumentParser(description="Render or check README metrics block from run_manifest.json")

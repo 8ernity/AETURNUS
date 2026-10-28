@@ -527,7 +527,7 @@ export const FleetOverviewTab: React.FC<FleetOverviewTabProps> = ({
         </div>
       </div>
 
-      {/* Main Grid: Engines Cards + Live Alert Feed */}
+      {/* Main Grid: Engines Cards + Replay Alert Feed */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Engine Cards (3 Columns) */}
         <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -620,12 +620,12 @@ export const FleetOverviewTab: React.FC<FleetOverviewTabProps> = ({
           ))}
         </div>
 
-        {/* Right Live Alert Feed (1 Column) */}
+        {/* Right Replay Alert Feed (1 Column) */}
         <div className="glass-panel p-5 rounded-2xl flex flex-col h-full">
           <div className="flex items-center justify-between mb-4 pb-3 border-b border-indigo-500/10">
             <div className="flex items-center gap-2">
               <Zap className="w-4 h-4 text-cyan-400" />
-              <h3 className="font-semibold text-sm text-white">Live Decision Feed</h3>
+              <h3 className="font-semibold text-sm text-white">Replay Decision Feed</h3>
             </div>
             <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded-full text-slate-400 font-mono">
               WebSocket

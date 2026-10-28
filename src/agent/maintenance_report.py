@@ -109,7 +109,7 @@ def generate_maintenance_report_pdf(engine_id: str, data: Dict[str, Any]) -> byt
         "<b>DECISION SUPPORT ONLY:</b> This report is generated automatically from statistical "
         "machine learning models and predictive rules. It is provided strictly for maintenance planning "
         "and engineering decision support. It does not constitute a certified maintenance release, "
-        "airworthiness directive, or regulatory signoff."
+        "regulatory airworthiness determination, or signoff."
     )
     disclaimer_table = Table(
         [[Paragraph(disclaimer_html, disclaimer_style)]],

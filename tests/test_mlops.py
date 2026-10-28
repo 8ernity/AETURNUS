@@ -7,7 +7,9 @@ from src.mlops.drift_and_retrain import MLOpsManager, compute_df_sha256
 from src.common.utils import get_root_dir
 import pandas as pd
 
-client = TestClient(app)
+from tests.auth_helpers import ADMIN_HEADERS
+
+client = TestClient(app, headers=ADMIN_HEADERS)
 root_dir = get_root_dir()
 
 def test_drift_uses_training_reference_and_replay_window():

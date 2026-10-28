@@ -7,7 +7,9 @@ from src.api.server import app
 from src.agent.maintenance_queue import MaintenanceQueue
 from src.common.utils import get_root_dir, load_yaml
 
-client = TestClient(app)
+from tests.auth_helpers import ADMIN_HEADERS
+
+client = TestClient(app, headers=ADMIN_HEADERS)
 root_dir = get_root_dir()
 
 

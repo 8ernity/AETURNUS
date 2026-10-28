@@ -3,7 +3,9 @@ from fastapi.testclient import TestClient
 from src.api.server import app, get_mlops_manager
 from src.common.utils import get_root_dir, load_yaml
 
-client = TestClient(app)
+from tests.auth_helpers import ADMIN_HEADERS
+
+client = TestClient(app, headers=ADMIN_HEADERS)
 root_dir = get_root_dir()
 
 def test_suspected_subsystem_and_live_model_version():

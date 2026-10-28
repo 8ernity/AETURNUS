@@ -5,72 +5,72 @@ severity_bands:
   critical:
     value: 15
     kind: policy
-    source: "FAA Part 39 airworthiness directive safe envelope: pull within 15 flight cycles"
+    source: "Configured starting value; 15-cycle critical severity band used by the triage policy, not a regulatory airworthiness limit."
   high:
     value: 30
     kind: policy
-    source: "Airline standard scheduled turn-around safety buffer for depot bay reservation"
+    source: "Configured starting value; Airline standard scheduled turn-around safety buffer for depot bay reservation"
   medium:
     value: 60
     kind: policy
-    source: "Next line inspection inspection opportunity window"
+    source: "Configured starting value; Next line inspection inspection opportunity window"
   low:
     value: 100
     kind: policy
-    source: "Nominal operational tracking horizon"
+    source: "Configured starting value; Nominal operational tracking horizon"
 
 escalation:
   rul_drop_window:
     value: 10
     kind: policy
-    source: "Rolling operational window length for degradation acceleration detection"
+    source: "Configured starting value; Rolling operational window length for degradation acceleration detection"
   rul_drop_threshold:
     value: 15
     kind: policy
-    source: "Cycles of RUL loss exceeding elapsed flight cycles to trigger urgent review"
+    source: "Configured starting value; Cycles of RUL loss exceeding elapsed flight cycles to trigger urgent review"
   anomaly_threshold:
     value: 0.80
     kind: tuned_on_validation
-    source: "Calibrated 95th percentile contamination threshold on healthy validation engines"
+    source: "Configured starting value; Calibrated 95th percentile contamination threshold on healthy validation engines"
     run_id: "val_run_cmapss_baseline"
   fail_prob_threshold:
     value: 0.70
     kind: tuned_on_validation
-    source: "Decision threshold yielding >= 90% recall on 30-cycle failure validation events"
+    source: "Configured starting value; Decision threshold yielding >= 90% recall on 30-cycle failure validation events"
     run_id: "val_run_cmapss_baseline"
   deescalate_after_cycles:
     value: 5
     kind: policy
-    source: "Minimum consecutive stable flight cycles before lowering severity"
+    source: "Configured starting value; Minimum consecutive stable flight cycles before lowering severity"
 
 exceptions:
   max_interval_width:
     value: 40
     kind: policy
-    source: "Maximum epistemic uncertainty width (p90 - p10) permitted before sensor check"
+    source: "Configured starting value; Maximum epistemic uncertainty width (p90 - p10) permitted before sensor check"
   max_missing_fraction:
     value: 0.30
     kind: policy
-    source: "Maximum packet loss fraction tolerated before raising telemetry gap flag"
+    source: "Configured starting value; Maximum packet loss fraction tolerated before raising telemetry gap flag"
   min_history_cycles:
     value: 15
     kind: policy
-    source: "Warmup cycles required to populate rolling EWMA and Hampel statistical windows"
+    source: "Configured starting value; Warmup cycles required to populate rolling EWMA and Hampel statistical windows"
   data_gap_cycles:
     value: 5
     kind: policy
-    source: "Consecutive missing timestamp threshold to declare telemetry offline"
+    source: "Configured starting value; Consecutive missing timestamp threshold to declare telemetry offline"
 
 lifecycle:
   cooldown_cycles:
     value: 20
     kind: policy
-    source: "Post-maintenance burn-in monitoring cycles before resetting engine age"
+    source: "Configured starting value; Post-maintenance burn-in monitoring cycles before resetting engine age"
   default_due_by_factor:
     value: 0.5
     kind: policy
-    source: "Fraction of conservative RUL allocated as work order resolution deadline"
+    source: "Configured starting value; Fraction of conservative RUL allocated as work order resolution deadline"
   suppression_window_cycles:
     value: 10
     kind: policy
-    source: "Duplicate notification suppression window to prevent alert fatigue"
+    source: "Configured starting value; Duplicate notification suppression window to prevent alert fatigue"

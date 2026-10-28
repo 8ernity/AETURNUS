@@ -119,7 +119,7 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900/60 border border-indigo-500/20">
           <span className={`w-2.5 h-2.5 rounded-full ${wsConnected ? "bg-emerald-400 animate-pulse" : "bg-rose-500"}`}></span>
           <span className="text-xs font-medium text-slate-300">
-            {wsConnected ? "STREAM LIVE" : "DISCONNECTED"}
+            {wsConnected ? "REPLAY CONNECTED" : "DISCONNECTED"}
           </span>
         </div>
       </div>

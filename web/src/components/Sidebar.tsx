@@ -14,7 +14,6 @@ import {
   Flame
 } from "lucide-react";
 
-import aeturnusMark from "../assets/aeturnus-mark.png";
 import aeturnusName from "../assets/aeturnus-name.png";
 
 interface SidebarProps {
@@ -33,7 +32,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   exceptionCount
 }) => {
   const navItems = [
-    { id: "fleet", label: "Fleet Overview", icon: Activity, badge: "Live" },
+    { id: "fleet", label: "Fleet Overview", icon: Activity, badge: "Replay" },
     { id: "engine", label: "Engine Detail", icon: Cpu, badge: "Telemetry" },
     { id: "work_orders", label: "Work Orders & Triage", icon: ClipboardList, badge: exceptionCount > 0 ? `${exceptionCount} Review` : "Agent", badgeAlert: exceptionCount > 0 },
     { id: "cost_simulator", label: "Cost & ROI Simulator", icon: DollarSign, badge: "Finance" },
@@ -54,7 +53,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {!collapsed ? (
           <div className="flex items-center gap-3 overflow-hidden">
             <img 
-              src={aeturnusMark} 
+              src="/aeturnus-mark.png"
               alt="AETURNUS Emblem" 
               className="h-10 w-auto max-w-[48px] object-contain drop-shadow-md flex-shrink-0" 
             />
@@ -66,7 +65,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         ) : (
           <img 
-            src={aeturnusMark} 
+            src="/aeturnus-mark.png" 
             alt="AETURNUS" 
             className="h-10 w-auto max-w-[42px] object-contain mx-auto drop-shadow-md" 
           />

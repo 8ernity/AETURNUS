@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import toast from "react-hot-toast";
+import { authHeaders } from "../../lib/api";
 import { 
   ClipboardList, 
   CheckCircle2, 
@@ -57,6 +58,16 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
   const [isSimulating, setIsSimulating] = useState<boolean>(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState<boolean>(false);
 
+  const getResponseError = async (res: Response): Promise<string> => {
+    try {
+      const body = await res.json();
+      if (body?.detail) return String(body.detail);
+    } catch {
+      // Response was not JSON; fall back to the HTTP status below.
+    }
+    return `HTTP ${res.status}: ${res.statusText || "Request failed"}`;
+  };
+
   const fetchOrders = () => {
     fetch("/api/v1/work-orders")
       .then((res) => res.json())
@@ -78,13 +89,17 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
 
   // Maintenance Queue state
   const [maintenanceQueue, setMaintenanceQueue] = useState<any[]>([]);
+  const [queueConfig, setQueueConfig] = useState<any | null>(null);
   const [dailyCapacity, setDailyCapacity] = useState<number>(5);
   const [showQueue, setShowQueue] = useState<boolean>(true);
 
   const fetchQueue = () => {
     fetch(`/api/v1/maintenance-queue?subset=${currentSubset}&capacity=${dailyCapacity}`)
       .then((res) => res.json())
-      .then((data) => setMaintenanceQueue(data.queue || []))
+      .then((data) => {
+        setMaintenanceQueue(data.queue || []);
+        if (data.config) setQueueConfig(data.config);
+      })
       .catch((err) => console.error(err));
   };
 
@@ -101,18 +116,28 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
     if (!selectedOrder) return;
     setActionLoading(true);
     try {
-      await fetch(`/api/v1/work-orders/${selectedOrder.work_order_id}/action`, {
+      const res = await fetch(`/api/v1/work-orders/${selectedOrder.work_order_id}/action`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           action,
           reason: actionReason,
           new_severity: action === "OVERRIDE" ? overrideSeverity : undefined
         })
       });
+      if (!res.ok) throw new Error(await getResponseError(res));
+      const data = await res.json();
+      if (data.work_order) {
+        setSelectedOrder(
+          ["CLOSED", "REJECTED"].includes(data.work_order.status) ? null : data.work_order
+        );
+      }
       fetchOrders();
+      toast.success(`Work order action applied: ${action}`);
     } catch (err) {
-      console.error(err);
+      console.error("Work order action failed:", err);
+      const message = err instanceof Error ? err.message : "Unknown error";
+      toast.error(`Work order action failed: ${message}`);
     } finally {
       setActionLoading(false);
     }
@@ -122,20 +147,26 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
     if (!selectedOrder) return;
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/v1/work-orders/${selectedOrder.work_order_id}/advance`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          note: actionReason
-        })
-      });
+      const note = actionReason.trim() || "Stage progression";
+      const res = await fetch(
+        `/api/v1/work-orders/${selectedOrder.work_order_id}/advance`,
+        {
+          method: "POST",
+          headers: authHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ note })
+        }
+      );
+      if (!res.ok) throw new Error(await getResponseError(res));
       const data = await res.json();
       if (data.work_order) {
-        setSelectedOrder(data.work_order);
+        setSelectedOrder(data.work_order.status === "CLOSED" ? null : data.work_order);
+        toast.success(`Work order advanced to ${data.work_order.status}`);
       }
       fetchOrders();
     } catch (err) {
       console.error("Error advancing lifecycle:", err);
+      const message = err instanceof Error ? err.message : "Unknown error";
+      toast.error(`Unable to advance work order: ${message}`);
     } finally {
       setActionLoading(false);
     }
@@ -148,7 +179,7 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
     try {
       const res = await fetch(`/api/v1/rules/simulate?subset=${currentSubset}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           critical_threshold: simCrit,
           high_threshold: simHigh,
@@ -217,6 +248,12 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
     if (status === "OVERRIDDEN") return 4;
     return -1;
   };
+
+  const queueWeights = queueConfig?.weights;
+  const queueConfigSource = queueConfig?.source || "configs/queue.yaml";
+  const queueWeightSummary = queueWeights
+    ? `w_rul=${Number(queueWeights.w_rul).toFixed(2)}, w_fail=${Number(queueWeights.w_fail).toFixed(2)}, w_anom=${Number(queueWeights.w_anom).toFixed(2)}, w_trend=${Number(queueWeights.w_trend).toFixed(2)}`
+    : "loading configured weights from the queue policy…";
 
   return (
     <div className="space-y-6">
@@ -346,7 +383,7 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
         )}
 
         <div className="text-[10px] text-slate-500 italic">
-          * Configured starting weights (w_rul=0.40, w_fail=0.30, w_anom=0.15, w_trend=0.15) for decision support, not empirical physical claims.
+          * Configured starting weights ({queueWeightSummary}) from <span className="font-mono">{queueConfigSource}</span> for decision support, not empirical physical claims.
         </div>
       </div>
 

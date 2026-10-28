@@ -6,7 +6,9 @@ from src.api.server import app
 from src.mlops.drift_and_retrain import MLOpsManager
 from src.common.utils import get_root_dir
 
-client = TestClient(app)
+from tests.auth_helpers import ADMIN_HEADERS
+
+client = TestClient(app, headers=ADMIN_HEADERS)
 root_dir = get_root_dir()
 
 def test_benchmark_endpoint_reads_disk_reports():

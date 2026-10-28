@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { authHeaders } from "../../lib/api";
 import toast from "react-hot-toast";
 import { 
   DollarSign, 
@@ -68,7 +69,7 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
 
     fetch("/api/v1/economics/simulate", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify(payload)
     })
       .then((r) => r.json())

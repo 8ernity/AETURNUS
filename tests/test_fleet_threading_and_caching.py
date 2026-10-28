@@ -11,7 +11,9 @@ from src.api.server import (
     replay_ticker_loop
 )
 
-client = TestClient(app)
+from tests.auth_helpers import ADMIN_HEADERS
+
+client = TestClient(app, headers=ADMIN_HEADERS)
 
 def test_fleet_prediction_caching():
     """Verify that predictions are cached per (subset, unit, cycle, model_version)."""

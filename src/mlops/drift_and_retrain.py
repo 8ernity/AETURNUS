@@ -3,6 +3,7 @@ import json
 import time
 import hashlib
 import sqlite3
+import threading
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -101,6 +102,184 @@ def compute_df_sha256(df: pd.DataFrame) -> str:
         if pd.api.types.is_numeric_dtype(df[col]):
             h.update(df[col].to_numpy().tobytes()[:8192])
     return f"sha256:{h.hexdigest()[:16]}"
+
+class RetrainJobStore:
+    """Persistent, single-flight retraining job state.
+
+    A row with status RUNNING is the lock. ``BEGIN IMMEDIATE`` serializes
+    competing processes; a process-local lock serializes threads that would
+    otherwise race before SQLite's write lock is acquired.
+    """
+
+    _start_lock = threading.Lock()
+
+    def __init__(self, db_path: Optional[Path] = None):
+        self.db_path = db_path or state_db_path("retrain_jobs.db")
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_db()
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(str(self.db_path), timeout=10.0, isolation_level=None)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_db(self) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS retrain_jobs (
+                    job_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    subset TEXT NOT NULL,
+                    scenario TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    actor TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT,
+                    updated_at TEXT NOT NULL,
+                    result_json TEXT,
+                    error TEXT
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_retrain_jobs_subset_status "
+                "ON retrain_jobs(subset, status)"
+            )
+
+    @staticmethod
+    def _row_to_dict(row: Optional[sqlite3.Row]) -> Optional[Dict[str, Any]]:
+        if row is None:
+            return None
+        item = dict(row)
+        raw = item.pop("result_json", None)
+        if raw:
+            try:
+                item["result"] = json.loads(raw)
+            except json.JSONDecodeError:
+                item["result"] = None
+        else:
+            item["result"] = None
+        return item
+
+    def start_job(
+        self,
+        subset: str,
+        scenario: str,
+        actor: str = "operator",
+    ) -> Optional[Dict[str, Any]]:
+        """Atomically claim the retrain slot, or return None if already running."""
+        now = time.strftime("%Y-%m-%d %H:%M:%S")
+        with self._start_lock:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                running = conn.execute(
+                    """
+                    SELECT job_id FROM retrain_jobs
+                    WHERE subset = ? AND status = 'RUNNING'
+                    ORDER BY job_id DESC LIMIT 1
+                    """,
+                    (subset,),
+                ).fetchone()
+                if running is not None:
+                    conn.execute("ROLLBACK")
+                    return None
+                cursor = conn.execute(
+                    """
+                    INSERT INTO retrain_jobs (
+                        subset, scenario, status, actor, started_at, updated_at
+                    ) VALUES (?, ?, 'RUNNING', ?, ?, ?)
+                    """,
+                    (subset, scenario, actor, now, now),
+                )
+                job_id = int(cursor.lastrowid)
+                conn.execute("COMMIT")
+                return self.get_job(job_id)
+            except Exception:
+                try:
+                    conn.execute("ROLLBACK")
+                except Exception:
+                    pass
+                raise
+            finally:
+                conn.close()
+
+    def finish_job(
+        self,
+        job_id: int,
+        status: str,
+        result: Optional[Dict[str, Any]] = None,
+        error: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Finalize a RUNNING job. Terminal states are write-once."""
+        status = status.upper()
+        if status not in {"COMPLETED", "FAILED", "INTERRUPTED"}:
+            raise ValueError(f"Unsupported retrain job terminal status: {status}")
+        now = time.strftime("%Y-%m-%d %H:%M:%S")
+        payload = json.dumps(result, default=str) if result is not None else None
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                UPDATE retrain_jobs
+                SET status = ?, finished_at = ?, updated_at = ?,
+                    result_json = ?, error = ?
+                WHERE job_id = ? AND status = 'RUNNING'
+                """,
+                (status, now, now, payload, error, job_id),
+            )
+        finally:
+            conn.close()
+        return self.get_job(job_id)
+
+    def get_job(self, job_id: int) -> Optional[Dict[str, Any]]:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM retrain_jobs WHERE job_id = ?", (job_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+        return self._row_to_dict(row)
+
+    def latest_job(self, subset: str) -> Optional[Dict[str, Any]]:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT * FROM retrain_jobs WHERE subset = ?
+                ORDER BY job_id DESC LIMIT 1
+                """,
+                (subset,),
+            ).fetchone()
+        finally:
+            conn.close()
+        return self._row_to_dict(row)
+
+    def list_jobs(
+        self,
+        subset: Optional[str] = None,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        conn = self._connect()
+        try:
+            if subset:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM retrain_jobs WHERE subset = ?
+                    ORDER BY job_id DESC LIMIT ?
+                    """,
+                    (subset, int(limit)),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM retrain_jobs ORDER BY job_id DESC LIMIT ?",
+                    (int(limit),),
+                ).fetchall()
+        finally:
+            conn.close()
+        return [self._row_to_dict(row) for row in rows if row is not None]
+
 
 class MLOpsManager:
     def __init__(self, subset: str = "FD001"):

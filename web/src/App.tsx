@@ -12,6 +12,7 @@ import { DataPipelineTab } from "./components/tabs/DataPipelineTab";
 import { HowItWorksTab } from "./components/tabs/HowItWorksTab";
 import { DiagnosticPanel } from "./components/DiagnosticPanel";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { authHeaders, websocketUrl } from "./lib/api";
 
 export function App() {
   const [activeTab, setActiveTab] = useState<string>("fleet");
@@ -52,9 +53,7 @@ export function App() {
 
   // WebSocket Connection
   useEffect(() => {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/ws`;
+    const wsUrl = websocketUrl("/ws");
 
     const connectWs = () => {
       const socket = new WebSocket(wsUrl);
@@ -100,23 +99,34 @@ export function App() {
   const handleTogglePlay = async () => {
     const nextState = !isPlaying;
     setIsPlaying(nextState);
-    if (nextState) {
-      await fetch(`/api/v1/replay/start?speed=${speed}`, { method: "POST" });
-    } else {
-      await fetch(`/api/v1/replay/pause`, { method: "POST" });
+    const res = nextState
+      ? await fetch(`/api/v1/replay/start?speed=${speed}`, {
+          method: "POST",
+          headers: authHeaders()
+        })
+      : await fetch(`/api/v1/replay/pause`, {
+          method: "POST",
+          headers: authHeaders()
+        });
+    if (!res.ok) {
+      setIsPlaying(!nextState);
+      console.error("Replay control rejected:", res.status);
     }
   };
 
   const handleChangeSpeed = async (newSpeed: number) => {
     setSpeed(newSpeed);
     if (isPlaying) {
-      await fetch(`/api/v1/replay/start?speed=${newSpeed}`, { method: "POST" });
+      await fetch(`/api/v1/replay/start?speed=${newSpeed}`, {
+        method: "POST",
+        headers: authHeaders()
+      });
     }
   };
 
   const handleReset = async () => {
     setIsPlaying(false);
-    await fetch(`/api/v1/replay/reset`, { method: "POST" });
+    await fetch(`/api/v1/replay/reset`, { method: "POST", headers: authHeaders() });
     setCurrentCycle(20);
     fetchFleet();
   };
@@ -127,7 +137,10 @@ export function App() {
     setSpeed(5);
     setActiveTab("engine");
     setSelectedEngineId(`${currentSubset}-001`);
-    await fetch(`/api/v1/replay/start?speed=5&mode=lifecycle_demo&unit=1`, { method: "POST" });
+    await fetch(`/api/v1/replay/start?speed=5&mode=lifecycle_demo&unit=1`, {
+      method: "POST",
+      headers: authHeaders()
+    });
   };
 
   const handleSelectEngine = (engineId: string) => {
@@ -150,7 +163,7 @@ export function App() {
 
       {/* Main Content Area */}
       <div 
-        className={`flex-1 transition-all duration-300 main-mesh min-h-screen flex flex-col ${
+        className={`flex-1 min-w-0 transition-all duration-300 main-mesh min-h-screen flex flex-col ${
           collapsed ? "ml-20" : "ml-72"
         }`}
       >
@@ -171,8 +184,17 @@ export function App() {
           wsConnected={wsConnected}
         />
 
+        {/* Global data-provenance banner: every live-looking surface is replay data. */}
+        <div className="border-b border-amber-500/20 bg-amber-500/10 px-8 py-2 text-[11px] font-medium text-amber-200 flex items-center gap-2">
+          <span className="uppercase tracking-wider font-bold text-amber-300">Simulation</span>
+          <span>
+            Replay of NASA C-MAPSS data (simulated). Telemetry, decisions, and maintenance
+            actions are demonstrations, not live aircraft operations.
+          </span>
+        </div>
+
         {/* Dynamic Tab Body */}
-        <main className="flex-1 p-8 overflow-y-auto">
+        <main className="flex-1 min-w-0 p-8 overflow-y-auto">
           {activeTab === "fleet" && (
             <ErrorBoundary fallbackTitle="Fleet Overview">
               <FleetOverviewTab

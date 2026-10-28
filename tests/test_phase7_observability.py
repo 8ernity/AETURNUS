@@ -6,7 +6,9 @@ from fastapi.testclient import TestClient
 from src.api.server import app
 from src.mlops.alerts import AlertManager
 
-client = TestClient(app)
+from tests.auth_helpers import ADMIN_HEADERS
+
+client = TestClient(app, headers=ADMIN_HEADERS)
 
 def test_prometheus_metrics_endpoint():
     """Verify GET /metrics returns Prometheus format with pdm_ metrics."""

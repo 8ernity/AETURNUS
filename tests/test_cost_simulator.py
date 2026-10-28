@@ -3,7 +3,9 @@ from fastapi.testclient import TestClient
 from src.api.server import app
 from src.economics.cost_simulator import FleetCostSimulator, DEFAULT_COST_CONFIG
 
-client = TestClient(app)
+from tests.auth_helpers import ADMIN_HEADERS
+
+client = TestClient(app, headers=ADMIN_HEADERS)
 
 def test_simulator_initialization():
     sim = FleetCostSimulator("FD001")

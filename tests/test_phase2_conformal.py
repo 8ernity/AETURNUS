@@ -11,7 +11,9 @@ from src.models.model_service import ModelService, wilson_ci
 from src.ingest.loader import CMAPSSLoader
 from src.common.splits import get_persistent_split
 
-client = TestClient(app)
+from tests.auth_helpers import ADMIN_HEADERS
+
+client = TestClient(app, headers=ADMIN_HEADERS)
 root_dir = get_root_dir()
 
 def test_conformal_calibration_provenance():

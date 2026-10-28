@@ -4,7 +4,9 @@ import pandas as pd
 from fastapi.testclient import TestClient
 from src.api.server import app
 
-client = TestClient(app)
+from tests.auth_helpers import ADMIN_HEADERS
+
+client = TestClient(app, headers=ADMIN_HEADERS)
 
 def test_predict_batch_csv_with_processed_features():
     """Verify batch scoring endpoint works on CSV with features."""

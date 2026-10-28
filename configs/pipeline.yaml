@@ -34,41 +34,41 @@ cleaning:
   ffill_limit:
     value: 3
     kind: policy
-    source: "Maximum consecutive sensor dropout cycles imputed with forward fill"
+    source: "Configured starting value; Maximum consecutive sensor dropout cycles imputed with forward fill"
   hampel_window:
     value: 7
     kind: policy
-    source: "Sliding window size for Hampel median filter spike detection"
+    source: "Configured starting value; Sliding window size for Hampel median filter spike detection"
   hampel_sigma:
     value: 3.0
     kind: policy
-    source: "Standard deviation threshold for Hampel outlier detection"
+    source: "Configured starting value; Standard deviation threshold for Hampel outlier detection"
   outlier_z_clip:
     value: 5.0
     kind: policy
-    source: "Z-score clipping threshold to suppress extreme unphysical sensor spikes"
+    source: "Configured starting value; Z-score clipping threshold to suppress extreme unphysical sensor spikes"
   flatline_window:
     value: 10
     kind: policy
-    source: "Window length to detect stuck sensor flatline anomalies"
+    source: "Configured starting value; Window length to detect stuck sensor flatline anomalies"
   flatline_var_threshold:
     value: 1.0e-5
     kind: policy
-    source: "Minimum sensor variance required over flatline window"
+    source: "Configured starting value; Minimum sensor variance required over flatline window"
   constant_sensor_var_threshold:
     value: 1.0e-4
     kind: policy
-    source: "Variance threshold below which non-informative constant sensors are dropped"
+    source: "Configured starting value; Variance threshold below which non-informative constant sensors are dropped"
 
 regime:
   n_clusters_single_regime:
     value: 1
     kind: policy
-    source: "Sea-level single flight condition baseline (FD001 and FD003)"
+    source: "Configured starting value; Sea-level single flight condition baseline (FD001 and FD003)"
   n_clusters_multi_regime:
     value: 6
     kind: policy
-    source: "Six distinct flight envelope operating regimes (FD002 and FD004)"
+    source: "Configured starting value; Six distinct flight envelope operating regimes (FD002 and FD004)"
   multi_regime_subsets: ["FD002", "FD004"]
 
 evaluation:
@@ -76,85 +76,85 @@ evaluation:
     mode:
       value: "random"
       kind: policy
-      source: "Cross-validation censors targets with random cycle truncation to match the official test protocol"
+      source: "Configured starting value; Cross-validation censors targets with random cycle truncation to match the official test protocol"
     n_draws:
       value: 5
       kind: policy
-      source: "Five independent truncation draws per engine stabilize the validation RUL distribution"
+      source: "Configured starting value; Five independent truncation draws per engine stabilize the validation RUL distribution"
     min_cycles:
       value: 60
       kind: policy
-      source: "Minimum observed cycles before a random cutoff; 60 is the cross-subset value where censored CV RUL means align with the official test RUL means (FD001-FD004)"
+      source: "Configured starting value; Minimum observed cycles before a random cutoff; 60 is the cross-subset value where censored CV RUL means align with the official test RUL means (FD001-FD004)"
     ks_threshold:
       value: 0.20
       kind: policy
-      source: "Largest observed capped-RUL KS statistic between censored CV and official test distributions across FD001-FD004 at min_cycles=60 (0.162) plus sampling margin"
+      source: "Configured starting value; Largest observed capped-RUL KS statistic between censored CV and official test distributions across FD001-FD004 at min_cycles=60 (0.162) plus sampling margin"
     mean_rel_gap:
       value: 0.15
       kind: policy
-      source: "Largest observed capped-RUL mean gap between censored CV and official test RUL across FD001-FD004 at min_cycles=60 (0.091) plus sampling margin"
+      source: "Configured starting value; Largest observed capped-RUL mean gap between censored CV and official test RUL across FD001-FD004 at min_cycles=60 (0.091) plus sampling margin"
 
 features:
   rolling_windows: [5, 10, 30]
   healthy_baseline_cycles:
     value: 20
     kind: policy
-    source: "Engine cycles used to calculate pristine reference baseline statistics"
+    source: "Configured starting value; Engine cycles used to calculate pristine reference baseline statistics"
   smoothing_alpha:
     value: 0.2
     kind: policy
-    source: "Exponentially weighted moving average (EWMA) smoothing parameter"
+    source: "Configured starting value; Exponentially weighted moving average (EWMA) smoothing parameter"
   rul_cap:
     value: 125
     kind: policy
-    source: "Piecewise linear RUL target ceiling to suppress early steady-state noise"
+    source: "Configured starting value; Piecewise linear RUL target ceiling to suppress early steady-state noise"
   sequence_window_len:
     value: 30
     kind: policy
-    source: "Sequence history window length for deep neural baselines"
+    source: "Configured starting value; Sequence history window length for deep neural baselines"
 
 splits:
   train_ratio:
     value: 0.80
     kind: policy
-    source: "Engine unit split ratio allocated to training set"
+    source: "Configured starting value; Engine unit split ratio allocated to training set"
   val_ratio:
     value: 0.20
     kind: policy
-    source: "Engine unit split ratio allocated to validation set"
+    source: "Configured starting value; Engine unit split ratio allocated to validation set"
   random_seed:
     value: 42
     kind: policy
-    source: "Deterministic split random seed"
+    source: "Configured starting value; Deterministic split random seed"
 
 state:
   dir:
     value: "state"
     kind: policy
-    source: "Single runtime SQLite directory for triage, self-healing, drift, and MLflow state; overridable via AETURNUS_STATE_DIR"
+    source: "Configured starting value; Single runtime SQLite directory for triage, self-healing, drift, and MLflow state; overridable via AETURNUS_STATE_DIR"
 
 conformal:
   target_coverage:
     value: 0.80
     kind: policy
-    source: "Target empirical interval coverage for held-out validation engines; test coverage is reported separately as a diagnostic."
+    source: "Configured starting value; Target empirical interval coverage for held-out validation engines; test coverage is reported separately as a diagnostic."
   nominal_levels:
     value: [0.80, 0.85, 0.90, 0.95]
     kind: policy
-    source: "Candidate nominal conformal levels evaluated on the held-out validation-engine fold; the smallest level meeting target coverage is selected."
+    source: "Configured starting value; Candidate nominal conformal levels evaluated on the held-out validation-engine fold; the smallest level meeting target coverage is selected."
   validation_draws:
     value: 10
     kind: policy
-    source: "Independent truncation draws per held-out validation engine; at least 10 are required so Wilson lower bounds are not dominated by sampling noise."
+    source: "Configured starting value; Independent truncation draws per held-out validation engine; at least 10 are required so Wilson lower bounds are not dominated by sampling noise."
   selection_tolerance:
     value: 0.03
     kind: policy
-    source: "Allowed shortfall between the validation Wilson lower bound and target coverage when selecting a nominal level; prevents an optimistic point estimate from promoting an under-covering interval."
+    source: "Configured starting value; Allowed shortfall between the validation Wilson lower bound and target coverage when selecting a nominal level; prevents an optimistic point estimate from promoting an under-covering interval."
   cross_conformal_folds:
     value: 3
     kind: policy
-    source: "Number of engine-disjoint folds used to generate out-of-fold quantile residuals across all non-test engines for cross-conformal calibration."
+    source: "Configured starting value; Number of engine-disjoint folds used to generate out-of-fold quantile residuals across all non-test engines for cross-conformal calibration."
   n_buckets:
     value: 3
     kind: policy
-    source: "Number of predicted-RUL buckets used for conditional conformal calibration"
+    source: "Configured starting value; Number of predicted-RUL buckets used for conditional conformal calibration"

@@ -4,7 +4,9 @@ from fastapi.testclient import TestClient
 from src.api.server import app
 from src.common.utils import get_root_dir
 
-client = TestClient(app)
+from tests.auth_helpers import ADMIN_HEADERS
+
+client = TestClient(app, headers=ADMIN_HEADERS)
 
 @pytest.fixture(autouse=True)
 def isolate_uploads(tmp_path, monkeypatch):
