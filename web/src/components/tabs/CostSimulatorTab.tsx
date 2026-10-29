@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { authHeaders } from "../../lib/api";
+import { authHeaders, hasApiKey } from "../../lib/api";
 import toast from "react-hot-toast";
 import { 
   DollarSign, 
@@ -53,28 +53,60 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
   // Results State
   const [simData, setSimData] = useState<any | null>(null);
   const [curveData, setCurveData] = useState<any | null>(null);
+  const [authRequired, setAuthRequired] = useState<boolean>(false);
 
-  // Fetch simulation
-  const fetchSimulation = () => {
+  interface SimulationOverrides {
+    threshold?: number;
+    costCatastrophic?: number;
+    costOverhaul?: number;
+    costWastedCycle?: number;
+    costInspection?: number;
+  }
+
+  // Fetch simulation. Authenticated clients can POST custom unit economics;
+  // unauthenticated viewers still get the server-default simulation through
+  // the read-only GET route instead of a page full of em-dashes.
+  const fetchSimulation = (overrides: SimulationOverrides = {}) => {
+    const effectiveThreshold = overrides.threshold ?? threshold;
+    const effectiveCatastrophic = overrides.costCatastrophic ?? costCatastrophic;
+    const effectiveOverhaul = overrides.costOverhaul ?? costOverhaul;
+    const effectiveWasted = overrides.costWastedCycle ?? costWastedCycle;
+    const effectiveInspection = overrides.costInspection ?? costInspection;
+    const canSubmitCustomCosts = hasApiKey();
+
     setLoading(true);
     const payload = {
       subset: currentSubset,
-      threshold,
+      threshold: effectiveThreshold,
       use_conservative: useConservative,
-      cost_catastrophic: costCatastrophic,
-      cost_overhaul: costOverhaul,
-      cost_wasted_cycle: costWastedCycle,
-      cost_inspection: costInspection
+      cost_catastrophic: effectiveCatastrophic,
+      cost_overhaul: effectiveOverhaul,
+      cost_wasted_cycle: effectiveWasted,
+      cost_inspection: effectiveInspection
     };
+    const endpoint = canSubmitCustomCosts
+      ? "/api/v1/economics/simulate"
+      : `/api/v1/economics/simulate?subset=${encodeURIComponent(currentSubset)}&threshold=${effectiveThreshold}&use_conservative=${useConservative}`;
 
-    fetch("/api/v1/economics/simulate", {
-      method: "POST",
-      headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify(payload)
-    })
-      .then((r) => r.json())
+    fetch(endpoint, canSubmitCustomCosts
+      ? {
+          method: "POST",
+          headers: authHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify(payload)
+        }
+      : undefined)
+      .then(async (response) => {
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 403) {
+            setAuthRequired(true);
+          }
+          throw new Error(`Simulation request failed (${response.status})`);
+        }
+        return response.json();
+      })
       .then((data) => {
         setSimData(data);
+        setAuthRequired(false);
         setLoading(false);
       })
       .catch((err) => {
@@ -109,18 +141,36 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
       setCostOverhaul(240000);
       setCostWastedCycle(1400);
       setCostInspection(15000);
+      fetchSimulation({
+        costCatastrophic: 3000000,
+        costOverhaul: 240000,
+        costWastedCycle: 1400,
+        costInspection: 15000
+      });
       toast.success("Applied Commercial Airline Preset ($3.0M AOG, $240k Overhaul)");
     } else if (preset === "cargo") {
       setCostCatastrophic(2000000);
       setCostOverhaul(200000);
       setCostWastedCycle(1000);
       setCostInspection(10000);
+      fetchSimulation({
+        costCatastrophic: 2000000,
+        costOverhaul: 200000,
+        costWastedCycle: 1000,
+        costInspection: 10000
+      });
       toast.success("Applied Cargo Operator Preset ($2.0M AOG, $200k Overhaul)");
     } else {
       setCostCatastrophic(4500000);
       setCostOverhaul(350000);
       setCostWastedCycle(2200);
       setCostInspection(25000);
+      fetchSimulation({
+        costCatastrophic: 4500000,
+        costOverhaul: 350000,
+        costWastedCycle: 2200,
+        costInspection: 25000
+      });
       toast.success("Applied Military / Heavy Preset ($4.5M AOG, $350k Overhaul)");
     }
   };
@@ -134,6 +184,20 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
 
   return (
     <div className="space-y-6">
+      {(!hasApiKey() || authRequired) && (
+        <div className="bg-slate-900/70 border border-slate-700 text-slate-300 p-4 rounded-2xl flex items-center gap-3">
+          <Info className="w-5 h-5 text-cyan-400 shrink-0" />
+          <div className="text-xs space-y-0.5">
+            <div className="font-bold text-slate-200">Read-only default economics</div>
+            <div>
+              Custom AOG, overhaul, inspection, and wasted-life inputs require an API key.
+              Click <span className="font-mono text-cyan-300">CONNECT</span> in the header to
+              apply your own assumptions.
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Stale Artifact Warning Banner */}
       {simData?.stale && (
         <div className="bg-amber-500/15 border border-amber-500/30 text-amber-300 p-4 rounded-2xl flex items-center gap-3">
@@ -175,7 +239,7 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
             <button
               onClick={() => {
                 setThreshold(optimalTau);
-                fetchSimulation();
+                fetchSimulation({ threshold: optimalTau });
               }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 text-indigo-200 text-xs font-semibold transition-all shadow-md"
             >
@@ -183,7 +247,7 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
               <span>Snap to Optimal Threshold (τ* = {optimalTau} cyc)</span>
             </button>
             <button
-              onClick={fetchSimulation}
+              onClick={() => fetchSimulation()}
               className="p-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-400 hover:text-white transition-colors"
               title="Refresh Simulation"
             >
@@ -450,19 +514,19 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
           <div className="flex items-center gap-2">
             <span className="text-xs text-slate-400 font-medium mr-1">Scenario Presets (Illustrative):</span>
             <button
-              onClick={() => { handleApplyPreset("commercial"); fetchSimulation(); }}
+              onClick={() => handleApplyPreset("commercial")}
               className="px-2.5 py-1 rounded-lg text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition-all"
             >
               Commercial Airline
             </button>
             <button
-              onClick={() => { handleApplyPreset("cargo"); fetchSimulation(); }}
+              onClick={() => handleApplyPreset("cargo")}
               className="px-2.5 py-1 rounded-lg text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition-all"
             >
               Cargo Operator
             </button>
             <button
-              onClick={() => { handleApplyPreset("military"); fetchSimulation(); }}
+              onClick={() => handleApplyPreset("military")}
               className="px-2.5 py-1 rounded-lg text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition-all"
             >
               Military / Heavy
@@ -487,8 +551,8 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
               step="1"
               value={threshold}
               onChange={(e) => setThreshold(parseInt(e.target.value))}
-              onMouseUp={fetchSimulation}
-              onTouchEnd={fetchSimulation}
+              onMouseUp={() => fetchSimulation()}
+              onTouchEnd={() => fetchSimulation()}
               className="w-full accent-cyan-500 cursor-pointer"
             />
             <div className="flex justify-between text-[10px] text-slate-500 font-mono">
@@ -545,7 +609,7 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
                   type="number"
                   value={costCatastrophic}
                   onChange={(e) => setCostCatastrophic(Math.max(0, parseFloat(e.target.value) || 0))}
-                  onBlur={fetchSimulation}
+                  onBlur={() => fetchSimulation()}
                   onKeyDown={(e) => { if (e.key === "Enter") fetchSimulation(); }}
                   className="w-24 px-1.5 py-0.5 rounded bg-slate-950 border border-slate-700 text-right text-rose-300 font-mono text-xs focus:border-rose-400 focus:outline-none"
                 />
@@ -558,8 +622,8 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
               step="250000"
               value={costCatastrophic}
               onChange={(e) => setCostCatastrophic(parseFloat(e.target.value))}
-              onMouseUp={fetchSimulation}
-              onTouchEnd={fetchSimulation}
+              onMouseUp={() => fetchSimulation()}
+              onTouchEnd={() => fetchSimulation()}
               className="w-full accent-rose-500 cursor-pointer"
             />
             <div className="flex justify-between text-[10px] text-slate-500 font-mono">
@@ -581,7 +645,7 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
                   type="number"
                   value={costOverhaul}
                   onChange={(e) => setCostOverhaul(Math.max(0, parseFloat(e.target.value) || 0))}
-                  onBlur={fetchSimulation}
+                  onBlur={() => fetchSimulation()}
                   onKeyDown={(e) => { if (e.key === "Enter") fetchSimulation(); }}
                   className="w-24 px-1.5 py-0.5 rounded bg-slate-950 border border-slate-700 text-right text-indigo-300 font-mono text-xs focus:border-indigo-400 focus:outline-none"
                 />
@@ -594,8 +658,8 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
               step="20000"
               value={costOverhaul}
               onChange={(e) => setCostOverhaul(parseFloat(e.target.value))}
-              onMouseUp={fetchSimulation}
-              onTouchEnd={fetchSimulation}
+              onMouseUp={() => fetchSimulation()}
+              onTouchEnd={() => fetchSimulation()}
               className="w-full accent-indigo-500 cursor-pointer"
             />
             <div className="flex justify-between text-[10px] text-slate-500 font-mono">
@@ -617,7 +681,7 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
                   type="number"
                   value={costWastedCycle}
                   onChange={(e) => setCostWastedCycle(Math.max(0, parseFloat(e.target.value) || 0))}
-                  onBlur={fetchSimulation}
+                  onBlur={() => fetchSimulation()}
                   onKeyDown={(e) => { if (e.key === "Enter") fetchSimulation(); }}
                   className="w-20 px-1.5 py-0.5 rounded bg-slate-950 border border-slate-700 text-right text-amber-300 font-mono text-xs focus:border-amber-400 focus:outline-none"
                 />
@@ -630,8 +694,8 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
               step="100"
               value={costWastedCycle}
               onChange={(e) => setCostWastedCycle(parseFloat(e.target.value))}
-              onMouseUp={fetchSimulation}
-              onTouchEnd={fetchSimulation}
+              onMouseUp={() => fetchSimulation()}
+              onTouchEnd={() => fetchSimulation()}
               className="w-full accent-amber-500 cursor-pointer"
             />
             <div className="flex justify-between text-[10px] text-slate-500 font-mono">
@@ -653,7 +717,7 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
                   type="number"
                   value={costInspection}
                   onChange={(e) => setCostInspection(Math.max(0, parseFloat(e.target.value) || 0))}
-                  onBlur={fetchSimulation}
+                  onBlur={() => fetchSimulation()}
                   onKeyDown={(e) => { if (e.key === "Enter") fetchSimulation(); }}
                   className="w-20 px-1.5 py-0.5 rounded bg-slate-950 border border-slate-700 text-right text-purple-300 font-mono text-xs focus:border-purple-400 focus:outline-none"
                 />
@@ -666,8 +730,8 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
               step="1000"
               value={costInspection}
               onChange={(e) => setCostInspection(parseFloat(e.target.value))}
-              onMouseUp={fetchSimulation}
-              onTouchEnd={fetchSimulation}
+              onMouseUp={() => fetchSimulation()}
+              onTouchEnd={() => fetchSimulation()}
               className="w-full accent-purple-500 cursor-pointer"
             />
             <div className="flex justify-between text-[10px] text-slate-500 font-mono">

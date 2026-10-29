@@ -76,23 +76,40 @@ To run reliably within free-tier resource boundaries (e.g., 512 MB RAM limit):
    - Parquet projection loading is used (`pyarrow` schema inspection) so only drift-relevant columns are loaded during monitoring runs, reducing RAM usage by 80%.
 
 3. **Render Setup**:
-   - Environment: Docker
+   - Environment: Python
    - Instance Type: Free (512 MB RAM, 0.1 CPU)
+   - Build Command: `pip install -r requirements.txt && python -m scripts.build_all_data FD001`
    - Start Command: `python run_app.py`
    - Health Check Path: `/api/v1/health`
    - Port: Render-injected `$PORT` (local default `8000`)
+   - A checked-in `render.yaml` describes this configuration. Build FD001 in
+     the deploy build step so the 512 MB runtime does not have to construct the
+     279-column feature frame while FastAPI is importing.
 
 4. **Fast Port Binding & Bounded Warmup**:
    - FastAPI does not load datasets or models during lifespan startup. It
-     returns from startup immediately and warms only the active subset
-     (`FD001`) in a background thread, so Render's `$PORT` opens without
+     returns from startup immediately, so Render's `$PORT` opens without
      waiting for model/data work.
-   - Set `AETURNUS_WARM_SUBSETS=all` (or a comma-separated subset list) only on
-     instances with enough RAM. Warming all four subsets can exceed a 512 MB
-     limit.
+   - On a 512 MB instance, set `AETURNUS_WARM_SUBSETS=none`. The first
+     `/api/v1/fleet` request loads only that subset lazily. Set
+     `AETURNUS_WARM_SUBSETS=all` (or a comma-separated subset list) only on
+     instances with enough RAM.
    - Only one subset's telemetry frames stay resident at a time; frames for
      other subsets are evicted before a new subset is loaded and after its
      fleet prediction cache is primed.
+   - The artifact bootstrap runs in a short-lived child process on startup, so
+     any temporary data-build memory is released before Uvicorn imports the API
+     and model stack. MLflow is imported lazily, only when retraining runs.
+
+5. **Authentication Keys on Render**:
+   - Add `AETURNUS_API_KEY_ADMIN`, `AETURNUS_API_KEY_OPERATOR`,
+     `AETURNUS_API_KEY_TECHNICIAN`, and `AETURNUS_API_KEY_VIEWER` in
+     Render → Environment. Use strong random strings; the app does not
+     generate or display them.
+   - Open the deployed UI, click **API KEY** in the header, paste the operator
+     key, and save. The key is kept in the browser's `localStorage` and is sent
+     on WebSocket and mutation requests. Use the viewer key for read-only
+     telemetry.
 
 ---
 

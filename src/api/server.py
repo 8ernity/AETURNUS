@@ -471,6 +471,8 @@ def _startup_warmup_subsets() -> List[str]:
     configured = os.getenv("AETURNUS_WARM_SUBSETS", "").strip()
     if not configured:
         return [current_subset]
+    if configured.lower() in {"none", "off", "false", "0"}:
+        return []
     if configured.lower() == "all":
         return list(CONFIGURED_SUBSETS)
     requested = [item.strip().upper() for item in configured.split(",") if item.strip()]
@@ -588,9 +590,17 @@ def get_fleet(subset: str = Query(default="FD001")):
     open_orders_count = int(len(triage_agent.open_orders))
     needs_review_count = int(sum(1 for o in triage_agent.open_orders.values() if o.get("status") == "NEEDS_REVIEW"))
 
-    mgr = get_mlops_manager(subset)
-    reg = mgr.get_registry()
-    champ_ver = reg.get("active_champion", "v1.0")
+    # Read the lightweight registry JSON instead of instantiating MLOpsManager.
+    # MLOpsManager brings in MLflow and is only needed when the MLOps tab or a
+    # retraining job is actually used.  Keeping it out of /fleet saves ~65 MB
+    # RSS on 512 MB hosts.
+    champ_ver = "v1.0"
+    registry_path = ROOT_DIR / "artifacts" / "reports" / "model_registry.json"
+    try:
+        with open(registry_path, "r", encoding="utf-8") as registry_file:
+            champ_ver = json.load(registry_file).get("active_champion", "v1.0")
+    except Exception:
+        pass
 
     # Fleet Survival Curve (Kaplan-Meier Reliability S(t) = P(RUL > t))
     n_engines = max(1, len(engines))

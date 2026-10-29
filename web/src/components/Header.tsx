@@ -1,5 +1,5 @@
 import React from "react";
-import { Play, Pause, RotateCcw, FastForward, Radio, Sparkles } from "lucide-react";
+import { Play, Pause, RotateCcw, FastForward, Radio, Sparkles, KeyRound } from "lucide-react";
 
 interface HeaderProps {
   currentSubset: string;
@@ -12,6 +12,9 @@ interface HeaderProps {
   onLifecycleDemo: () => void;
   currentCycle: number;
   wsConnected: boolean;
+  wsAuthFailed: boolean;
+  hasApiKey: boolean;
+  onOpenApiKey: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -24,7 +27,10 @@ export const Header: React.FC<HeaderProps> = ({
   onReset,
   onLifecycleDemo,
   currentCycle,
-  wsConnected
+  wsConnected,
+  wsAuthFailed,
+  hasApiKey,
+  onOpenApiKey
 }) => {
   const subsets = [
     { id: "FD001", label: "FD001 · 1 Regime / HPC" },
@@ -115,11 +121,38 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Right WebSocket & Telemetry Status */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3">
+        <button
+          onClick={onOpenApiKey}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
+            hasApiKey
+              ? "bg-slate-900/60 border-indigo-500/20 text-slate-300 hover:border-indigo-400/50 hover:text-white"
+              : "bg-amber-500/10 border-amber-500/40 text-amber-200 hover:bg-amber-500/20"
+          }`}
+          title={hasApiKey ? "Update browser API key" : "Connect with the server API key"}
+        >
+          <KeyRound className="w-3.5 h-3.5" />
+          <span>{hasApiKey ? "API KEY" : "CONNECT"}</span>
+        </button>
+
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900/60 border border-indigo-500/20">
-          <span className={`w-2.5 h-2.5 rounded-full ${wsConnected ? "bg-emerald-400 animate-pulse" : "bg-rose-500"}`}></span>
-          <span className="text-xs font-medium text-slate-300">
-            {wsConnected ? "REPLAY CONNECTED" : "DISCONNECTED"}
+          <span
+            className={`w-2.5 h-2.5 rounded-full ${
+              wsConnected
+                ? "bg-emerald-400 animate-pulse"
+                : !hasApiKey || wsAuthFailed
+                  ? "bg-amber-400"
+                  : "bg-rose-500"
+            }`}
+          ></span>
+          <span className={`text-xs font-medium ${!wsConnected && (!hasApiKey || wsAuthFailed) ? "text-amber-200" : "text-slate-300"}`}>
+            {wsConnected
+              ? "REPLAY CONNECTED"
+              : !hasApiKey
+                ? "AUTH REQUIRED"
+                : wsAuthFailed
+                  ? "KEY REJECTED"
+                  : "DISCONNECTED"}
           </span>
         </div>
       </div>

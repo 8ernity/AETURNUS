@@ -1,20 +1,48 @@
 /**
  * Shared browser-side credential helper.
  *
- * The backend intentionally rejects unauthenticated mutations.  The static
- * demo has no login screen, so an operator can place an API key in
- * `localStorage` under `aeturnus_api_key` (or inject it at build time through
- * VITE_AETURNUS_API_KEY).  Read-only endpoints continue to work without it.
+ * The backend intentionally rejects unauthenticated mutations and WebSocket
+ * connections.  The static UI therefore lets an operator store the key under
+ * `localStorage["aeturnus_api_key"]`; deployments may also inject a build-time
+ * `VITE_AETURNUS_API_KEY` for private demos.  Read-only endpoints continue to
+ * work without it.
  */
+const STORAGE_KEY = "aeturnus_api_key";
+
 export function getApiKey(): string {
   try {
     return (
-      window.localStorage.getItem("aeturnus_api_key") ||
+      window.localStorage.getItem(STORAGE_KEY) ||
       (import.meta.env.VITE_AETURNUS_API_KEY as string | undefined) ||
       ""
     );
   } catch {
     return "";
+  }
+}
+
+export function hasApiKey(): boolean {
+  return Boolean(getApiKey());
+}
+
+export function saveApiKey(key: string): void {
+  try {
+    const trimmed = key.trim();
+    if (trimmed) {
+      window.localStorage.setItem(STORAGE_KEY, trimmed);
+    } else {
+      window.localStorage.removeItem(STORAGE_KEY);
+    }
+  } catch {
+    // localStorage can be unavailable in hardened browser contexts.
+  }
+}
+
+export function clearApiKey(): void {
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // Ignore storage failures.
   }
 }
 

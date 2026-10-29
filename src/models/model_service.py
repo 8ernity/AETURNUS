@@ -675,6 +675,7 @@ class ModelService:
         selected_coverage: Optional[float] = None
         selected_ci: Optional[Tuple[float, float]] = None
         selected_n = 0
+        selection_status = "floor_met"
         for level in nominal_levels:
             q = self._conformal_quantile(cal_scores, level)
             lower = np.maximum(0.0, val_base_p10 - q)
@@ -701,16 +702,50 @@ class ModelService:
                 selected_n = n_validation
 
         if selected_level is None:
+            # A retraining run must not crash merely because the challenger's
+            # validation fold is harder than the calibration fold.  Fall back to
+            # the widest configured nominal level and add a validation-based
+            # safety expansion below.  The promotion gate still evaluates the
+            # challenger honestly, and the fallback is recorded in metadata.
+            best = max(
+                validation_levels,
+                key=lambda item: (item["coverage"], item["nominal_level"]),
+            )
+            selected_level = float(best["nominal_level"])
+            selected_coverage = float(best["coverage"])
+            selected_ci = (
+                float(best["ci_lower"]),
+                float(best["wilson_ci_95"][1]),
+            )
+            selected_n = int(best["n"])
+            selection_status = "floor_unmet_highest_nominal_level"
             detail = "; ".join(
                 f"{item['nominal_level']:.2f}: cov={item['coverage']:.4f}, "
                 f"CI_low={item['ci_lower']:.4f}"
                 for item in validation_levels
             )
-            raise ValueError(
-                f"[{self.subset}] No nominal level reaches the validation coverage floor "
-                f"{selection_floor:.4f} (target {target_coverage:.4f} - tolerance "
-                f"{selection_tolerance:.4f}). {detail}"
+            print(
+                f"[{self.subset}] WARNING: no nominal level reaches validation "
+                f"coverage floor {selection_floor:.4f}; using "
+                f"{selected_level:.2f} with a validation safety expansion. {detail}"
             )
+
+        validation_fallback_q = 0.0
+        if selection_status != "floor_met":
+            required_validation_q = np.maximum(
+                np.asarray(val_base_p10) - np.asarray(val_truth),
+                np.asarray(val_truth) - np.asarray(val_base_p90),
+            )
+            required_validation_q = np.maximum(0.0, required_validation_q)
+            required_validation_q = required_validation_q[
+                np.isfinite(required_validation_q)
+            ]
+            if required_validation_q.size:
+                validation_fallback_q = float(
+                    self._conformal_quantile(
+                        required_validation_q, float(selection_floor)
+                    )
+                )
 
         cross_method = "cross_conformal_all_non_test_engines"
         cross_folds = 0
@@ -754,7 +789,7 @@ class ModelService:
         # delivers covered intervals rather than silently shrinking them.
         cross_global_q = self._conformal_quantile(scores, float(selected_level))
         calibration_global_q = self._conformal_quantile(cal_scores, float(selected_level))
-        global_q = max(cross_global_q, calibration_global_q)
+        global_q = max(cross_global_q, calibration_global_q, validation_fallback_q)
 
         calibration_bucket_indices = (
             np.searchsorted(edges, cal_pred_p50, side="right")
@@ -781,7 +816,9 @@ class ModelService:
                 if len(calibration_bucket_scores)
                 else calibration_global_q
             )
-            bucket_q.append(max(cross_bucket_q, calibration_bucket_q))
+            bucket_q.append(
+                max(cross_bucket_q, calibration_bucket_q, validation_fallback_q)
+            )
 
         regime_count = (
             int(calibration_source["regime"].nunique())
@@ -811,9 +848,13 @@ class ModelService:
             "validation_truth_mode": "rul_capped",
             "validation_coverage_rule": "censored_open_upper_bound",
             "validation_levels": validation_levels,
+            "selection_status": selection_status,
+            "validation_fallback_q": float(validation_fallback_q),
             "selection_policy": (
                 "smallest_nominal_level_with_validation_wilson_lower_bound_at_least_"
                 "target_minus_tolerance"
+                if selection_status == "floor_met"
+                else "widest_nominal_level_plus_validation_safety_expansion"
             ),
             "cross_conformal_folds": int(cross_folds),
             "calibration_regime_count": regime_count,
@@ -950,6 +991,7 @@ class ModelService:
                 num_leaves=n_leaves, min_child_samples=min_child,
                 reg_alpha=reg_alpha, reg_lambda=reg_lambda,
                 boost_from_average=False,
+                n_jobs=1, deterministic=True, force_col_wise=True,
                 random_state=random_state, verbose=-1
             ).fit(X_train, y_rul_train)
 
@@ -960,6 +1002,7 @@ class ModelService:
                 n_estimators=n_est, learning_rate=lr,
                 num_leaves=n_leaves, min_child_samples=min_child,
                 reg_alpha=reg_alpha, reg_lambda=reg_lambda,
+                n_jobs=1, deterministic=True, force_col_wise=True,
                 random_state=random_state, verbose=-1
             ).fit(X_train, y_rul_train)
 
@@ -969,6 +1012,7 @@ class ModelService:
                 num_leaves=n_leaves, min_child_samples=min_child,
                 reg_alpha=reg_alpha, reg_lambda=reg_lambda,
                 boost_from_average=False,
+                n_jobs=1, deterministic=True, force_col_wise=True,
                 random_state=random_state, verbose=-1
             ).fit(X_train, y_rul_train)
         else:
@@ -1068,6 +1112,7 @@ class ModelService:
                     class_weight="balanced",
                     n_estimators=cls_cfg.get("n_estimators", 120),
                     learning_rate=cls_cfg.get("learning_rate", 0.05),
+                    n_jobs=1, deterministic=True, force_col_wise=True,
                     random_state=random_state,
                     verbose=-1
                 )

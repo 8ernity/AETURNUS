@@ -8,10 +8,23 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional, Callable
-import mlflow
 from src.common.utils import get_root_dir, load_yaml, calculate_psi, calculate_ks_drift, calculate_metrics
 from src.common.state import state_db_path
 from src.models.model_service import ModelService
+
+
+def _mlflow_module():
+    """Import MLflow lazily.
+
+    MLflow pulls in a large dependency tree (~65 MB RSS).  The API server only
+    needs it when a retraining run is actually executed, so importing it at
+    module import time was pushing 512 MB hosts over their limit before the
+    first request arrived.
+    """
+    import mlflow
+
+    return mlflow
+
 
 def get_drift_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
     if db_path is None:
@@ -291,13 +304,13 @@ class MLOpsManager:
         self.registry_file = self.artifacts_dir / "reports" / "model_registry.json"
         self.drift_db_path = state_db_path("drift_monitoring.db", self.root_dir)
         
-        self._setup_mlflow()
         self._init_registry()
 
     def _setup_mlflow(self):
         """Initializes SQLite-backed MLflow tracking store."""
         os.environ["MLFLOW_ALLOW_FILE_STORE"] = "true"
         os.environ["MLFLOW_DISABLE_AGENT_HINT"] = "1"
+        mlflow = _mlflow_module()
         db_path = state_db_path("mlflow.db", self.root_dir).resolve()
         mlflow.set_tracking_uri(f"sqlite:///{db_path.as_posix()}")
         mlflow.set_experiment(f"cmapss_{self.subset}")
@@ -767,6 +780,7 @@ class MLOpsManager:
 
         # Log MLflow Runs
         self._setup_mlflow()
+        mlflow = _mlflow_module()
         # 1. Champion MLflow Run
         try:
             with mlflow.start_run(run_name=f"{self.subset}_{champ_version}_champion") as champ_run:

@@ -12,7 +12,8 @@ import { DataPipelineTab } from "./components/tabs/DataPipelineTab";
 import { HowItWorksTab } from "./components/tabs/HowItWorksTab";
 import { DiagnosticPanel } from "./components/DiagnosticPanel";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { authHeaders, websocketUrl } from "./lib/api";
+import { ApiKeyDialog } from "./components/ApiKeyDialog";
+import { authHeaders, hasApiKey, websocketUrl } from "./lib/api";
 
 export function App() {
   const [activeTab, setActiveTab] = useState<string>("fleet");
@@ -25,6 +26,9 @@ export function App() {
   const [speed, setSpeed] = useState<number>(1);
   const [currentCycle, setCurrentCycle] = useState<number>(30);
   const [wsConnected, setWsConnected] = useState<boolean>(false);
+  const [wsAuthFailed, setWsAuthFailed] = useState<boolean>(false);
+  const [apiKeyOpen, setApiKeyOpen] = useState<boolean>(false);
+  const [hasKey, setHasKey] = useState<boolean>(hasApiKey());
 
   // Data cache
   const [fleetData, setFleetData] = useState<any>(null);
@@ -61,6 +65,7 @@ export function App() {
 
       socket.onopen = () => {
         setWsConnected(true);
+        setWsAuthFailed(false);
       };
 
       socket.onmessage = (event) => {
@@ -79,8 +84,17 @@ export function App() {
         }
       };
 
-      socket.onclose = () => {
+      socket.onclose = (event) => {
         setWsConnected(false);
+        if (event.code === 1008) {
+          // Authentication required/rejected. Retrying the same credential
+          // every three seconds just fills the console; let the operator fix
+          // the key in the header dialog instead.
+          setWsAuthFailed(true);
+          setHasKey(hasApiKey());
+          if (!hasApiKey()) setApiKeyOpen(true);
+          return;
+        }
         setTimeout(connectWs, 3000);
       };
 
@@ -94,6 +108,14 @@ export function App() {
       if (wsRef.current) wsRef.current.close();
     };
   }, []);
+
+  const handleAuthResponse = (res: Response) => {
+    if (!res.ok && (res.status === 401 || res.status === 403)) {
+      setWsAuthFailed(true);
+      setHasKey(hasApiKey());
+      setApiKeyOpen(true);
+    }
+  };
 
   // Play / Pause / Speed Replay Handlers
   const handleTogglePlay = async () => {
@@ -110,6 +132,7 @@ export function App() {
         });
     if (!res.ok) {
       setIsPlaying(!nextState);
+      handleAuthResponse(res);
       console.error("Replay control rejected:", res.status);
     }
   };
@@ -117,16 +140,18 @@ export function App() {
   const handleChangeSpeed = async (newSpeed: number) => {
     setSpeed(newSpeed);
     if (isPlaying) {
-      await fetch(`/api/v1/replay/start?speed=${newSpeed}`, {
+      const res = await fetch(`/api/v1/replay/start?speed=${newSpeed}`, {
         method: "POST",
         headers: authHeaders()
       });
+      handleAuthResponse(res);
     }
   };
 
   const handleReset = async () => {
     setIsPlaying(false);
-    await fetch(`/api/v1/replay/reset`, { method: "POST", headers: authHeaders() });
+    const res = await fetch(`/api/v1/replay/reset`, { method: "POST", headers: authHeaders() });
+    handleAuthResponse(res);
     setCurrentCycle(20);
     fetchFleet();
   };
@@ -137,10 +162,11 @@ export function App() {
     setSpeed(5);
     setActiveTab("engine");
     setSelectedEngineId(`${currentSubset}-001`);
-    await fetch(`/api/v1/replay/start?speed=5&mode=lifecycle_demo&unit=1`, {
+    const res = await fetch(`/api/v1/replay/start?speed=5&mode=lifecycle_demo&unit=1`, {
       method: "POST",
       headers: authHeaders()
     });
+    handleAuthResponse(res);
   };
 
   const handleSelectEngine = (engineId: string) => {
@@ -182,6 +208,9 @@ export function App() {
           onLifecycleDemo={handleLifecycleDemo}
           currentCycle={currentCycle}
           wsConnected={wsConnected}
+          wsAuthFailed={wsAuthFailed}
+          hasApiKey={hasKey}
+          onOpenApiKey={() => setApiKeyOpen(true)}
         />
 
         {/* Global data-provenance banner: every live-looking surface is replay data. */}
@@ -252,6 +281,8 @@ export function App() {
         recentAlerts={recentAlerts}
         onSelectEngine={handleSelectEngine}
       />
+
+      <ApiKeyDialog open={apiKeyOpen} onClose={() => setApiKeyOpen(false)} />
 
       <Toaster 
         position="top-right" 

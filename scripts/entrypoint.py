@@ -80,7 +80,7 @@ def ensure_data_and_models():
 def main():
     ensure_data_and_models()
     import run_app
-    run_app.main()
+    run_app.main(bootstrap=False)
 
 if __name__ == "__main__":
     main()
