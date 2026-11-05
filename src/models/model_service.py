@@ -1,4 +1,3 @@
-import os
 import re
 import gc
 import json
@@ -12,7 +11,7 @@ import sklearn
 from sklearn.linear_model import Ridge
 from sklearn.ensemble import IsolationForest, HistGradientBoostingRegressor, HistGradientBoostingClassifier
 from sklearn.calibration import CalibratedClassifierCV
-from sklearn.metrics import precision_recall_curve, auc, average_precision_score, precision_score, recall_score
+from sklearn.metrics import average_precision_score, precision_score, recall_score
 from sklearn.inspection import permutation_importance
 from sklearn.base import clone
 from sklearn.model_selection import GroupKFold

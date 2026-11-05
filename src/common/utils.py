@@ -1,8 +1,7 @@
-import os
 import yaml
 import numpy as np
 from pathlib import Path
-from typing import Dict, Any, Union, Tuple
+from typing import Dict, Any, Tuple
 from scipy import stats
 
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent

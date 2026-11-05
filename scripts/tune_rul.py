@@ -1,4 +1,3 @@
-import os
 import sys
 import json
 import time
@@ -16,7 +15,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from src.common.utils import get_root_dir, load_yaml, calculate_metrics
+from src.common.utils import get_root_dir, calculate_metrics
 from src.common.splits import get_persistent_split
 from src.models.model_service import ModelService
 

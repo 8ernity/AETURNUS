@@ -1,7 +1,7 @@
 import time
 import numpy as np
 import pandas as pd
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Tuple
 from sklearn.preprocessing import StandardScaler
 from src.common.utils import calculate_metrics
 

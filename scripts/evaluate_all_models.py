@@ -1,5 +1,4 @@
 import sys
-import os
 import gc
 import json
 import time
@@ -9,9 +8,8 @@ import argparse
 import tempfile
 import shutil
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 import pandas as pd
-import numpy as np
 import joblib
 
 ROOT_DIR = Path(__file__).resolve().parent.parent

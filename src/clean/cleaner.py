@@ -1,9 +1,7 @@
 import re
-import json
 import numpy as np
 import pandas as pd
 from typing import Dict, Any, List, Tuple
-from pathlib import Path
 
 SENSOR_REGEX = re.compile(r"^s\d+$")
 

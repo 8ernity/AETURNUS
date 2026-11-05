@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from sklearn.cluster import KMeans
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional
 
 class RegimeNormalizer:
     def __init__(self, subset: str, n_clusters: Optional[int] = None):

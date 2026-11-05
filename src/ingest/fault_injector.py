@@ -1,7 +1,6 @@
 import re
 import numpy as np
 import pandas as pd
-from typing import Dict, Any
 
 SENSOR_REGEX = re.compile(r"^s\d+$")
 

@@ -1,11 +1,10 @@
-import os
 import copy
 import json
 import uuid
 import sqlite3
 import time
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple, Set
+from typing import Dict, Any, List, Optional, Tuple
 from src.common.utils import get_root_dir, load_yaml
 from src.common.state import state_db_path
 
@@ -186,9 +185,7 @@ class TriageAgent:
 
                     eid = order["engine_id"]
                     if order["status"] in ["CLOSED", "REJECTED", "CANCELLED"]:
-                        if eid not in self.closed_orders_history:
-                            self.closed_orders_history[eid] = []
-                        self.closed_orders_history[eid].append(order)
+                        self._archive_closed_order(eid, order)
                     else:
                         self.open_orders[eid] = order
 
@@ -214,8 +211,17 @@ class TriageAgent:
                         "anomaly_score": float(r["anomaly_score"]),
                         "exceptions": json.loads(r["exceptions"]) if r["exceptions"] else []
                     })
+                    if len(self.engine_state_history[eid]) > 50:
+                        self.engine_state_history[eid] = self.engine_state_history[eid][-50:]
         except Exception as e:
             print(f"Error loading work orders from SQLite: {e}")
+
+    def _archive_closed_order(self, engine_id: str, order: Dict[str, Any]) -> None:
+        if engine_id not in self.closed_orders_history:
+            self.closed_orders_history[engine_id] = []
+        self.closed_orders_history[engine_id].append(order)
+        if len(self.closed_orders_history[engine_id]) > 10:
+            self.closed_orders_history[engine_id] = self.closed_orders_history[engine_id][-10:]
 
     def _persist_hysteresis(self, engine_id: str, hyst: Dict[str, Any]):
         now = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -645,6 +651,8 @@ class TriageAgent:
         }
         if not dry_run:
             hist.append(hist_entry)
+            if len(hist) > 50:
+                self.engine_state_history[engine_id] = hist[-50:]
             self._persist_state_history_entry(engine_id, hist_entry)
 
         # Step 8: Suppression window, recovery, & cooldown check
@@ -662,9 +670,7 @@ class TriageAgent:
                     "event": f"Auto-closed on sustained recovery to {final_severity} (RUL: {cons_rul:.1f})",
                     "actor": "TriageAgent"
                 })
-                if engine_id not in self.closed_orders_history:
-                    self.closed_orders_history[engine_id] = []
-                self.closed_orders_history[engine_id].append(existing_order)
+                self._archive_closed_order(engine_id, existing_order)
                 del self.open_orders[engine_id]
                 self._persist_order(existing_order)
                 self._log_audit_event(
@@ -928,9 +934,7 @@ class TriageAgent:
             })
             if next_stage == "CLOSED":
                 target_order["closed_at_cycle"] = cycle
-                if target_engine not in self.closed_orders_history:
-                    self.closed_orders_history[target_engine] = []
-                self.closed_orders_history[target_engine].append(target_order)
+                self._archive_closed_order(target_engine, target_order)
                 del self.open_orders[target_engine]
             self._persist_order(target_order)
             self._log_audit_event(
@@ -953,9 +957,7 @@ class TriageAgent:
             })
             if action == "CLOSED":
                 target_order["closed_at_cycle"] = cycle
-                if target_engine not in self.closed_orders_history:
-                    self.closed_orders_history[target_engine] = []
-                self.closed_orders_history[target_engine].append(target_order)
+                self._archive_closed_order(target_engine, target_order)
                 del self.open_orders[target_engine]
             self._persist_order(target_order)
             self._log_audit_event(
@@ -983,9 +985,7 @@ class TriageAgent:
             self.suppressed_engines[target_engine] = cycle + suppression_cycles
             
             # Archive order
-            if target_engine not in self.closed_orders_history:
-                self.closed_orders_history[target_engine] = []
-            self.closed_orders_history[target_engine].append(target_order)
+            self._archive_closed_order(target_engine, target_order)
             del self.open_orders[target_engine]
 
             self._persist_order(target_order)
@@ -1013,9 +1013,7 @@ class TriageAgent:
             target_order["closed_at_cycle"] = cycle
             target_order["events"].append({"cycle": cycle, "event": "Work order closed", "reason": reason, "actor": actor})
             
-            if target_engine not in self.closed_orders_history:
-                self.closed_orders_history[target_engine] = []
-            self.closed_orders_history[target_engine].append(target_order)
+            self._archive_closed_order(target_engine, target_order)
             del self.open_orders[target_engine]
 
             self._persist_order(target_order)

@@ -10,10 +10,9 @@ Includes mandatory "FOR DECISION SUPPORT ONLY" disclaimer.
 
 import io
 import time
-from typing import Dict, Any, List
+from typing import Dict, Any
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
-from reportlab.lib.units import inch
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether, HRFlowable

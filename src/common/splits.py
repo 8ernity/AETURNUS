@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 from typing import Dict, List, Any, Optional
-import numpy as np
 import pandas as pd
 from src.common.utils import get_root_dir
 

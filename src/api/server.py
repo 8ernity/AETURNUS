@@ -1,5 +1,4 @@
 import os
-import sys
 
 # Constrain thread pools and glibc memory arenas to prevent memory explosion on 512MB cloud instances
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -15,7 +14,6 @@ import gc
 import ctypes
 import json
 import hashlib
-import shutil
 import threading
 import time
 from datetime import datetime, timezone
@@ -45,7 +43,7 @@ def trim_memory():
     except Exception:
         pass
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Query, HTTPException, Body, UploadFile, File, Depends
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Query, HTTPException, UploadFile, File, Depends
 from fastapi.responses import FileResponse, Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -178,6 +176,7 @@ def clear_prediction_cache():
 # In-memory trajectory cache for instant < 100ms engine detail telemetry loading
 engine_trajectory_cache: Dict[Tuple[str, str], Dict[str, Any]] = {}
 _trajectory_cache_lock = threading.Lock()
+_TRAJECTORY_CACHE_MAX = 8
 
 def clear_engine_trajectory_cache(subset: Optional[str] = None):
     global engine_trajectory_cache
@@ -186,6 +185,7 @@ def clear_engine_trajectory_cache(subset: Optional[str] = None):
             engine_trajectory_cache = {k: v for k, v in engine_trajectory_cache.items() if k[0] != subset}
         else:
             engine_trajectory_cache.clear()
+    trim_memory()
 
 # Replay simulation state
 class ReplayState:
@@ -205,31 +205,68 @@ active_websockets: List[WebSocket] = []
 loaded_dfs: Dict[str, pd.DataFrame] = {}
 
 def _evict_other_subset_dataframes(keep_subset: str) -> None:
-    """Keep only the requested subset's frames resident.
+    """Keep only the requested subset's frames and models resident.
 
-    The FD002/FD004 parquets are large (tens of thousands of rows and hundreds
-    of engineered columns). Retaining frames for every subset visited by the UI
-    can exceed a 512 MB instance even though each individual load succeeds.
+    The FD002/FD004 parquets and model bundles are large. Retaining artifacts
+    for every subset visited by the UI exceeds a 512 MB instance even though
+    each individual load succeeds.
     """
     evicted = False
     for key in list(loaded_dfs):
         if not key.endswith(f"_{keep_subset}"):
             loaded_dfs.pop(key, None)
             evicted = True
+    for key in list(model_services):
+        if key != keep_subset:
+            model_services.pop(key, None)
+            evicted = True
+    for key in list(streaming_pipelines):
+        if key != keep_subset:
+            streaming_pipelines.pop(key, None)
+            evicted = True
+    for key in list(mlops_managers):
+        if key != keep_subset:
+            mlops_managers.pop(key, None)
+            evicted = True
     with _trajectory_cache_lock:
         for key in list(engine_trajectory_cache):
             if key[0] != keep_subset:
                 engine_trajectory_cache.pop(key, None)
                 evicted = True
+    with _cache_lock:
+        for key in list(_prediction_cache):
+            if key[0] != keep_subset:
+                _prediction_cache.pop(key, None)
+                evicted = True
     if evicted:
         trim_memory()
 
 def _load_downcasted_parquet(path: Path) -> pd.DataFrame:
-    df = pd.read_parquet(path)
-    # Downcast float64 to float32: cuts memory usage by 50% with zero loss of accuracy
-    float_cols = df.select_dtypes(include=["float64"]).columns
-    if len(float_cols) > 0:
-        df[float_cols] = df[float_cols].astype("float32")
+    try:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        schema = pq.read_schema(path)
+        new_fields = []
+        has_f64 = False
+        for field in schema:
+            if pa.types.is_float64(field.type):
+                new_fields.append(field.with_type(pa.float32()))
+                has_f64 = True
+            else:
+                new_fields.append(field)
+        if has_f64:
+            target_schema = pa.schema(new_fields)
+            table = pq.read_table(path).cast(target_schema)
+            df = table.to_pandas(split_blocks=True, self_destruct=True)
+            del table
+        else:
+            df = pd.read_parquet(path)
+    except Exception:
+        df = pd.read_parquet(path)
+        float_cols = df.select_dtypes(include=["float64"]).columns
+        if len(float_cols) > 0:
+            df[float_cols] = df[float_cols].astype("float32")
     trim_memory()
     return df
 
@@ -241,6 +278,10 @@ def _cached_under_current_root(obj: Any) -> bool:
     return Path(getattr(obj, "root_dir", "")) == Path(ROOT_DIR)
 
 def get_model_service(subset: str = "FD001") -> ModelService:
+    for k in list(model_services):
+        if k != subset:
+            model_services.pop(k, None)
+            trim_memory()
     cached = model_services.get(subset)
     if cached is None or not _cached_under_current_root(cached):
         ms = ModelService(subset)
@@ -255,12 +296,18 @@ def get_model_service(subset: str = "FD001") -> ModelService:
     return model_services[subset]
 
 def get_mlops_manager(subset: str = "FD001") -> MLOpsManager:
+    for k in list(mlops_managers):
+        if k != subset:
+            mlops_managers.pop(k, None)
     cached = mlops_managers.get(subset)
     if cached is None or not _cached_under_current_root(cached):
         mlops_managers[subset] = MLOpsManager(subset)
     return mlops_managers[subset]
 
 def get_streaming_pipeline(subset: str = "FD001") -> StreamingEnginePipeline:
+    for k in list(streaming_pipelines):
+        if k != subset:
+            streaming_pipelines.pop(k, None)
     if subset not in streaming_pipelines:
         ms = get_model_service(subset)
         streaming_pipelines[subset] = StreamingEnginePipeline(subset=subset, model_service=ms, triage_agent=triage_agent)
@@ -281,6 +328,7 @@ def get_test_df(subset: str = "FD001") -> pd.DataFrame:
     key = f"test_{subset}"
     if key not in loaded_dfs:
         _evict_other_subset_dataframes(subset)
+        loaded_dfs.pop(f"train_{subset}", None)
         proc_path = ROOT_DIR / "data" / "processed" / subset / "test.parquet"
         if not proc_path.exists():
             from src.features.pipeline import DataPipeline
@@ -294,6 +342,7 @@ def get_train_df(subset: str = "FD001") -> pd.DataFrame:
     key = f"train_{subset}"
     if key not in loaded_dfs:
         _evict_other_subset_dataframes(subset)
+        loaded_dfs.pop(f"test_{subset}", None)
         proc_path = ROOT_DIR / "data" / "processed" / subset / "train.parquet"
         if not proc_path.exists():
             from src.features.pipeline import DataPipeline
@@ -827,8 +876,9 @@ def get_engine_detail(engine_id: str, subset: str = Query(default="FD001")):
     }
 
     with _trajectory_cache_lock:
-        if len(engine_trajectory_cache) >= 1000:
-            engine_trajectory_cache.clear()
+        while len(engine_trajectory_cache) >= _TRAJECTORY_CACHE_MAX:
+            oldest_key = next(iter(engine_trajectory_cache))
+            engine_trajectory_cache.pop(oldest_key, None)
         engine_trajectory_cache[cache_key] = res
 
     return res
@@ -1250,6 +1300,7 @@ def simulate_what_if(req: WhatIfRequest, subset: str = Query(default="FD001")):
             simulated_severities[sev] += 1
 
     del holdout_df, records, X, sim_agent
+    loaded_dfs.pop(f"train_{subset}", None)
     trim_memory()
 
     return {
@@ -1621,6 +1672,14 @@ async def trigger_retrain(
             loop
         )
 
+    # Retraining loads its own train/validation frames and four LightGBM
+    # models. Free the telemetry caches first so a 512 MB instance does not
+    # hold a second copy of the active subset while training runs.
+    loaded_dfs.clear()
+    clear_engine_trajectory_cache(subset)
+    model_services.clear()
+    trim_memory()
+
     try:
         result = await asyncio.to_thread(
             mgr.run_retrain_demo,
@@ -1672,6 +1731,7 @@ async def trigger_retrain(
         retrain_jobs.finish_job(job_id, "FAILED", error=str(exc))
         raise HTTPException(status_code=500, detail=f"Retrain post-processing failed: {exc}") from exc
 
+    trim_memory()
     result["job_id"] = job_id
     retrain_jobs.finish_job(job_id, "COMPLETED", result=result)
     await broadcast("retrain_completed", {

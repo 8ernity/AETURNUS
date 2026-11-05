@@ -8,7 +8,6 @@ os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 os.environ["MALLOC_ARENA_MAX"] = "2"
 
-import time
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent

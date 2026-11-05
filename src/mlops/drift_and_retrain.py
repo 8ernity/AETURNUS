@@ -1,14 +1,14 @@
 import os
 import json
+import gc
 import time
 import hashlib
 import sqlite3
 import threading
-import numpy as np
 import pandas as pd
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional, Callable
-from src.common.utils import get_root_dir, load_yaml, calculate_psi, calculate_ks_drift, calculate_metrics
+from src.common.utils import get_root_dir, load_yaml, calculate_psi, calculate_ks_drift
 from src.common.state import state_db_path
 from src.models.model_service import ModelService
 
@@ -711,9 +711,8 @@ class MLOpsManager:
             DataPipeline(self.subset).run()
 
         df = pd.read_parquet(processed_path)
-        test_df = pd.read_parquet(self.root_dir / "data" / "processed" / self.subset / "test.parquet")
-        from src.ingest.loader import CMAPSSLoader
-        _, _, rul_truth = CMAPSSLoader(self.subset).load_raw_data()
+        # The test frame is loaded after champion training to keep peak RSS lower.
+        # Raw truth is loaded on demand during the holdout/test evaluation below.
 
         # Partition engine units using the persistent engine split
         from src.common.splits import get_persistent_split
@@ -729,6 +728,7 @@ class MLOpsManager:
         champ_train_df = df[df["unit"].isin(champ_units)].copy()
         new_batch_df = df[df["unit"].isin(new_batch_units)].copy()
         holdout_df = df[df["unit"].isin(holdout_units)].copy()
+        del df
 
         # In Scenario B, simulate operational shift on incoming telemetry
         if scenario == "B":
@@ -745,6 +745,8 @@ class MLOpsManager:
         report_step(2, 5, "Computing sensor drift against operational telemetry window...")
         current_telemetry = replay_window_df if (replay_window_df is not None and len(replay_window_df) >= 30) else new_batch_df
         drift_report = self.calculate_drift_report(champ_train_df.sample(min(1000, len(champ_train_df)), random_state=42), current_telemetry)
+        del new_batch_df
+        current_telemetry = None
 
         report_step(3, 5, "Training Champion (60% units) and Challenger (80% units) models...")
         # Champion Model Bundle
@@ -757,22 +759,37 @@ class MLOpsManager:
             champ_service.train(champ_train_df)
             champ_service.save(champ_version)
 
+        # Evaluate and release the champion before training the challenger.
+        # Keeping both full model sets resident at once was the peak-memory
+        # spike that could exceed a 512 MB instance.
+        del champ_train_df
+        gc.collect()
+        test_df = pd.read_parquet(
+            self.root_dir / "data" / "processed" / self.subset / "test.parquet"
+        )
+        from src.ingest.loader import CMAPSSLoader
+        _, _, rul_truth = CMAPSSLoader(self.subset).load_raw_data()
+
+        report_step(4, 5, "Evaluating Champion vs Challenger strictly on fixed holdout engines...")
+        champ_holdout_metrics = champ_service.evaluate_dataframe(holdout_df)
+        champ_test_eval = champ_service.evaluate_test(test_df, rul_truth, save_report=False)
+        champ_metrics = champ_test_eval["metrics"]
+        del champ_service
+        gc.collect()
+
         # Challenger Model Bundle
         registry = self.get_registry()
         chal_version = f"v{len(registry.get('models', [])) + 1}.0"
         chal_service = ModelService(self.subset)
         chal_service.train(chal_train_df)
         chal_service.save(chal_version)
-
-        report_step(4, 5, "Evaluating Champion vs Challenger strictly on fixed holdout engines...")
-        champ_holdout_metrics = champ_service.evaluate_dataframe(holdout_df)
+        del chal_train_df
+        gc.collect()
         chal_holdout_metrics = chal_service.evaluate_dataframe(holdout_df)
-
-        champ_test_eval = champ_service.evaluate_test(test_df, rul_truth, save_report=False)
         chal_test_eval = chal_service.evaluate_test(test_df, rul_truth, save_report=False)
-
-        champ_metrics = champ_test_eval["metrics"]
         chal_metrics = chal_test_eval["metrics"]
+        del chal_service, test_df, holdout_df, rul_truth
+        gc.collect()
 
         report_step(5, 5, "Evaluating 3-tier promotion gate and recording MLflow runs...")
         # Gate evaluation based strictly on holdout metrics
