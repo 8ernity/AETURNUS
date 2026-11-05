@@ -1,5 +1,7 @@
 import React from "react";
+import { motion } from "framer-motion";
 import { HelpCircle, Layers, CheckCircle2, BookOpen, ShieldAlert, Cpu, Sparkles } from "lucide-react";
+import { pageVariants, AnimatedCard, StaggerContainer } from "../ui/AnimatedCard";
 
 export const HowItWorksTab: React.FC = () => {
   const tradeOffs = [
@@ -26,7 +28,7 @@ export const HowItWorksTab: React.FC = () => {
   ];
 
   return (
-    <div className="space-y-6">
+    <motion.div variants={pageVariants} initial="hidden" animate="show" exit="exit" className="space-y-6">
       {/* Architecture Overview */}
       <div className="glass-panel p-6 rounded-3xl space-y-4">
         <div className="flex items-center gap-2">
@@ -77,9 +79,9 @@ export const HowItWorksTab: React.FC = () => {
           Core technical rationales prepared for technical review and defense:
         </p>
 
-        <div className="space-y-3">
+        <StaggerContainer className="space-y-3">
           {tradeOffs.map((item, idx) => (
-            <div key={idx} className="bg-slate-900/70 p-4 rounded-2xl border border-slate-800 space-y-1.5">
+            <AnimatedCard key={idx} className="bg-slate-900/70 p-4 rounded-2xl border border-slate-800 space-y-1.5">
               <h4 className="text-xs font-bold text-indigo-300 flex items-center gap-2">
                 <CheckCircle2 className="w-3.5 h-3.5 text-indigo-400" />
                 <span>{item.question}</span>
@@ -87,9 +89,9 @@ export const HowItWorksTab: React.FC = () => {
               <p className="text-xs text-slate-300 leading-relaxed pl-5">
                 {item.answer}
               </p>
-            </div>
+            </AnimatedCard>
           ))}
-        </div>
+        </StaggerContainer>
       </div>
 
       {/* Dataset Citation & Acknowledgement */}
@@ -100,6 +102,6 @@ export const HowItWorksTab: React.FC = () => {
           Background Paper: Saxena et al., "Damage Propagation Modeling for Aircraft Engine Run-to-Failure Simulation", PHM08.
         </p>
       </div>
-    </div>
+    </motion.div>
   );
 };

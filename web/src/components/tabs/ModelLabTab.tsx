@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from "react";
+import { motion } from "framer-motion";
+import { AnimatedCard, pageVariants } from "../ui/AnimatedCard";
 import { 
   Award, 
   BarChart2, 
@@ -103,7 +105,7 @@ export const ModelLabTab: React.FC = () => {
   const avgNasaPenalty = totalEngines > 0 ? (totalNasaScore / totalEngines).toFixed(2) : "0.00";
 
   return (
-    <div className="space-y-6 min-w-0 max-w-full">
+    <motion.div variants={pageVariants} initial="hidden" animate="show" exit="exit" className="space-y-6 min-w-0 max-w-full">
       {/* Stale Artifact Warning Banner */}
       {(benchmarkMeta?.stale || modelDetails?.stale) && (
         <div className="bg-amber-500/15 border border-amber-500/30 text-amber-300 p-4 rounded-2xl flex items-center gap-3">
@@ -940,6 +942,6 @@ export const ModelLabTab: React.FC = () => {
           </div>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 };
