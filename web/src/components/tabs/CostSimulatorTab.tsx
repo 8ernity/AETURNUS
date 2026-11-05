@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from "react";
+import { motion } from "framer-motion";
 import { authHeaders, hasApiKey } from "../../lib/api";
+import { pageVariants, AnimatedCard, StaggerContainer } from "../ui/AnimatedCard";
 import toast from "react-hot-toast";
 import { 
   DollarSign, 
@@ -183,7 +185,7 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
   const curvePoints = curveData?.curve || [];
 
   return (
-    <div className="space-y-6">
+    <motion.div variants={pageVariants} initial="hidden" animate="show" exit="exit" className="space-y-6">
       {(!hasApiKey() || authRequired) && (
         <div className="bg-slate-900/70 border border-slate-700 text-slate-300 p-4 rounded-2xl flex items-center gap-3">
           <Info className="w-5 h-5 text-cyan-400 shrink-0" />
@@ -257,9 +259,9 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
         </div>
 
         {/* 4 Financial & Break-Even Metric Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
+        <StaggerContainer className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
           {/* Lead Metric: Break-Even Cost Ratio */}
-          <div className="bg-slate-950/70 p-4 rounded-2xl border border-indigo-500/30 space-y-1 shadow-lg shadow-indigo-950/20">
+          <AnimatedCard className="bg-slate-950/70 p-4 rounded-2xl border border-indigo-500/30 space-y-1 shadow-lg shadow-indigo-950/20">
             <div className="flex items-center justify-between text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
               <span>Break-Even Cost Ratio</span>
               <span className="text-[10px] text-cyan-400 font-bold bg-cyan-500/10 px-1.5 py-0.5 rounded font-mono">
@@ -275,10 +277,10 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
                 {summary?.current_cost_ratio !== undefined ? `${summary.current_cost_ratio}x (Favorable)` : "—"}
               </span>
             </div>
-          </div>
+          </AnimatedCard>
 
           {/* Net Fleet Savings vs Fixed Interval & vs Reactive */}
-          <div className="bg-slate-950/70 p-4 rounded-2xl border border-emerald-500/30 space-y-1 shadow-lg shadow-emerald-950/20">
+          <AnimatedCard className="bg-slate-950/70 p-4 rounded-2xl border border-emerald-500/30 space-y-1 shadow-lg shadow-emerald-950/20">
             <div className="flex items-center justify-between text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
               <span>Net Fleet Savings</span>
               <span className="text-[10px] text-emerald-400 font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded">
@@ -298,10 +300,10 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
                   : "—"}
               </span>
             </div>
-          </div>
+          </AnimatedCard>
 
           {/* AETURNUS Total Cost */}
-          <div className="bg-slate-950/70 p-4 rounded-2xl border border-slate-700/60 space-y-1">
+          <AnimatedCard className="bg-slate-950/70 p-4 rounded-2xl border border-slate-700/60 space-y-1">
             <div className="flex items-center justify-between text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
               <span>AETURNUS Fleet Cost</span>
               <span className="text-[10px] text-indigo-400 font-bold bg-indigo-500/10 px-1.5 py-0.5 rounded">
@@ -317,10 +319,10 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
                 {summary?.fixed_total_cost !== undefined ? `$${(summary.fixed_total_cost / 1e6).toFixed(1)}M` : "—"}
               </span>
             </div>
-          </div>
+          </AnimatedCard>
 
           {/* Optimal Threshold Tau */}
-          <div className="bg-slate-950/70 p-4 rounded-2xl border border-purple-500/30 space-y-1">
+          <AnimatedCard className="bg-slate-950/70 p-4 rounded-2xl border border-purple-500/30 space-y-1">
             <div className="flex items-center justify-between text-[11px] text-slate-400 font-semibold uppercase tracking-wider">
               <span>Optimal Threshold τ*</span>
               <span className="text-[10px] text-purple-300 font-bold bg-purple-500/10 px-1.5 py-0.5 rounded font-mono">
@@ -335,8 +337,8 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
               <span>Active Threshold:</span>
               <span className="text-cyan-400 font-bold">{threshold} cyc</span>
             </div>
-          </div>
-        </div>
+          </AnimatedCard>
+        </StaggerContainer>
       </div>
 
       {/* Middle Row: Interactive U-Curve Optimizer & Policy Breakdown Stacked Bar Chart */}
@@ -813,6 +815,6 @@ export const CostSimulatorTab: React.FC<CostSimulatorTabProps> = ({ currentSubse
           </table>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 };

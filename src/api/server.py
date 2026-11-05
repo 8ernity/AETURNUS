@@ -18,8 +18,11 @@ import hashlib
 import shutil
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple, Set
+
+SERVER_START_TIME = time.time()
 import pandas as pd
 import numpy as np
 import io
@@ -526,10 +529,21 @@ async def startup_event():
 # ----------------- REST Endpoints -----------------
 
 @app.get("/api/v1/health")
+@app.get("/health")
 def health():
-    if not is_system_ready():
-        raise HTTPException(status_code=503, detail="System initializing: data and models not ready yet")
-    return {"status": "ok", "timestamp": time.time(), "version": "1.0.0"}
+    """Lightweight, public health-check ping for keep-alive cron jobs.
+
+    Zero-ML, zero-DB, zero-disk I/O to respond instantly (< 1ms) and prevent
+    cold starts on serverless / free container tiers (Render, Fly.io, etc.).
+    """
+    now = time.time()
+    return {
+        "status": "online",
+        "service": "AETURNUS",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "uptime_seconds": round(now - SERVER_START_TIME, 2),
+        "version": "1.0.0",
+    }
 
 @app.get("/api/v1/fleet")
 def get_fleet(subset: str = Query(default="FD001")):

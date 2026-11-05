@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from "react";
+import { motion } from "framer-motion";
 import toast from "react-hot-toast";
 import { authHeaders } from "../../lib/api";
+import { pageVariants, AnimatedCard, StaggerContainer } from "../ui/AnimatedCard";
 import { 
   ClipboardList, 
   CheckCircle2, 
@@ -256,33 +258,33 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
     : "loading configured weights from the queue policy…";
 
   return (
-    <div className="space-y-6">
+    <motion.div variants={pageVariants} initial="hidden" animate="show" exit="exit" className="space-y-6">
       {/* Header & Aerospace PdM KPIs Strip */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="glass-panel p-4 rounded-2xl">
+      <StaggerContainer className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <AnimatedCard className="glass-panel p-4 rounded-2xl">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Total Work Orders</div>
           <div className="text-2xl font-bold font-mono text-white mt-1">{workOrders.length}</div>
           <div className="text-[10px] text-slate-500 mt-0.5">Fleet-wide Requisition Pipeline</div>
-        </div>
+        </AnimatedCard>
 
-        <div className="glass-panel p-4 rounded-2xl border-amber-500/25">
+        <AnimatedCard className="glass-panel p-4 rounded-2xl border-amber-500/25">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-300">Exception Queue (HITL)</div>
           <div className="text-2xl font-bold font-mono text-amber-400 mt-1">{exceptionOrders.length}</div>
           <div className="text-[10px] text-amber-300/80 mt-0.5">Safety & Disagreement Triage</div>
-        </div>
+        </AnimatedCard>
 
-        <div className="glass-panel p-4 rounded-2xl border-indigo-500/25">
+        <AnimatedCard className="glass-panel p-4 rounded-2xl border-indigo-500/25">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-indigo-300">Logistics & Hangar</div>
           <div className="text-2xl font-bold font-mono text-indigo-400 mt-1">{logisticsOrders.length + maintenanceOrders.length}</div>
           <div className="text-[10px] text-indigo-300/80 mt-0.5">Spares Dispatched / In-Work</div>
-        </div>
+        </AnimatedCard>
 
-        <div className="glass-panel p-4 rounded-2xl border-emerald-500/25">
+        <AnimatedCard className="glass-panel p-4 rounded-2xl border-emerald-500/25">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-emerald-300">Closed &amp; Resolved</div>
           <div className="text-2xl font-bold font-mono text-emerald-400 mt-1">{closedOrders.length}</div>
           <div className="text-[10px] text-emerald-400 mt-0.5">Maintenance Signoff Completed</div>
-        </div>
-      </div>
+        </AnimatedCard>
+      </StaggerContainer>
 
       {/* Ranked Maintenance Priority Queue (Capacity-Constrained) */}
       <div className="glass-panel p-6 rounded-3xl space-y-4 border-indigo-500/30">
@@ -851,6 +853,6 @@ export const WorkOrdersTab: React.FC<WorkOrdersTabProps> = ({ currentSubset }) =
           </div>
         </div>
       )}
-    </div>
+    </motion.div>
   );
 };

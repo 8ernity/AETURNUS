@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { Toaster } from "react-hot-toast";
 import { Sidebar } from "./components/Sidebar";
 import { Header } from "./components/Header";
@@ -12,6 +13,7 @@ import { DataPipelineTab } from "./components/tabs/DataPipelineTab";
 import { HowItWorksTab } from "./components/tabs/HowItWorksTab";
 import { DiagnosticPanel } from "./components/DiagnosticPanel";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { pageVariants } from "./components/ui/AnimatedCard";
 import { ApiKeyDialog } from "./components/ApiKeyDialog";
 import { authHeaders, hasApiKey, websocketUrl } from "./lib/api";
 
@@ -224,49 +226,60 @@ export function App() {
 
         {/* Dynamic Tab Body */}
         <main className="flex-1 min-w-0 p-8 overflow-y-auto">
-          {activeTab === "fleet" && (
-            <ErrorBoundary fallbackTitle="Fleet Overview">
-              <FleetOverviewTab
-                fleetData={fleetData}
-                onSelectEngine={handleSelectEngine}
-                recentAlerts={recentAlerts}
-              />
-            </ErrorBoundary>
-          )}
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeTab}
+              variants={pageVariants}
+              initial="hidden"
+              animate="show"
+              exit="exit"
+              className="w-full"
+            >
+              {activeTab === "fleet" && (
+                <ErrorBoundary fallbackTitle="Fleet Overview">
+                  <FleetOverviewTab
+                    fleetData={fleetData}
+                    onSelectEngine={handleSelectEngine}
+                    recentAlerts={recentAlerts}
+                  />
+                </ErrorBoundary>
+              )}
 
-          {activeTab === "engine" && (
-            <ErrorBoundary fallbackTitle="Engine Telemetry View">
-              <EngineDetailTab
-                selectedEngineId={selectedEngineId}
-                currentSubset={currentSubset}
-                onBackToFleet={() => setActiveTab("fleet")}
-              />
-            </ErrorBoundary>
-          )}
+              {activeTab === "engine" && (
+                <ErrorBoundary fallbackTitle="Engine Telemetry View">
+                  <EngineDetailTab
+                    selectedEngineId={selectedEngineId}
+                    currentSubset={currentSubset}
+                    onBackToFleet={() => setActiveTab("fleet")}
+                  />
+                </ErrorBoundary>
+              )}
 
-          {activeTab === "work_orders" && (
-            <WorkOrdersTab currentSubset={currentSubset} />
-          )}
+              {activeTab === "work_orders" && (
+                <WorkOrdersTab currentSubset={currentSubset} />
+              )}
 
-          {activeTab === "cost_simulator" && (
-            <CostSimulatorTab currentSubset={currentSubset} />
-          )}
+              {activeTab === "cost_simulator" && (
+                <CostSimulatorTab currentSubset={currentSubset} />
+              )}
 
-          {activeTab === "model_lab" && (
-            <ModelLabTab />
-          )}
+              {activeTab === "model_lab" && (
+                <ModelLabTab />
+              )}
 
-          {activeTab === "mlops" && (
-            <MLOpsTab currentSubset={currentSubset} />
-          )}
+              {activeTab === "mlops" && (
+                <MLOpsTab currentSubset={currentSubset} />
+              )}
 
-          {activeTab === "pipeline" && (
-            <DataPipelineTab currentSubset={currentSubset} />
-          )}
+              {activeTab === "pipeline" && (
+                <DataPipelineTab currentSubset={currentSubset} />
+              )}
 
-          {activeTab === "how_it_works" && (
-            <HowItWorksTab />
-          )}
+              {activeTab === "how_it_works" && (
+                <HowItWorksTab />
+              )}
+            </motion.div>
+          </AnimatePresence>
         </main>
       </div>
 

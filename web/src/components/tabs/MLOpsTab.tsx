@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from "react";
+import { motion } from "framer-motion";
 import { GitBranch, RefreshCw, AlertTriangle, CheckCircle2, ShieldCheck, Flame, ArrowRight, XCircle } from "lucide-react";
 import { authHeaders } from "../../lib/api";
+import { AnimatedCard, StaggerContainer, staggerContainerVariants, tableRowVariants } from "../ui/AnimatedCard";
 
 interface MLOpsTabProps {
   currentSubset: string;
@@ -130,7 +132,7 @@ export const MLOpsTab: React.FC<MLOpsTabProps> = ({ currentSubset }) => {
   return (
     <div className="space-y-6">
       {/* Retraining Trigger Card */}
-      <div className="glass-panel p-6 rounded-3xl border-indigo-500/30 flex flex-col md:flex-row md:items-center justify-between gap-6">
+      <AnimatedCard enableHover={false} className="glass-panel p-6 rounded-3xl border-indigo-500/30 flex flex-col md:flex-row md:items-center justify-between gap-6 hover:shadow-indigo-500/10">
         <div>
           <div className="flex items-center gap-2 mb-1.5">
             <RefreshCw className={`w-5 h-5 text-indigo-400 ${isRetraining ? "animate-spin" : ""}`} />
@@ -160,7 +162,7 @@ export const MLOpsTab: React.FC<MLOpsTabProps> = ({ currentSubset }) => {
             <span>{isRetraining ? "Evaluating Gate..." : "Simulate Retrain"}</span>
           </button>
         </div>
-      </div>
+      </AnimatedCard>
 
       {retrainError && (
         <div className="glass-panel p-4 rounded-2xl border border-rose-500/40 bg-rose-500/5 text-xs text-rose-200 font-mono">
@@ -215,7 +217,7 @@ export const MLOpsTab: React.FC<MLOpsTabProps> = ({ currentSubset }) => {
       )}
 
       {/* Autonomous Self-Healing Recommendation Panel */}
-      <div className="glass-panel p-6 rounded-3xl space-y-4 border-cyan-500/30">
+      <AnimatedCard enableHover={false} className="glass-panel p-6 rounded-3xl space-y-4 border-cyan-500/30 hover:shadow-cyan-500/10">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-5 h-5 text-cyan-400" />
@@ -326,10 +328,10 @@ export const MLOpsTab: React.FC<MLOpsTabProps> = ({ currentSubset }) => {
             </table>
           </div>
         )}
-      </div>
+      </AnimatedCard>
 
       {/* Model Registry Table */}
-      <div className="glass-panel p-6 rounded-3xl space-y-4">
+      <AnimatedCard enableHover={false} className="glass-panel p-6 rounded-3xl space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <GitBranch className="w-5 h-5 text-indigo-400" />
@@ -351,9 +353,18 @@ export const MLOpsTab: React.FC<MLOpsTabProps> = ({ currentSubset }) => {
                 <th className="p-3.5 font-mono">Data Hash</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/60 font-mono">
+            <motion.tbody 
+              variants={staggerContainerVariants}
+              initial="hidden"
+              animate="visible"
+              className="divide-y divide-slate-800/60 font-mono"
+            >
               {models.map((m: any, idx: number) => (
-                <tr key={idx} className="hover:bg-slate-800/30 transition-colors">
+                <motion.tr 
+                  key={m.version || idx} 
+                  variants={tableRowVariants}
+                  className="hover:bg-slate-800/40 transition-colors"
+                >
                   <td className="p-3.5 font-bold text-white">{m.version}</td>
                   <td className="p-3.5">
                     <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
@@ -371,15 +382,15 @@ export const MLOpsTab: React.FC<MLOpsTabProps> = ({ currentSubset }) => {
                   <td className="p-3.5 text-purple-300">{m.metrics?.nasa_score}</td>
                   <td className="p-3.5 text-slate-400">{m.created_at}</td>
                   <td className="p-3.5 text-slate-500 text-[10px] truncate max-w-[120px]">{m.data_hash}</td>
-                </tr>
+                </motion.tr>
               ))}
-            </tbody>
+            </motion.tbody>
           </table>
         </div>
-      </div>
+      </AnimatedCard>
 
       {/* Sensor Distribution Drift Heatmap */}
-      <div className="glass-panel p-6 rounded-3xl space-y-4">
+      <AnimatedCard enableHover={false} className="glass-panel p-6 rounded-3xl space-y-4 hover:shadow-amber-500/10">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-5 h-5 text-amber-400" />
@@ -396,14 +407,14 @@ export const MLOpsTab: React.FC<MLOpsTabProps> = ({ currentSubset }) => {
           Monitors Population Stability Index (PSI &gt; 0.20 triggers alert) and Kolmogorov-Smirnov 2-sample p-values on incoming telemetry.
         </p>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+        <StaggerContainer className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3" staggerDelay={0.03}>
           {Object.entries(sensorDrifts).map(([sensor, val]: [string, any]) => (
-            <div 
+            <AnimatedCard 
               key={sensor} 
-              className={`p-3 rounded-2xl border text-xs font-mono space-y-1 transition-all ${
+              className={`p-3 rounded-2xl border text-xs font-mono space-y-1 transition-all cursor-default ${
                 val.is_drifting 
-                  ? "bg-rose-500/10 border-rose-500/40 text-rose-300"
-                  : "bg-slate-900/60 border-slate-800 text-slate-300"
+                  ? "bg-rose-500/10 border-rose-500/40 text-rose-300 hover:shadow-rose-500/20"
+                  : "bg-slate-900/60 border-slate-800 text-slate-300 hover:shadow-cyan-500/20"
               }`}
             >
               <div className="font-bold flex items-center justify-between">
@@ -412,10 +423,10 @@ export const MLOpsTab: React.FC<MLOpsTabProps> = ({ currentSubset }) => {
               </div>
               <div className="text-[10px] text-slate-400">PSI: <b className="text-white">{val.psi}</b></div>
               <div className="text-[10px] text-slate-400">p-val: <b className="text-white">{val.ks_pvalue}</b></div>
-            </div>
+            </AnimatedCard>
           ))}
-        </div>
-      </div>
+        </StaggerContainer>
+      </AnimatedCard>
     </div>
   );
 };

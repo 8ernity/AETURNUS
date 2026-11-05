@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from "react";
+import { motion } from "framer-motion";
 import { Database, CheckCircle2, AlertOctagon, Filter, Cpu, Sliders, ShieldCheck } from "lucide-react";
+import { pageVariants, AnimatedCard, StaggerContainer } from "../ui/AnimatedCard";
 
 interface DataPipelineTabProps {
   currentSubset: string;
@@ -71,7 +73,7 @@ export const DataPipelineTab: React.FC<DataPipelineTabProps> = ({ currentSubset 
   ];
 
   return (
-    <div className="space-y-6">
+    <motion.div variants={pageVariants} initial="hidden" animate="show" exit="exit" className="space-y-6">
       {/* Pipeline Stages Execution Flow */}
       <div className="glass-panel p-6 rounded-3xl space-y-4">
         <div className="flex items-center justify-between">
@@ -84,9 +86,9 @@ export const DataPipelineTab: React.FC<DataPipelineTabProps> = ({ currentSubset 
           </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <StaggerContainer className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {stages.map((stg, idx) => (
-            <div key={idx} className="bg-slate-900/80 p-4 rounded-2xl border border-slate-800 space-y-2">
+            <AnimatedCard key={idx} className="bg-slate-900/80 p-4 rounded-2xl border border-slate-800 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="font-bold text-xs text-white">{stg.name}</span>
                 <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
@@ -100,9 +102,9 @@ export const DataPipelineTab: React.FC<DataPipelineTabProps> = ({ currentSubset 
               <p className="text-[11px] text-slate-400">
                 {stg.desc}
               </p>
-            </div>
+            </AnimatedCard>
           ))}
-        </div>
+        </StaggerContainer>
       </div>
 
       {/* Data Quality Report & Fault Injection Harness */}
@@ -178,6 +180,6 @@ export const DataPipelineTab: React.FC<DataPipelineTabProps> = ({ currentSubset 
           </div>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 };

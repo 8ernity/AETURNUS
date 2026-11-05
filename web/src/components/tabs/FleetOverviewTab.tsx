@@ -1,4 +1,6 @@
 import React, { useState, useMemo } from "react";
+import { motion } from "framer-motion";
+import { AnimatedCard, StaggerContainer, pageVariants } from "../ui/AnimatedCard";
 import { 
   AlertTriangle, 
   CheckCircle2, 
@@ -159,11 +161,11 @@ export const FleetOverviewTab: React.FC<FleetOverviewTabProps> = ({
   };
 
   return (
-    <div className="space-y-6">
+    <motion.div variants={pageVariants} initial="hidden" animate="show" exit="exit" className="space-y-6">
       {/* KPI Cards Strip */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      <StaggerContainer className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         {/* Monitored */}
-        <div className="glass-panel p-4 rounded-2xl relative overflow-hidden group">
+        <AnimatedCard className="glass-panel p-4 rounded-2xl relative overflow-hidden group hover:shadow-indigo-500/20">
           <div className="flex items-center justify-between text-slate-400 mb-2">
             <span className="text-xs font-semibold uppercase tracking-wider">Monitored</span>
             <Activity className="w-4 h-4 text-indigo-400" />
@@ -171,10 +173,10 @@ export const FleetOverviewTab: React.FC<FleetOverviewTabProps> = ({
           <div className="text-2xl font-bold text-white font-mono">{kpis.engines_monitored || 0}</div>
           <div className="text-[11px] text-slate-400 mt-1">Turbofan units</div>
           <div className="absolute -bottom-6 -right-6 w-16 h-16 bg-indigo-500/10 rounded-full blur-xl group-hover:bg-indigo-500/20 transition-all"></div>
-        </div>
+        </AnimatedCard>
 
         {/* Critical */}
-        <div className="glass-panel p-4 rounded-2xl relative overflow-hidden group border-rose-500/20">
+        <AnimatedCard className="glass-panel p-4 rounded-2xl relative overflow-hidden group border-rose-500/20 hover:shadow-rose-500/20">
           <div className="flex items-center justify-between text-rose-300 mb-2">
             <span className="text-xs font-semibold uppercase tracking-wider">Critical</span>
             <AlertTriangle className="w-4 h-4 text-rose-400 animate-pulse" />
@@ -182,10 +184,10 @@ export const FleetOverviewTab: React.FC<FleetOverviewTabProps> = ({
           <div className="text-2xl font-bold text-rose-400 font-mono">{kpis.critical_count || 0}</div>
           <div className="text-[11px] text-rose-300/80 mt-1">RUL ≤ 15 cycles</div>
           <div className="absolute -bottom-6 -right-6 w-16 h-16 bg-rose-500/10 rounded-full blur-xl group-hover:bg-rose-500/20 transition-all"></div>
-        </div>
+        </AnimatedCard>
 
         {/* Open Work Orders */}
-        <div className="glass-panel p-4 rounded-2xl relative overflow-hidden group">
+        <AnimatedCard className="glass-panel p-4 rounded-2xl relative overflow-hidden group hover:shadow-purple-500/20">
           <div className="flex items-center justify-between text-slate-400 mb-2">
             <span className="text-xs font-semibold uppercase tracking-wider">Work Orders</span>
             <FileText className="w-4 h-4 text-purple-400" />
@@ -193,10 +195,10 @@ export const FleetOverviewTab: React.FC<FleetOverviewTabProps> = ({
           <div className="text-2xl font-bold text-purple-300 font-mono">{kpis.open_work_orders || 0}</div>
           <div className="text-[11px] text-slate-400 mt-1">Auto-dispatched</div>
           <div className="absolute -bottom-6 -right-6 w-16 h-16 bg-purple-500/10 rounded-full blur-xl group-hover:bg-purple-500/20 transition-all"></div>
-        </div>
+        </AnimatedCard>
 
         {/* Exception Queue */}
-        <div className={`glass-panel p-4 rounded-2xl relative overflow-hidden group ${kpis.exception_queue_size > 0 ? "border-amber-500/30 bg-amber-500/5" : ""}`}>
+        <AnimatedCard className={`glass-panel p-4 rounded-2xl relative overflow-hidden group hover:shadow-amber-500/20 ${kpis.exception_queue_size > 0 ? "border-amber-500/30 bg-amber-500/5" : ""}`}>
           <div className="flex items-center justify-between text-amber-300 mb-2">
             <span className="text-xs font-semibold uppercase tracking-wider">Human Review</span>
             <ShieldAlert className="w-4 h-4 text-amber-400" />
@@ -204,10 +206,10 @@ export const FleetOverviewTab: React.FC<FleetOverviewTabProps> = ({
           <div className="text-2xl font-bold text-amber-400 font-mono">{kpis.exception_queue_size || 0}</div>
           <div className="text-[11px] text-amber-300/80 mt-1">Exceptions pending</div>
           <div className="absolute -bottom-6 -right-6 w-16 h-16 bg-amber-500/10 rounded-full blur-xl group-hover:bg-amber-500/20 transition-all"></div>
-        </div>
+        </AnimatedCard>
 
         {/* Mean RUL */}
-        <div className="glass-panel p-4 rounded-2xl relative overflow-hidden group">
+        <AnimatedCard className="glass-panel p-4 rounded-2xl relative overflow-hidden group hover:shadow-cyan-500/20">
           <div className="flex items-center justify-between text-slate-400 mb-2">
             <span className="text-xs font-semibold uppercase tracking-wider">Fleet Mean RUL</span>
             <Clock className="w-4 h-4 text-cyan-400" />
@@ -215,10 +217,10 @@ export const FleetOverviewTab: React.FC<FleetOverviewTabProps> = ({
           <div className="text-2xl font-bold text-cyan-300 font-mono">{kpis.mean_conservative_rul || 0}</div>
           <div className="text-[11px] text-slate-400 mt-1">Cycles remaining</div>
           <div className="absolute -bottom-6 -right-6 w-16 h-16 bg-cyan-500/10 rounded-full blur-xl group-hover:bg-cyan-500/20 transition-all"></div>
-        </div>
+        </AnimatedCard>
 
         {/* Model Version */}
-        <div className="glass-panel p-4 rounded-2xl relative overflow-hidden group">
+        <AnimatedCard className="glass-panel p-4 rounded-2xl relative overflow-hidden group hover:shadow-emerald-500/20">
           <div className="flex items-center justify-between text-slate-400 mb-2">
             <span className="text-xs font-semibold uppercase tracking-wider">Active Model</span>
             <Zap className="w-4 h-4 text-emerald-400" />
@@ -229,13 +231,13 @@ export const FleetOverviewTab: React.FC<FleetOverviewTabProps> = ({
             <span>Serving verified</span>
           </div>
           <div className="absolute -bottom-6 -right-6 w-16 h-16 bg-emerald-500/10 rounded-full blur-xl group-hover:bg-emerald-500/20 transition-all"></div>
-        </div>
-      </div>
+        </AnimatedCard>
+      </StaggerContainer>
 
       {/* Fleet Reliability & Risk Intelligence: Survival Curve & Risk Donut */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left: Fleet Survival Curve S(t) (7 cols) */}
-        <div className="lg:col-span-7 glass-panel p-6 rounded-3xl space-y-4">
+        <AnimatedCard enableHover={false} className="lg:col-span-7 glass-panel p-6 rounded-3xl space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
@@ -366,10 +368,10 @@ export const FleetOverviewTab: React.FC<FleetOverviewTabProps> = ({
               75% Survival Milestone: <strong className="text-cyan-300">{p75Life} cyc</strong>
             </span>
           </div>
-        </div>
+        </AnimatedCard>
 
         {/* Right: Risk Distribution Donut (5 cols) */}
-        <div className="lg:col-span-5 glass-panel p-6 rounded-3xl flex flex-col justify-between space-y-4">
+        <AnimatedCard enableHover={false} className="lg:col-span-5 glass-panel p-6 rounded-3xl flex flex-col justify-between space-y-4">
           <div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -480,11 +482,11 @@ export const FleetOverviewTab: React.FC<FleetOverviewTabProps> = ({
               );
             })}
           </div>
-        </div>
+        </AnimatedCard>
       </div>
 
       {/* Severity Breakdown Bar & Search Filter */}
-      <div className="glass-panel p-5 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <AnimatedCard enableHover={false} className="glass-panel p-5 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
         {/* Severity Tabs Filter */}
         <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0">
           <span className="text-xs text-slate-400 font-semibold mr-1 flex items-center gap-1">
@@ -525,17 +527,25 @@ export const FleetOverviewTab: React.FC<FleetOverviewTabProps> = ({
             className="w-full px-3.5 py-1.5 text-xs bg-slate-900/90 text-white rounded-xl border border-indigo-500/20 focus:outline-none focus:border-indigo-500 placeholder-slate-500"
           />
         </div>
-      </div>
+      </AnimatedCard>
 
       {/* Main Grid: Engines Cards + Replay Alert Feed */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Engine Cards (3 Columns) */}
-        <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        <StaggerContainer className="lg:col-span-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4" staggerDelay={0.03}>
           {filteredEngines.map((engine) => (
-            <div
+            <AnimatedCard
               key={engine.engine_id}
               onClick={() => onSelectEngine(engine.engine_id)}
-              className="glass-panel p-5 rounded-2xl cursor-pointer transition-all duration-300 hover:scale-[1.01] hover:border-indigo-500/40 group relative flex flex-col justify-between"
+              className={`glass-panel p-5 rounded-2xl cursor-pointer hover:border-indigo-500/40 group relative flex flex-col justify-between ${
+                engine.severity === "CRITICAL"
+                  ? "hover:shadow-rose-500/20"
+                  : engine.severity === "HIGH"
+                  ? "hover:shadow-amber-500/20"
+                  : engine.severity === "MEDIUM"
+                  ? "hover:shadow-yellow-500/20"
+                  : "hover:shadow-cyan-500/20"
+              }`}
             >
               {/* Header */}
               <div className="flex items-center justify-between mb-3">
@@ -616,12 +626,12 @@ export const FleetOverviewTab: React.FC<FleetOverviewTabProps> = ({
                   <ArrowUpRight className="w-3.5 h-3.5" />
                 </div>
               </div>
-            </div>
+            </AnimatedCard>
           ))}
-        </div>
+        </StaggerContainer>
 
         {/* Right Replay Alert Feed (1 Column) */}
-        <div className="glass-panel p-5 rounded-2xl flex flex-col h-full">
+        <AnimatedCard enableHover={false} className="glass-panel p-5 rounded-2xl flex flex-col h-full">
           <div className="flex items-center justify-between mb-4 pb-3 border-b border-indigo-500/10">
             <div className="flex items-center gap-2">
               <Zap className="w-4 h-4 text-cyan-400" />
@@ -662,8 +672,8 @@ export const FleetOverviewTab: React.FC<FleetOverviewTabProps> = ({
               ))
             )}
           </div>
-        </div>
+        </AnimatedCard>
       </div>
-    </div>
+    </motion.div>
   );
 };

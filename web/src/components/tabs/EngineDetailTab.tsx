@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { motion } from "framer-motion";
 import toast from "react-hot-toast";
+import { AnimatedCard, pageVariants } from "../ui/AnimatedCard";
 import { 
   Cpu, 
   TrendingDown, 
@@ -178,9 +180,9 @@ export const EngineDetailTab: React.FC<EngineDetailTabProps> = ({
   }
 
   return (
-    <div className="space-y-6">
+    <motion.div variants={pageVariants} initial="hidden" animate="show" exit="exit" className="space-y-6">
       {/* Top Banner & Quick Controls */}
-      <div className="glass-panel p-6 rounded-3xl flex flex-col md:flex-row md:items-center justify-between gap-4 border-indigo-500/25">
+      <AnimatedCard enableHover={false} className="glass-panel p-6 rounded-3xl flex flex-col md:flex-row md:items-center justify-between gap-4 border-indigo-500/25">
         <div className="flex items-center gap-4">
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-600/30">
             <Cpu className="w-7 h-7 text-white" />
@@ -242,7 +244,7 @@ export const EngineDetailTab: React.FC<EngineDetailTabProps> = ({
             </span>
           </button>
         </div>
-      </div>
+      </AnimatedCard>
 
       {/* Main Charts: 1. RUL Prediction vs Ground Truth & 2. Health Index Degradation */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -938,6 +940,6 @@ export const EngineDetailTab: React.FC<EngineDetailTabProps> = ({
           )}
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 };
